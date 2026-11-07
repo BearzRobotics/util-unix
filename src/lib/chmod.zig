@@ -229,9 +229,8 @@ const Engine = struct {
             },
         }
 
-        // Always set, even when the mode looks unchanged (inherited from the
-        // Core Utils implementation; whether GNU skips an unchanged mode was
-        // not checked against its source, see docs/compatibility/chmod.md).
+        // Always set, even when the mode looks unchanged: GNU chmod 9.7 calls
+        // fchmodat unconditionally (src/chmod.c, process_file).
         parent.setFilePermissions(e.io, name, .fromMode(new), .{ .follow_symlinks = follow }) catch |err| {
             e.problem(.changing_permissions, err);
             return false;
