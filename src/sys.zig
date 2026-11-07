@@ -38,8 +38,8 @@ pub fn defaultSignal(sig: Signal) void {
 
 /// Zig's runtime ignores SIGPIPE, which would turn `cmd | head` into a write
 /// error message. The conventional behaviour is to die silently, so every
-/// entry point restores the default action; commands that must see EPIPE
-/// (split --filter) set it back to ignore.
+/// entry point restores the default action. A command that must see EPIPE
+/// can set it back to ignore with `ignoreSignal`; none does yet.
 pub fn restoreSigpipe() void {
     defaultSignal(.pipe);
 }

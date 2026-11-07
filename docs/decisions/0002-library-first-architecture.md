@@ -15,7 +15,7 @@ using the `std.Io` interface. Core Utils, by contrast, keeps its logic inside
 - `src/root.zig` is the package module **`util_unix`**, exported from
   `build.zig` with `b.addModule("util_unix", ...)`. A dependent writes
   `b.dependency("util_unix", .{...}).module("util_unix")`.
-- Each command has a library namespace under `src/lib/` (`util_unix.split`).
+- Each command has a library namespace under `src/lib/` (for example `util_unix.chmod`).
   It takes `std.Io` and an allocator, does no argument parsing, prints nothing,
   and changes no process-wide state (no signal dispositions, no exit calls,
   no environment writes). Results come back as values, failures as
@@ -45,3 +45,10 @@ using the `std.Io` interface. Core Utils, by contrast, keeps its logic inside
 - Callers using `Options.filter` must decide SIGPIPE handling themselves.
 - The wrapper does more work than a pure "forward argv" shim: the argument
   grammar is part of the command's behaviour, so it stays out of the library.
+
+## Update 2026-11-07
+
+This decision was written when `split` was the only command. `split` has since
+moved to Core Utils (decision 0005), so the `Options.filter` and SIGPIPE
+consequence above no longer applies to any command here; the layout and rules
+stand unchanged.
