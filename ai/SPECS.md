@@ -48,7 +48,7 @@ These examples are candidates, not a commitment to implement them. A command als
 - A command MUST have one authoritative owner among these projects; do not maintain competing implementations.
 - Classification is based on semantics and existing command ownership, not on historical GNU package membership alone.
 - Shared parsing or data structures MAY become independent Zig libraries when justified; neither project is required to depend on the other.
-Initial ownership proposal: chmod, chown, and chgrp belong in util-unix because of their Unix permission/ownership semantics, subject to a final cross-project inventory review. find, grep, sed, and diff remain in Core Utils. tty and uname need an explicit decision because they have historically been included in GNU coreutils; they must not appear in both projects.
+Initial ownership proposal: chmod, chown, and chgrp belong in util-unix because of their Unix permission/ownership semantics, subject to a final cross-project inventory review. find, grep, sed, and diff remain in Core Utils. tty and uname needed an explicit decision because they have historically been included in GNU coreutils; decision 0005 assigns them (with id and groups) to util-unix, and they must not appear in both projects.
 6. Compatibility and portability
 6.1 Reference behavior
 For each command, identify the relevant upstream manual and version, POSIX standard if applicable, Linux manual pages, kernel documentation, and any deliberate deviations.
@@ -134,15 +134,15 @@ Each command's manual page MUST document supported operating systems, privilege 
 13. Proposed inventory for review
 This is a small initial candidate list, not a promise of coverage. None of these commands may be implemented until their ownership is checked against the current upstream util-linux inventory and Core Utils specification.
 Command	Category	Status
-split	Output splitting	Implemented — maintainer-approved exception, see docs/decisions/0001; Core Utils SPEC also lists it
-chgrp	Group ownership	Proposed — verify ownership
-chmod	File permissions	Proposed — verify ownership
-chown	File ownership	Proposed — verify ownership
-getent	System database lookup	Proposed — verify ownership and portability
-groups	User identity	Proposed — verify Core Utils boundary
-id	User identity	Proposed — verify Core Utils boundary
-tty	Terminal identity	Deferred — resolve Core Utils ownership
-uname	OS identity	Deferred — resolve Core Utils ownership
+split	Output splitting	Not here — portable; owned by Core Utils (removed from util-unix in 4f2ba4c)
+chgrp	Group ownership	Implemented — decision 0005
+chmod	File permissions	Implemented — decision 0005
+chown	File ownership	Implemented — decision 0005
+getent	System database lookup	Implemented (files backend only, decision 0004) — portability to other Unix systems not yet reviewed
+groups	User identity	Implemented — decision 0005
+id	User identity	Implemented — decision 0005
+tty	Terminal identity	Implemented — decision 0005
+uname	OS identity	Implemented — decision 0005
 useradd	Account management	Deferred — scope/security review; consider existing shadow utilities
 userdel	Account management	Deferred — scope/security review; consider existing shadow utilities
 usermod	Account management	Deferred — scope/security review; consider existing shadow utilities
@@ -153,8 +153,8 @@ The following are examples of excluded util-linux commands, not implementation c
 
 This exclusion list is illustrative and MUST NOT substitute for checking the current upstream inventory. Additional commands owned by util-linux are excluded even if not named here.
 14. Open design decisions
-0. Reconcile `split`: Core Utils SPEC §5 lists it, util-unix implements it (decision 0001).
-1. Final command ownership for Unix-specific commands historically shipped by GNU coreutils, especially tty and uname.
+0. (Resolved: `split` is portable and owned by Core Utils; removed here.)
+1. (Resolved by decision 0005: chmod, chown, chgrp, id, groups, tty and uname belong to util-unix. Open follow-up: remove the duplicate copies from Core Utils.)
 2. Whether account-management commands belong here or should remain with an established project such as shadow.
 3. Which approved commands are Linux-only versus portable across Unix-like systems.
 4. Whether the approved inventory warrants a shared native Zig library, and which APIs are genuinely reusable.

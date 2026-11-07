@@ -3,15 +3,16 @@
 Unix/POSIX utilities in Zig, as a **library** (`util_unix`) plus thin
 command-line wrappers. Spec: `ai/SPECS.md`. Engineering rules: `ai/AGENTS.md`.
 
-Implemented: `split` (see `docs/decisions/0001-split-ownership-exception.md`).
+Implemented: `chmod`, `chown`, `chgrp`, `getent`, `id`, `groups`, `tty`, `uname`
+(ownership: `docs/decisions/0005-unix-only-commands-belong-here.md`).
 
 ## Build, test, benchmark
 
 ```
-zig build                      # zig-out/bin/split and zig-out/bin/util-unix (multicall)
+zig build                      # one binary per command in zig-out/bin, plus util-unix (multicall)
 zig build test                 # library and wrapper unit tests
 sh test/run_all_tests.sh       # differential tests against the GNU binaries in /usr/bin
-OURS_MULTICALL=1 sh test/test_split.sh   # same tests through `util-unix split`
+OURS_MULTICALL=1 sh test/test_chmod.sh   # same tests through `util-unix chmod`
 sh bench/run.sh                # poop comparison with GNU (needs ../poop)
 ```
 
@@ -33,21 +34,23 @@ exe.root_module.addImport("util_unix", uu.module("util_unix"));
 Code:
 
 ```zig
-const split = @import("util_unix").split;
+const uu = @import("util_unix");
 
-var diag: split.Diagnostic = .{};
-split.run(io, gpa, .{
-    .mode = .{ .lines = 2 },
-    .prefix = "part-",
-    .alphabet = .decimal,
-    .dir = out_dir, // null = current directory
-}, input_file, std.Io.File.stdout(), &diag) catch {
-    // diag.kind, diag.name(), diag.cause say what failed.
+// chmod -R go-rwx dir
+const Sink = struct {
+    fn on(_: ?*anyopaque, ev: uu.chmod.Event) void { _ = ev; } // report or ignore
 };
+const ok = try uu.chmod.run(io, gpa, "dir", .{
+    .change = .{ .mode_text = "go-rwx" },
+    .recurse = true,
+    .umask = uu.proc.umask(),
+    .reporter = .{ .on_event = Sink.on },
+});
 ```
 
 The library takes `std.Io`, parses no arguments, prints nothing and changes no
-process state. See decision 0002 and the header of `src/lib/split.zig`.
+process state. Failures and progress come back as return values and events.
+See decision 0002 and the header comment of each `src/lib/*.zig`.
 
 ## Layout
 

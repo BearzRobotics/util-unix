@@ -5,7 +5,8 @@ with every structural change.
 
 - Toolchain: Zig 0.17.1; standard-library APIs were checked against
   `~/.zvm/0.17.1/lib/std`.
-- Commands implemented: `split` (decision 0001 for its ownership).
+- Commands implemented: `chmod`, `chown`, `chgrp`, `getent`, `id`, `groups`,
+  `tty`, `uname`. Why these belong here: decision 0005.
 - Shape: a reusable library module, `util_unix`, plus thin command wrappers
   (decision 0002). DKDE and other Zig projects import the module; the
   executables are just one client of it.
@@ -16,20 +17,30 @@ with every structural change.
 build.zig            exports module "util_unix"; per-command exes, multicall exe, tests
 build.zig.zon        package: name util_unix, no dependencies
 src/
-  root.zig           the library's public surface: `pub const split = ...`
-  lib/
-    split.zig        split: Options/Mode, Namer (file-name generator), planSuffix,
-                     parseSize, Diagnostic, run(); all splitting logic.
-                     Imports only std.
+  root.zig           the library's public surface (one `pub const` per module)
+  lib/               library: takes std.Io, prints nothing, parses no argv
+    mode.zig         chmod mode grammar (octal/symbolic) and `rwxr-xr-x` text
+    chmod.zig        chmod engine: walk, set modes, report events
+    ownership.zig    chown/chgrp engine: walk, --from, report events
+    fsown.zig        statx (uid/gid/dev) and fchownat, which std.Io lacks
+    userspec.zig     OWNER[:GROUP] parsing
+    userdb.zig       /etc/passwd and /etc/group (files only, decision 0004)
+    identity.zig     id and groups output formats, user lookup
+    proc.zig         credentials, umask, uname(2) (decision 0003)
+    uname.zig        uname field selection and output
+    tty.zig          is-a-terminal and terminal name
+    getent.zig       getent databases (files backend)
   cli.zig            wrapper-side: Context, getopt-style matching, warn, errText,
-                     quotef/quoteaf (GNU C-locale quoting)
-  sys.zig            wrapper-side: the only std.posix use (SIGPIPE)
+                     quotef/quoteaf/quoteC (GNU C-locale quoting)
+  sys.zig            wrapper-side: the only sigaction use (SIGPIPE)
+  ownership_cli.zig  wrapper shared by chown and chgrp
+  identity_cli.zig   wrapper helper shared by id and groups
   commands.zig       registry: `all` + `modules` + get/find
-  commands/split.zig option parsing, GNU validation order, diagnostics -> run()
+  commands/<name>.zig  option parsing, GNU validation order, diagnostics -> library
   exe.zig            entry of an individual executable (command fixed by build option)
   multicall.zig      entry of `util-unix`: argv[0] link name, else `util-unix <cmd>`
   test_all.zig       unit-test root for the wrapper side
-test/                differential shell tests against GNU (testlib.sh, test_split.sh,
+test/                differential shell tests against GNU (testlib.sh, test_<cmd>.sh,
                      run_all_tests.sh); OURS_MULTICALL=1 for multicall mode
 bench/               poop comparison against the GNU binaries (README.md, run.sh)
 docs/                this file, decisions/, compatibility/, manpages/, benchmarks/
@@ -38,31 +49,28 @@ docs/                this file, decisions/, compatibility/, manpages/, benchmark
 ## Data flow
 
 ```
- argv ──► commands/split.zig ──► util_unix.split.Options ──► split.run(io, gpa, opts, input, stdout, &diag)
-          (parse, validate,                                     │   │            │
-           GNU order)                                           │   │            └─ Observer: --verbose lines
-                                                                │   └─ files via Io.Dir, filters via std.process.spawn
-          exit status ◄── report(Diagnostic) ◄──────────────────┘
+ argv ──► commands/chmod.zig ──► chmod.Options ──► chmod.run(io, gpa, operand, opts)
+          (parse, validate,                          │   │
+           GNU order)                                │   └─ Io.Dir.statFile / setFilePermissions,
+                                                     │      relative to the directory being walked
+          exit status ◄── format(Event) ◄── Reporter ┘
 ```
 
-Inside `run`: `planSuffix` -> `Namer` -> one of `splitLines`, `splitBytes`,
-`splitLineBytes`, `splitLineChunks`, `extractBytes`, `roundRobin`,
-`extractRoundRobin` (all methods of the internal `Splitter`). Output goes
-through `OutFile`, which owns a descriptor or a filter child and a write-behind
-buffer.
+`chown`, `chgrp`, `id`, `groups`, `uname`, `tty` and `getent` have the same
+shape: the wrapper parses and validates, the library returns values or events,
+and the wrapper formats them as GNU does. Libraries that print (`identity`,
+`uname`, `getent`) write to a caller-supplied `*Io.Writer`.
 
 ## Memory and resources
 
-- Library scratch memory comes from the caller's allocator and is freed before
-  `run` returns: a 128 KiB read buffer, a 64 KiB stdout buffer, a 64 KiB
-  write-behind buffer for the current file.
-- `-C` holds at most one record (up to SIZE bytes) while deciding where it goes.
-- `-n r/N` keeps N names and up to 4 MiB of per-file buffers in total; when
-  descriptors run out it closes other files and reopens them for appending
-  (positional writes at the recorded offset).
-- `-n` modes on non-regular input hold the whole input in memory, capped at
-  `max_spool_bytes` (default 1 GiB).
-- Failures after partial output leave the files in place (POSIX).
+- `chmod.run` and `ownership.run` hold the display path of the entry being
+  visited and one open directory descriptor per level of recursion; nothing else
+  grows with the tree.
+- `userdb.Db` reads both account files into memory once (64 MiB cap each) and
+  borrows from them for every lookup; the caller frees it.
+- `id` and `groups` read the process's supplementary groups into a 1024-entry
+  stack buffer.
+- Writers are 4-8 KiB stack buffers flushed at the end or before a warning.
 
 ## Build
 
@@ -70,5 +78,5 @@ buffer.
 - `-Dcommands=a,b` restricts the set; unknown names fail the build.
 - Adding a command: `src/lib/<name>.zig` (+ line in `root.zig`),
   `src/commands/<name>.zig`, then the name in `all` and `modules` in `commands.zig`.
-- Binary sizes: `split` 312 KB stripped ReleaseFast, 190 KB ReleaseSmall (std's
-  `Io` runtime is the floor, as in Core Utils); no libc is linked.
+- Binaries are statically linked and do not use libc (`file zig-out/bin/id`).
+  Sizes have not been re-measured since `split` was removed.

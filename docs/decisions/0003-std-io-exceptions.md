@@ -7,16 +7,18 @@ Audited against `~/.zvm/0.17.1/lib/std` (Zig 0.17.1) on 2026-11-07:
 
 | Used | Where | What | Why std.Io cannot |
 |---|---|---|---|
-| `sigaction` for SIGPIPE | `src/sys.zig`, called only by wrappers (`exe.zig`, `multicall.zig`, `commands/split.zig`) | default disposition at start-up; ignore while a `--filter` runs | `std.Io` has no signal API; Zig's runtime ignores SIGPIPE, which would turn `split ... \| head` into a write error |
+| `sigaction` for SIGPIPE | `src/sys.zig`, called only by the entry points (`exe.zig`, `multicall.zig`) | restore the default disposition at start-up | `std.Io` has no signal API; Zig's runtime ignores SIGPIPE, which would turn `cmd \| head` into a write error |
+| `getuid`/`geteuid`/`getgid`/`getegid`/`getgroups`, `umask`, `uname` | `src/lib/proc.zig` (library) | credentials of the process, the file-mode creation mask, `utsname` | `std.Io` has no credentials, umask or utsname API (checked 2026-11-07 against `~/.zvm/0.17.1/lib/std/Io*`). They read process or machine state; only `umask` has a side effect, because the syscall has no query form (set to 0, restore), which is why it is read once at start-up. |
+| `statx`, `fchownat` | `src/lib/fsown.zig` (library) | owner, group and device of a file; change owner | `File.Stat` lacks uid/gid/dev and `Dir.setFileOwner` is not implemented in `Io.Threaded` |
 
-The library (`src/lib/`) uses `std.Io` for everything: `Io.File` read/write
-(streaming and positional), `Io.Dir.createFile`/`openFile`, `File.stat`,
-`File.setLength`, `std.process.spawn` and `Child.wait` for filters.
+Unlike the entry-point `sigaction` above, these two library files are the only
+places the library leaves `std.Io`. Other systems get neutral values
+(`proc.zig`) or `error.Unsupported` (`fsown.zig`).
 
-Two smaller gaps, both documented in docs/compatibility/split.md rather than
-worked around with `std.posix`:
+Everything else in the library (`src/lib/`) uses `std.Io`: `Io.File` and
+`Io.Dir` reads, writes, `statFile`, `setFilePermissions`, directory iteration,
+`readLinkAbsolute`, `File.isTty`.
 
-- `File.close` returns no error, so a failed close (for example ENOSPC on NFS)
-  cannot be reported.
-- `File.Stat` has no device number, so "output would overwrite input" compares
-  the inode number only, and only for a regular-file input.
+One smaller gap is worked around by documenting it rather than by `std.posix`:
+`File.close` returns no error, so a failed close (for example ENOSPC on NFS)
+cannot be reported.
