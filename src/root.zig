@@ -12,6 +12,12 @@ pub const userdb = @import("lib/userdb.zig");
 pub const userspec = @import("lib/userspec.zig");
 pub const ownership = @import("lib/ownership.zig");
 pub const getent = @import("lib/getent.zig");
+pub const mode = @import("lib/mode.zig");
+pub const proc = @import("lib/proc.zig");
+pub const uname = @import("lib/uname.zig");
+pub const tty = @import("lib/tty.zig");
+pub const identity = @import("lib/identity.zig");
+pub const chmod = @import("lib/chmod.zig");
 
 test {
     _ = fsown;
@@ -19,4 +25,10 @@ test {
     _ = userspec;
     _ = ownership;
     _ = getent;
+    _ = mode;
+    _ = proc;
+    _ = uname;
+    _ = tty;
+    _ = identity;
+    _ = chmod;
 }

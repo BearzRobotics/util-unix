@@ -145,6 +145,26 @@ pub const Db = struct {
         while (it.next()) |e| if (e.gid == gid) return e;
         return null;
     }
+
+    /// Group ids `user` belongs to, as getgrouplist(3) returns them: `primary`
+    /// first, then every group whose member list names the user, in file
+    /// order, without repeats. Caller frees the result with the Db's allocator.
+    pub fn groupsOf(db: *const Db, user: []const u8, primary: u32) Allocator.Error![]u32 {
+        var out: std.ArrayList(u32) = .empty;
+        errdefer out.deinit(db.gpa);
+        try out.append(db.gpa, primary);
+        var it = db.groupIterator();
+        while (it.next()) |g| {
+            var members = std.mem.splitScalar(u8, g.members, ',');
+            while (members.next()) |m| {
+                if (std.mem.eql(u8, m, user)) {
+                    if (std.mem.indexOfScalar(u32, out.items, g.gid) == null) try out.append(db.gpa, g.gid);
+                    break;
+                }
+            }
+        }
+        return out.toOwnedSlice(db.gpa);
+    }
 };
 
 pub const PasswdIterator = struct {
@@ -199,4 +219,15 @@ test "parsePasswd rejects non-numeric ids and short lines" {
     try std.testing.expect(parsePasswd("a:x:z:1:g:/:/bin/sh") == null);
     try std.testing.expect(parsePasswd("a:x:1:1:g:/") == null);
     try std.testing.expect(parsePasswd(":x:1:1:g:/:/bin/sh") == null);
+}
+
+test "groupsOf lists the primary group first, then memberships in file order" {
+    var db = try Db.fromText(std.testing.allocator, test_passwd, test_group);
+    defer db.deinit();
+    const g = try db.groupsOf("alice", 1000);
+    defer std.testing.allocator.free(g);
+    try std.testing.expectEqualSlices(u32, &.{ 1000, 50 }, g);
+    const none = try db.groupsOf("nobody", 65534);
+    defer std.testing.allocator.free(none);
+    try std.testing.expectEqualSlices(u32, &.{65534}, none);
 }

@@ -133,39 +133,72 @@ pub const Quoted = struct {
     always: bool,
 
     pub fn format(q: Quoted, w: *Io.Writer) Io.Writer.Error!void {
-        var plain = !q.always;
-        if (plain) {
-            if (q.text.len == 0) plain = false;
-            for (q.text, 0..) |c, i| {
-                const special = switch (c) {
-                    ' ', '\t', '\n', '|', '&', ';', '<', '>', '(', ')', '$', '`', '\\', '"', '\'', '*', '?', '[', ']', '{', '}', '!', '^' => true,
-                    '~', '#' => i == 0,
-                    else => c < 0x20 or c == 0x7f,
-                };
-                if (special) plain = false;
+        const name = q.text;
+        if (name.len == 0) return w.writeAll("''");
+        var has_ctl = false;
+        var needs = false;
+        var has_squote = false;
+        var has_other = false; // specials other than the single quote
+        for (name, 0..) |c, i| {
+            if (c < 0x20 or c >= 0x7f) {
+                has_ctl = true;
+                continue;
+            }
+            switch (c) {
+                '\'' => has_squote = true,
+                ' ', '!', '"', '$', '&', '(', ')', '*', ';', '<', '=', '>', '?', '[', '\\', '^', '`', '|', ':' => has_other = true,
+                '#', '~' => if (i == 0) {
+                    has_other = true;
+                },
+                '{', '}' => if (name.len == 1) {
+                    has_other = true;
+                },
+                else => {},
             }
         }
-        if (plain) return w.writeAll(q.text);
-        var control = false;
-        for (q.text) |c| if (c < 0x20 or c == 0x7f) {
-            control = true;
-        };
-        if (control) {
-            try w.writeAll("$'");
-            for (q.text) |c| switch (c) {
-                '\n' => try w.writeAll("\\n"),
-                '\t' => try w.writeAll("\\t"),
-                '\'' => try w.writeAll("\\'"),
-                '\\' => try w.writeAll("\\\\"),
-                else => if (c < 0x20 or c == 0x7f) try w.print("\\{o:0>3}", .{c}) else try w.writeByte(c),
-            };
+        needs = has_ctl or has_squote or has_other;
+        if (!needs) {
+            if (!q.always) return w.writeAll(name);
+            try w.writeByte('\'');
+            try w.writeAll(name);
             return w.writeByte('\'');
         }
-        try w.writeByte('\'');
-        for (q.text) |c| {
-            if (c == '\'') try w.writeAll("'\\''") else try w.writeByte(c);
+        if (!has_ctl and has_squote and !has_other and std.mem.indexOfAny(u8, name, "\"$`\\") == null) {
+            try w.writeByte('"');
+            try w.writeAll(name);
+            return w.writeByte('"');
         }
-        try w.writeByte('\'');
+        // Printable runs in '...' (a ' becomes '\''), other runs in $'...'.
+        var i: usize = 0;
+        var first = true;
+        while (i < name.len) {
+            const ctl = name[i] < 0x20 or name[i] >= 0x7f;
+            var j = i;
+            while (j < name.len and ((name[j] < 0x20 or name[j] >= 0x7f) == ctl)) j += 1;
+            if (ctl) {
+                if (first) try w.writeAll("''");
+                try w.writeAll("$'");
+                for (name[i..j]) |c| switch (c) {
+                    7 => try w.writeAll("\\a"),
+                    8 => try w.writeAll("\\b"),
+                    9 => try w.writeAll("\\t"),
+                    10 => try w.writeAll("\\n"),
+                    11 => try w.writeAll("\\v"),
+                    12 => try w.writeAll("\\f"),
+                    13 => try w.writeAll("\\r"),
+                    else => try w.print("\\{o:0>3}", .{c}),
+                };
+                try w.writeByte('\'');
+            } else {
+                try w.writeByte('\'');
+                for (name[i..j]) |c| {
+                    if (c == '\'') try w.writeAll("'\\''") else try w.writeByte(c);
+                }
+                try w.writeByte('\'');
+            }
+            first = false;
+            i = j;
+        }
     }
 };
 
@@ -179,12 +212,53 @@ pub fn quoteaf(text: []const u8) Quoted {
     return .{ .text = text, .always = true };
 }
 
+/// Diagnostic for a long option that did not match: "unrecognized" or, for an
+/// abbreviation shared by several options, "ambiguous" (see `matchLong`).
+pub fn badLong(ctx: Context, arg: []const u8, names: []const []const u8, m: LongMatch) void {
+    switch (m) {
+        .ambiguous => ambiguousLong(ctx, arg, names),
+        else => unrecognizedLong(ctx, arg),
+    }
+}
+
+/// A string as GNU `quote()` prints it in messages such as "'abc' is not a
+/// valid number": single-quoted with C escapes (\\ for a backslash, \' for a
+/// quote, \a \b \t \n \v \f \r, and three-digit octal for other control
+/// and non-ASCII bytes). Use with `{f}`.
+pub const QuotedC = struct {
+    text: []const u8,
+
+    pub fn format(q: QuotedC, w: *Io.Writer) Io.Writer.Error!void {
+        try w.writeByte('\'');
+        for (q.text) |c| switch (c) {
+            '\\' => try w.writeAll("\\\\"),
+            '\'' => try w.writeAll("\\'"),
+            7 => try w.writeAll("\\a"),
+            8 => try w.writeAll("\\b"),
+            9 => try w.writeAll("\\t"),
+            10 => try w.writeAll("\\n"),
+            11 => try w.writeAll("\\v"),
+            12 => try w.writeAll("\\f"),
+            13 => try w.writeAll("\\r"),
+            else => if (c < 0x20 or c >= 0x7f) try w.print("\\{o:0>3}", .{c}) else try w.writeByte(c),
+        };
+        try w.writeByte('\'');
+    }
+};
+
+pub fn quoteC(text: []const u8) QuotedC {
+    return .{ .text = text };
+}
+
 test "quotef/quoteaf follow GNU C-locale quoting" {
     const t = std.testing;
     var buf: [64]u8 = undefined;
     try t.expectEqualStrings("xaa", try std.fmt.bufPrint(&buf, "{f}", .{quotef("xaa")}));
     try t.expectEqualStrings("'xaa'", try std.fmt.bufPrint(&buf, "{f}", .{quoteaf("xaa")}));
     try t.expectEqualStrings("'p qaa'", try std.fmt.bufPrint(&buf, "{f}", .{quotef("p qaa")}));
-    try t.expectEqualStrings("'it'\\''s'", try std.fmt.bufPrint(&buf, "{f}", .{quotef("it's")}));
-    try t.expectEqualStrings("$'a\\nb'", try std.fmt.bufPrint(&buf, "{f}", .{quotef("a\nb")}));
+    // GNU 9.7 (chmod -v, chown -v) shows a name with only a single quote in
+    // double quotes; with other specials as '...' with '\'' for the quote.
+    try t.expectEqualStrings("\"it's\"", try std.fmt.bufPrint(&buf, "{f}", .{quotef("it's")}));
+    try t.expectEqualStrings("'it'\\''s a'", try std.fmt.bufPrint(&buf, "{f}", .{quotef("it's a")}));
+    try t.expectEqualStrings("'a'$'\\n''b'", try std.fmt.bufPrint(&buf, "{f}", .{quotef("a\nb")}));
 }
