@@ -30,6 +30,8 @@ Lookups by name or number in the files backend for every database listed in `get
 
 Linux only so far (tested on 6.18, WSL2, against the reference binary named
 above). The executable is static and does not link libc, so musl and glibc
-differ only in the host's account files; no musl-specific run has been made.
+differ only in the host's account files. Built with `-Dtarget=x86_64-linux-musl`, the
+unit tests and the full differential suite (748 cases) pass on a glibc host
+(2026-11-07); a run on a real musl distribution has not been made.
 Other Unix-like systems are not supported: `proc.zig` and `fsown.zig` return
 neutral values or `error.Unsupported` there (decision 0003).
