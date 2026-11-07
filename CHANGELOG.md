@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 Six more commands (decision 0006, which lifts the SPEC rule against
 commands that util-linux or procps also ship, for these names).
