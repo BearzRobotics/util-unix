@@ -20,12 +20,12 @@ Status: implemented; 9 differential cases pass against GNU tty 9.7 in individual
 
 ## Supported
 
-All options of GNU tty 9.7. The automated tests never have a terminal on standard input, so the terminal-present path (printing the device name) is covered by one unit test of the negative case only and has not been tested automatically.
+All options of GNU tty 9.7. The host tests never have a terminal on standard input. The terminal-present path is covered by the VM test (`test/vm/run.sh`, 2026-11-07), which runs `tty` with standard input on the guest's serial console (`/dev/console` and `/dev/ttyS0`) and compares the printed name and exit status with busybox's tty; `-s` and the not-a-tty cases are checked there too.
 
 ## Deliberate deviations and gaps
 
 1. **Terminal name through /proc.** The name comes from `/proc/self/fd/0`, not a ttyname(3) search of /dev. Without /proc a terminal is reported as "not a tty".
-2. **The positive path is unverified by tests.** Run `tty` in a terminal and compare with GNU manually.
+2. **Compared with busybox, not GNU,** for the terminal-present path, because the VM has no GNU tty. The names and statuses agreed in the VM; a run against GNU's tty on a terminal has not been made.
 
 ## Platforms
 

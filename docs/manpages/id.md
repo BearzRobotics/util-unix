@@ -66,7 +66,7 @@ Standards and references
 See docs/compatibility/id.md for the references consulted, what is POSIX and what is a GNU extension, and every known deviation.
 
 LIMITATIONS
-No SELinux context. A process with more than 1024 supplementary groups prints no supplementary groups at all (the buffer holds 1024 entries and getgroups(2) then fails). See docs/compatibility/id.md.
+No SELinux context. The number of supplementary groups is limited only by the kernel (65536); a 1503-group process was tested in a VM. See docs/compatibility/id.md.
 
 PERFORMANCE
 Dominated by process start-up. Measured on 2026-11-07 against GNU id 9.7 (docs/benchmarks/2026-11-07.md): 0.08-0.18 of GNU's cycles, wall 0.45-0.63. The binary is about 6 times larger. One run per case on WSL2; differences within about 20% are noise.

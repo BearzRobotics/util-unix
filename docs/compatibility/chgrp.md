@@ -23,7 +23,7 @@ The same engine as chown (`src/lib/ownership.zig`, wrapper `src/ownership_cli.zi
 
 ## Deliberate deviations and gaps
 
-The same gaps as `docs/compatibility/chown.md`: files-only lookup, privileged changes lightly tested.
+The same gaps as `docs/compatibility/chown.md`: files-only lookup. Privileged group changes are covered by the VM test (`chgrp` cases in `test/vm/init.sh`; see chown.md).
 
 ## Platforms
 

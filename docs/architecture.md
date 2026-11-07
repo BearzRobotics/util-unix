@@ -42,6 +42,8 @@ src/
   test_all.zig       unit-test root for the wrapper side
 test/                differential shell tests against GNU (testlib.sh, test_<cmd>.sh,
                      run_all_tests.sh); OURS_MULTICALL=1 for multicall mode
+test/vm/             QEMU guest (busybox + our binaries, root): real terminal, privileged
+                     chown/chgrp/chmod, a process with 1500 groups (run.sh, init.sh)
 bench/               poop comparison against the GNU binaries (README.md, run.sh)
 docs/                this file, decisions/, compatibility/, manpages/, benchmarks/
 ```
@@ -68,8 +70,8 @@ and the wrapper formats them as GNU does. Libraries that print (`identity`,
   grows with the tree.
 - `userdb.Db` reads both account files into memory once (64 MiB cap each) and
   borrows from them for every lookup; the caller frees it.
-- `id` and `groups` read the process's supplementary groups into a 1024-entry
-  stack buffer.
+- `id` and `groups` ask getgroups(2) for the count and allocate exactly that many
+  entries (freed before exit).
 - Writers are 4-8 KiB stack buffers flushed at the end or before a warning.
 
 ## Build

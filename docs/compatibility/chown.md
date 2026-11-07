@@ -25,7 +25,7 @@ Everything in `chown --help` of GNU 9.7. Differential-tested: owner/group/both/n
 ## Deliberate deviations and gaps
 
 1. **Files-only account lookup** (decision 0004): users and groups defined only in LDAP, SSSD or systemd-userdb are reported as invalid.
-2. **Privileged changes are lightly tested.** Tests run unprivileged, so a successful change of owner to a different account (which needs root) is not covered by the automated tests.
+2. **Privileged changes** are covered by the VM test (`test/vm/run.sh`, 2026-11-07), which runs as root in a guest with accounts alice (1000), bob (1001) and groups staff, devs: owner, group, `OWNER:`, `:GROUP`, numeric and `+N` forms, `-v`/`-c` messages, `--from`, `--reference`, `-R`, `-h`, and six option combinations over a tree compared with busybox's chown. The expected messages are GNU's wording from the earlier unprivileged runs; busybox is only a state oracle, not a wording reference.
 3. **`File.close` errors** cannot be reported (decision 0003).
 
 ## Platforms

@@ -22,7 +22,7 @@ Same data as `id -Gn`. Differential-tested for the invoking user, system users, 
 
 ## Deliberate deviations and gaps
 
-The gaps of `docs/compatibility/id.md` apply (files-only lookup; 1024-group limit). A numeric USERNAME is not looked up as a uid (unlike id).
+The gaps of `docs/compatibility/id.md` apply (files-only lookup). The many-groups case is covered by the VM test described there. A numeric USERNAME is not looked up as a uid (unlike id).
 
 ## Platforms
 

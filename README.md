@@ -13,6 +13,7 @@ zig build                      # one binary per command in zig-out/bin, plus uti
 zig build test                 # library and wrapper unit tests
 sh test/run_all_tests.sh       # differential tests against the GNU binaries in /usr/bin
 OURS_MULTICALL=1 sh test/test_chmod.sh   # same tests through `util-unix chmod`
+sh test/vm/run.sh              # QEMU guest tests: terminal, root-only changes, many groups
 sh bench/run.sh                # poop comparison with GNU (needs ../poop)
 ```
 

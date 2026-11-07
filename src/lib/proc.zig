@@ -31,15 +31,34 @@ pub fn identity() Identity {
     };
 }
 
-/// Supplementary group ids of the calling process, in kernel order, written to
-/// the front of `buf`. A process with more groups than `buf` holds gets an
-/// empty result (getgroups fails with EINVAL); use a buffer of at least 65536
-/// entries (the kernel limit, NGROUPS_MAX) when that matters.
-pub fn supplementaryGroups(buf: []u32) []u32 {
-    if (comptime !is_linux) return buf[0..0];
-    const n = std.os.linux.getgroups(buf.len, @ptrCast(buf.ptr));
-    if (@as(isize, @bitCast(n)) < 0) return buf[0..0];
-    return buf[0..n];
+/// Supplementary group ids of the calling process, in kernel order. The
+/// caller frees the result with `gpa`. getgroups(2) is asked for the count
+/// first, so any number of groups up to the kernel limit (65536) works; if the
+/// set grows between the two calls the query is repeated.
+pub fn supplementaryGroups(gpa: std.mem.Allocator) error{ OutOfMemory, Unexpected }![]u32 {
+    if (comptime !is_linux) return gpa.alloc(u32, 0);
+    while (true) {
+        const count = std.os.linux.getgroups(0, null);
+        if (std.os.linux.errno(count) != .SUCCESS) return error.Unexpected;
+        const buf = try gpa.alloc(u32, count);
+        errdefer gpa.free(buf);
+        const n = std.os.linux.getgroups(buf.len, @ptrCast(buf.ptr));
+        switch (std.os.linux.errno(n)) {
+            .SUCCESS => {
+                if (n == buf.len) return buf;
+                // Fewer groups than counted: hand back an exactly sized slice
+                // so the caller's free() matches the allocation.
+                defer gpa.free(buf);
+                return gpa.dupe(u32, buf[0..n]);
+            },
+            .INVAL => {
+                // The set grew since the count was taken; try again.
+                gpa.free(buf);
+                continue;
+            },
+            else => return error.Unexpected,
+        }
+    }
 }
 
 /// The file-mode creation mask. See the file comment for the caveat.
@@ -87,8 +106,8 @@ pub fn uname() Uname {
 test "identity, groups, umask and uname answer without failing" {
     const id = identity();
     _ = id;
-    var buf: [256]u32 = undefined;
-    _ = supplementaryGroups(&buf);
+    const groups = try supplementaryGroups(std.testing.allocator);
+    defer std.testing.allocator.free(groups);
     try std.testing.expect(umask() <= 0o777);
     const u = uname();
     if (is_linux) try std.testing.expectEqualStrings("Linux", u.sysname());

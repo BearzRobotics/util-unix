@@ -114,8 +114,11 @@ pub fn main(ctx: cli.Context) u8 {
     var status: u8 = 0;
     if (users.items.len == 0) {
         const me = uu.proc.identity();
-        var gbuf: [1024]u32 = undefined;
-        const sup = uu.proc.supplementaryGroups(&gbuf);
+        const sup = uu.proc.supplementaryGroups(ctx.gpa) catch {
+            cli.warn(ctx, "cannot get the supplementary groups of the process", .{});
+            return 1;
+        };
+        defer ctx.gpa.free(sup);
         const ids: uu.identity.Ids = .{ .uid = me.uid, .euid = me.euid, .gid = me.gid, .egid = me.egid, .groups = sup };
         if (!(uu.identity.write(w, &db, opts, ids) catch return 1)) status = 1;
     } else for (users.items) |name| {

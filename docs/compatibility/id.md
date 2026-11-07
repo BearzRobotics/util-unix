@@ -26,7 +26,8 @@ All options of GNU id 9.7 except a working `-Z`. Differential-tested for the inv
 
 1. **`-Z`/`--context` always fails** with GNU's message for a kernel without SELinux; no SELinux support exists.
 2. **Files-only lookup** (decision 0004): an account known only to NSS sources appears as a bare number.
-3. **At most 1024 supplementary groups** for the calling process. With more, getgroups(2) fails and none are printed. Not tested.
+3. **Many groups.** The VM test (`test/vm/run.sh`, 2026-11-07) runs `id -G` and `groups` in a process with 1503 supplementary groups and compares the count with busybox. It first exposed a bug in this port (a fixed 1024-entry buffer made getgroups(2) fail and none were printed); the library now asks the kernel for the count first, and the test passes.
+3a. **Real and effective ids that differ** (a set-user-ID process) are covered only by a unit test of the output format; the VM test could not create such a process with busybox alone.
 4. For a named USER, the group list is the primary group plus every group whose member list names the user, in file order (as getgrouplist does for the files backend).
 
 ## Platforms
