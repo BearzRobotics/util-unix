@@ -11,6 +11,9 @@ Audited against `~/.zvm/0.17.1/lib/std` (Zig 0.17.1) on 2026-11-07:
 | `getuid`/`geteuid`/`getgid`/`getegid`/`getgroups`, `umask`, `uname` | `src/lib/proc.zig` (library) | credentials of the process, the file-mode creation mask, `utsname` | `std.Io` has no credentials, umask or utsname API (checked 2026-11-07 against `~/.zvm/0.17.1/lib/std/Io*`). They read process or machine state; only `umask` has a side effect, because the syscall has no query form (set to 0, restore), which is why it is read once at start-up. |
 | `statx`, `fchownat` | `src/lib/fsown.zig` (library) | owner, group and device of a file; change owner | `File.Stat` lacks uid/gid/dev and `Dir.setFileOwner` is not implemented in `Io.Threaded` |
 
+The commands added later (`stty`, `chcon`, `runcon`, `hostname`) add the
+exceptions listed in decision 0006.
+
 Unlike the entry-point `sigaction` above, these two library files are the only
 places the library leaves `std.Io`. Other systems get neutral values
 (`proc.zig`) or `error.Unsupported` (`fsown.zig`).

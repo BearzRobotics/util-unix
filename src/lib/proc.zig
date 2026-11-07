@@ -95,6 +95,11 @@ pub const Uname = struct {
     pub fn machine(u: *const Uname) []const u8 {
         return u.field("machine");
     }
+    /// The NIS domain name ("(none)" when unset).
+    pub fn domainname(u: *const Uname) []const u8 {
+        if (comptime !is_linux) return "(none)";
+        return u.field("domainname");
+    }
 };
 
 pub fn uname() Uname {

@@ -1,12 +1,12 @@
 util-unix — Specification
-Status: Draft 0.2
+Status: Draft 0.3
 Implementation language: Zig
 Engineering policy: AGENTS.md
 Scope: Unix/POSIX-specific system utilities
 1. Purpose
 util-unix is an independent collection of Unix-oriented system utilities written in Zig. It complements, but does not depend on, the portable Core Utils project.
 
-Unlike Core Utils, util-unix targets operations whose useful semantics depend on Unix/POSIX facilities. It does not duplicate commands maintained by upstream util-linux. The project is not required to run on Windows, and Linux-only utilities are permitted when their interfaces are explicitly identified.
+Unlike Core Utils, util-unix targets operations whose useful semantics depend on Unix/POSIX facilities. It does not duplicate commands maintained by upstream util-linux, except the six that decision 0006 assigns to it (stty, who, pinky, chcon, runcon, hostname). The project is not required to run on Windows, and Linux-only utilities are permitted when their interfaces are explicitly identified.
 
 The project complements rather than replaces upstream util-linux. Its name does not imply affiliation with that project. Command ownership is determined by function and existing upstream maintenance, not historical GNU package boundaries.
 2. Goals
@@ -26,17 +26,18 @@ The project complements rather than replaces upstream util-linux. Its name does 
 - Hiding Linux-specific functionality behind misleading claims of universal POSIX support.
 - Requiring DKBuilder, DKDE, or a particular distribution.
 4. Scope and command classification
-A proposed command MUST be checked against the current upstream util-linux command inventory and the Core Utils project before implementation. Command names already maintained by util-linux are out of scope, even if they would otherwise fit util-unix's Unix-specific theme. Reevaluate ownership if an upstream project changes its inventory; do not assume this document is an exhaustive or permanent catalog.
+A proposed command MUST be checked against the current upstream util-linux command inventory and the Core Utils project before implementation. Command names already maintained by util-linux are out of scope, even if they would otherwise fit util-unix's Unix-specific theme (decision 0006 makes an explicit exception for stty, who, pinky, chcon, runcon and hostname). Reevaluate ownership if an upstream project changes its inventory; do not assume this document is an exhaustive or permanent catalog.
 Category	Scope	Examples for evaluation
 Unix identities and permissions	Unix ownership, group membership, and permission semantics not owned by util-linux	chmod, chown, chgrp, id, groups
 Unix account/database lookup	System databases and identity lookup	getent
-Terminal and OS identity	Unix-oriented commands not owned by util-linux or Core Utils	tty, uname (ownership to resolve)
+Terminal and OS identity	Unix-oriented commands not owned by util-linux or Core Utils	tty, uname, stty, hostname, who, pinky (decisions 0005, 0006)
+Security	SELinux contexts	chcon, runcon (decision 0006)
 Account administration	Optional, security-sensitive scope; avoid duplicating established implementations without a documented reason	useradd, userdel, usermod (deferred)
 
 
 These examples are candidates, not a commitment to implement them. A command also needs an explicit ownership decision and a useful, maintainable implementation scope.
 4.1 Relationship with upstream util-linux
-- util-unix MUST NOT intentionally duplicate commands maintained by upstream util-linux.
+- util-unix MUST NOT intentionally duplicate commands maintained by upstream util-linux, except the six named in decision 0006 (stty, who, pinky, chcon, runcon, hostname), for which the maintainer lifted the rule because util-unix is not built as a util-linux companion.
 - util-unix MUST NOT duplicate commands assigned to the Core Utils project.
 - Before approving a command, check the upstream util-linux source or official command inventory, record the checked version/revision, and document its intended owner.
 - If a name conflicts with an existing command, resolve the conflict before implementation; an exception requires an explicit architectural decision and must not silently violate the no-overlap policy.
@@ -143,6 +144,12 @@ groups	User identity	Implemented — decision 0005
 id	User identity	Implemented — decision 0005
 tty	Terminal identity	Implemented — decision 0005
 uname	OS identity	Implemented — decision 0005
+hostname	Host name	Implemented — decision 0006 (/etc/hosts only, no DNS)
+pinky	User information	Implemented — decision 0006 (utmp file, not logind; short format unverified against GNU)
+chcon	SELinux file contexts	Implemented — decision 0006
+runcon	SELinux process contexts	Implemented — decision 0006 (transition unverified; -c unsupported)
+stty	Terminal settings	Implemented — decision 0006 (generic-termios architectures)
+who	Logged-in users	Implemented — decision 0006 (utmp file, not logind)
 useradd	Account management	Deferred — scope/security review; consider existing shadow utilities
 userdel	Account management	Deferred — scope/security review; consider existing shadow utilities
 usermod	Account management	Deferred — scope/security review; consider existing shadow utilities
@@ -168,6 +175,6 @@ This exclusion list is illustrative and MUST NOT substitute for checking the cur
 - Individual and applicable multicall builds share a tested implementation.
 - Privileged and destructive tests cannot accidentally target real host devices.
 - No dependency on Core Utils, DKBuilder, DKDE, or a particular distribution is required.
-- No implemented command overlaps the verified upstream util-linux inventory or Core Utils ownership list.
+- No implemented command overlaps the verified upstream util-linux inventory or Core Utils ownership list, other than the six named in decision 0006.
 - Documentation identifies authoritative references and limitations.
 References to consult during implementation: POSIX Shell and Utilities; Linux man-pages; Linux kernel documentation; official util-linux command inventory/source (for exclusion checks); relevant BSD/macOS manuals for supported commands. This draft does not claim that each candidate command has been verified against those sources.

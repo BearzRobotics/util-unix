@@ -6,7 +6,9 @@ with every structural change.
 - Toolchain: Zig 0.17.1; standard-library APIs were checked against
   `~/.zvm/0.17.1/lib/std`.
 - Commands implemented: `chmod`, `chown`, `chgrp`, `getent`, `id`, `groups`,
-  `tty`, `uname`. Why these belong here: decision 0005.
+  `tty`, `uname` (why these belong here: decision 0005) and `stty`,
+  `who`, `pinky`, `chcon`, `runcon`, `hostname` (decision 0006, which
+  also lifts the SPEC rule against commands that util-linux or procps ship).
 - Shape: a reusable library module, `util_unix`, plus thin command wrappers
   (decision 0002). DKDE and other Zig projects import the module; the
   executables are just one client of it.
@@ -30,6 +32,14 @@ src/
     uname.zig        uname field selection and output
     tty.zig          is-a-terminal and terminal name
     getent.zig       getent databases (files backend)
+    hostname.zig     sethostname(2), /etc/hosts lookup, host-name file parsing
+    utmp.zig         the Linux 384-byte utmp record
+    localtime.zig    TZif zone (std.tz) to local calendar time
+    who.zig          who columns, idle/message status of a terminal, time styles
+    pinky.zig        pinky short and long formats
+    stty.zig         termios model, setting tables, ioctl calls, -a/-g/default output
+    selinux.zig      context text editing, security.selinux xattr, /proc/self/attr
+    chcon.zig        chcon engine: walk, partial/full context, report events
   cli.zig            wrapper-side: Context, getopt-style matching, warn, errText,
                      quotef/quoteaf/quoteC (GNU C-locale quoting)
   sys.zig            wrapper-side: the only sigaction use (SIGPIPE)
@@ -37,11 +47,13 @@ src/
   identity_cli.zig   wrapper helper shared by id and groups
   commands.zig       registry: `all` + `modules` + get/find
   commands/<name>.zig  option parsing, GNU validation order, diagnostics -> library
+                     (stty, chcon and runcon embed their help text from <name>_help.txt)
   exe.zig            entry of an individual executable (command fixed by build option)
   multicall.zig      entry of `util-unix`: argv[0] link name, else `util-unix <cmd>`
   test_all.zig       unit-test root for the wrapper side
 test/                differential shell tests against GNU (testlib.sh, test_<cmd>.sh,
                      run_all_tests.sh); OURS_MULTICALL=1 for multicall mode
+test/stty_pty.py     stty cases on a pseudo-terminal, GNU against ours (called by test_stty.sh)
 test/vm/             QEMU guest (busybox + our binaries, root): real terminal, privileged
                      chown/chgrp/chmod, a process with 1500 groups (run.sh, init.sh)
 bench/               poop comparison against the GNU binaries (README.md, run.sh)
@@ -62,6 +74,17 @@ docs/                this file, decisions/, compatibility/, manpages/, benchmark
 shape: the wrapper parses and validates, the library returns values or events,
 and the wrapper formats them as GNU does. Libraries that print (`identity`,
 `uname`, `getent`) write to a caller-supplied `*Io.Writer`.
+
+Two shapes differ from the files-and-flags commands above:
+
+- `who` and `pinky` read a utmp-format file whole (`utmp.load`),
+  decode records in place (`utmp.record`, slices into the buffer) and format
+  with `localtime.Zone` for the zone in `TZ` or `/etc/localtime`. They never
+  look at systemd-logind.
+- `stty` has a *parse everything first, then touch the terminal* order: the
+  wrapper turns the settings into `Op` values (any error stops here), then
+  reads the termios, applies the operations to a copy, writes it with
+  `TCSETSW`, re-reads it and compares.
 
 ## Memory and resources
 

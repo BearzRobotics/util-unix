@@ -223,6 +223,25 @@ pub fn badLong(ctx: Context, arg: []const u8, names: []const []const u8, m: Long
     }
 }
 
+/// Like `badLong` for programs whose diagnostics have no "Try --help" line
+/// (they print their usage text instead): only the one-line message.
+pub fn badLongPlain(ctx: Context, arg: []const u8, names: []const []const u8, m: LongMatch) void {
+    switch (m) {
+        .ambiguous => {
+            const eq = std.mem.indexOfScalar(u8, arg, '=') orelse arg.len;
+            const typed = arg[2..eq];
+            var buf: [512]u8 = undefined;
+            var w: Io.Writer = .fixed(&buf);
+            w.print("option '{s}' is ambiguous; possibilities:", .{arg}) catch {};
+            for (names) |n| {
+                if (std.mem.startsWith(u8, n, typed)) w.print(" '--{s}'", .{n}) catch {};
+            }
+            warn(ctx, "{s}", .{w.buffered()});
+        },
+        else => warn(ctx, "unrecognized option '{s}'", .{arg}),
+    }
+}
+
 /// A string as GNU `quote()` prints it in messages such as "'abc' is not a
 /// valid number": single-quoted with C escapes (\\ for a backslash, \' for a
 /// quote, \a \b \t \n \v \f \r, and three-digit octal for other control

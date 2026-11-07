@@ -19,6 +19,14 @@ pub const uname = @import("lib/uname.zig");
 pub const tty = @import("lib/tty.zig");
 pub const identity = @import("lib/identity.zig");
 pub const chmod = @import("lib/chmod.zig");
+pub const hostname = @import("lib/hostname.zig");
+pub const localtime = @import("lib/localtime.zig");
+pub const pinky = @import("lib/pinky.zig");
+pub const chcon = @import("lib/chcon.zig");
+pub const selinux = @import("lib/selinux.zig");
+pub const stty = @import("lib/stty.zig");
+pub const who = @import("lib/who.zig");
+pub const utmp = @import("lib/utmp.zig");
 
 test {
     _ = fsown;
@@ -32,4 +40,12 @@ test {
     _ = tty;
     _ = identity;
     _ = chmod;
+    _ = hostname;
+    _ = localtime;
+    _ = pinky;
+    _ = chcon;
+    _ = selinux;
+    _ = stty;
+    _ = who;
+    _ = utmp;
 }
