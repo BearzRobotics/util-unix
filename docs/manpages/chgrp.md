@@ -50,6 +50,9 @@ See docs/compatibility/chgrp.md for the references consulted, what is POSIX and 
 LIMITATIONS
 See chown(1) and docs/compatibility/chgrp.md.
 
+PERFORMANCE
+Measured on 2026-11-07 against GNU chgrp 9.7 (docs/benchmarks/2026-11-07.md): recursive group changes over 10,000 files used 0.45-0.54 of GNU's cycles, with wall time 0.76-0.91 of GNU's. The binary is about 4.7 times larger. One run per case on WSL2; differences within about 20% are noise.
+
 SEE ALSO
 chown(1), chmod(1), group(5)
 

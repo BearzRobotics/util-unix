@@ -16,6 +16,9 @@ Notes for reading results:
 
 - poop splits a command on spaces without quoting, so arguments cannot
   contain spaces.
+- The chmod cases use `u+rwX`, which leaves the tree's modes unchanged, so they
+  can repeat; the id, groups, tty and uname cases are dominated by process start-up
+  (tty runs with standard input on /dev/null).
 - The chown/chgrp cases change a tree to the owner it already has, so no
   privileges are needed and the file system state is identical for both sides;
   what is measured is the traversal plus one fchownat per file.

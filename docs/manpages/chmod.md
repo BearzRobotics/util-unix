@@ -94,6 +94,9 @@ See docs/compatibility/chmod.md for the references consulted, what is POSIX and 
 LIMITATIONS
 Mode changes are not applied to symbolic links themselves. SELinux, ACL and extended-attribute handling is not implemented (the mode bits are set, nothing else). See docs/compatibility/chmod.md.
 
+PERFORMANCE
+Measured on 2026-11-07 against GNU chmod 9.7 (docs/benchmarks/2026-11-07.md): a recursive mode change over 10,000 files was within noise of GNU (wall 0.93-1.01, cycles 0.82-0.90, instructions 1.09-1.10 of GNU's); a single-file run used fewer cycles and instructions. The binary is about 4.5 times larger. One run per case on WSL2; differences within about 20% are noise.
+
 SEE ALSO
 chown(1), chgrp(1), umask(2), chmod(2)
 

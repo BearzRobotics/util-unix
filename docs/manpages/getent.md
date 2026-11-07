@@ -60,6 +60,9 @@ See docs/compatibility/getent.md for the references consulted, what is POSIX and
 LIMITATIONS
 Answers that glibc gets from a non-file source differ ("not found"). See docs/compatibility/getent.md.
 
+PERFORMANCE
+Measured on 2026-11-07 against glibc 2.43 getent (docs/benchmarks/2026-11-07.md): 0.08-0.23 of its cycles, wall 0.49-0.82. This is not equal work: ours reads the files only, glibc goes through NSS. The binary is about 7.7 times larger. One run per case on WSL2; differences within about 20% are noise.
+
 SEE ALSO
 passwd(5), group(5), services(5), hosts(5), nsswitch.conf(5)
 

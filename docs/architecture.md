@@ -79,4 +79,5 @@ and the wrapper formats them as GNU does. Libraries that print (`identity`,
 - Adding a command: `src/lib/<name>.zig` (+ line in `root.zig`),
   `src/commands/<name>.zig`, then the name in `all` and `modules` in `commands.zig`.
 - Binaries are statically linked and do not use libc (`file zig-out/bin/id`).
-  Sizes have not been re-measured since `split` was removed.
+  Stripped ReleaseFast sizes are 245-306 KB per command (4.4-7.7 times GNU's);
+  see docs/benchmarks/2026-11-07.md.

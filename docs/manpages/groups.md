@@ -48,6 +48,9 @@ See docs/compatibility/groups.md for the references consulted, what is POSIX and
 LIMITATIONS
 Same group-count limit as id(1). See docs/compatibility/groups.md.
 
+PERFORMANCE
+Dominated by process start-up. Measured on 2026-11-07 against GNU groups 9.7 (docs/benchmarks/2026-11-07.md): 0.12-0.20 of GNU's cycles, wall 0.66-0.72. The binary is about 7 times larger. One run per case on WSL2; differences within about 20% are noise.
+
 SEE ALSO
 id(1), group(5)
 

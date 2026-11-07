@@ -12,3 +12,18 @@ getent|f|group adm
 getent|f|services http
 getent|f|services
 getent|f|protocols tcp
+# chmod: u+rwX leaves the tree's modes (644 files, 755 directories) as they are,
+# so the cases can repeat; each file still costs one chmod call.
+chmod|f|-R u+rwX @TREE
+chmod|f|-R -c u+rwX @TREE
+chmod|f|u+rw @TREE/d0/f0
+chmod|f|0644 @TREE/d0/f0
+# Start-up dominated: one short run each.
+id|f|
+id|f|-un
+id|f|root
+groups|f|
+groups|f|root
+tty|f|
+uname|f|-a
+uname|f|

@@ -52,6 +52,9 @@ See docs/compatibility/tty.md for the references consulted, what is POSIX and wh
 LIMITATIONS
 Needs /proc to name the terminal; without it a terminal is reported as "not a tty" with status 1. See docs/compatibility/tty.md.
 
+PERFORMANCE
+Dominated by process start-up. Measured on 2026-11-07 against GNU tty 9.7 with standard input on /dev/null (docs/benchmarks/2026-11-07.md): 0.18 of GNU's cycles, wall 0.90. The binary is about 7 times larger. One run per case on WSL2; differences within about 20% are noise.
+
 SEE ALSO
 isatty(3), ttyname(3)
 

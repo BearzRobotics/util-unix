@@ -52,6 +52,9 @@ See docs/compatibility/uname.md for the references consulted, what is POSIX and 
 LIMITATIONS
 See docs/compatibility/uname.md.
 
+PERFORMANCE
+Dominated by process start-up. Measured on 2026-11-07 against GNU uname 9.7 (docs/benchmarks/2026-11-07.md): 0.17 of GNU's cycles, wall 0.81-0.84. The binary is about 7 times larger. One run per case on WSL2; differences within about 20% are noise.
+
 SEE ALSO
 uname(2), arch(1)
 

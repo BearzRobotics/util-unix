@@ -66,6 +66,9 @@ See docs/compatibility/chown.md for the references consulted, what is POSIX and 
 LIMITATIONS
 Accounts that exist only in LDAP, SSSD or systemd-userdb are not seen (decision 0004). See docs/compatibility/chown.md.
 
+PERFORMANCE
+Measured on 2026-11-07 against GNU chown 9.7 (docs/benchmarks/2026-11-07.md): recursive ownership changes over 10,000 files used about half of GNU's cycles (0.43-0.54) with wall time 0.71-0.89 of GNU's. The binary is about 4.4 times larger. One run per case on WSL2; differences within about 20% are noise.
+
 SEE ALSO
 chgrp(1), chmod(1), passwd(5), group(5), chown(2)
 
