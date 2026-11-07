@@ -42,7 +42,7 @@ As chown(1).
 
 COMPATIBILITY
 Platforms
-Linux. Tested on Linux 6.18 (WSL2) against GNU coreutils 9.7 (getent: glibc 2.43). The executables are static and do not link libc, so musl or glibc matters only for the host's account files; no musl-specific testing has been done. Other Unix-like systems are not supported yet: only Linux has been exercised.
+Linux. Tested on Linux 6.18 (WSL2) against GNU coreutils 9.7 (getent: glibc 2.43). The executables are static and do not link libc, so musl or glibc matters only for the host's account files. Built for x86_64-linux-musl, the suite passes on a glibc host; a real musl distribution has not been tried. Other Unix-like systems are not supported yet: only Linux has been exercised.
 
 Standards and references
 See docs/compatibility/chgrp.md for the references consulted, what is POSIX and what is a GNU extension, and every known deviation.
