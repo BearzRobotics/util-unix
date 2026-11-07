@@ -229,8 +229,9 @@ const Engine = struct {
             },
         }
 
-        // Always set, even when the mode looks unchanged: the file system may
-        // hold bits stat did not show, and GNU does the same.
+        // Always set, even when the mode looks unchanged (inherited from the
+        // Core Utils implementation; whether GNU skips an unchanged mode was
+        // not checked against its source, see docs/compatibility/chmod.md).
         parent.setFilePermissions(e.io, name, .fromMode(new), .{ .follow_symlinks = follow }) catch |err| {
             e.problem(.changing_permissions, err);
             return false;

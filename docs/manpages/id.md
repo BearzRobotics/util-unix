@@ -1,0 +1,75 @@
+% ID(1) Version 0.1.0 | util-unix Manual
+% util-unix contributors
+% 2026-11-07
+
+NAME
+id - print real and effective user and group IDs
+
+SYNOPSIS
+id [OPTION]... [USER]...
+
+DESCRIPTION
+Prints user and group information for each USER (a name, or a decimal uid when no user has that name) or, with none, for the calling process. Without options it prints `uid=N(name) gid=N(name) [euid=...] [egid=...] groups=N(name),...`; the effective group is listed first. Names come from /etc/passwd and /etc/group only (decision 0004).
+
+OPTIONS
+**-u**, **--user**, **-g**, **--group**, **-G**, **--groups**
+: Print only the effective user id, group id, or all group ids. Only one may be given.
+
+**-n**, **--name**
+: Print a name instead of a number (needs **-u**, **-g** or **-G**).
+
+**-r**, **--real**
+: Print the real instead of the effective id.
+
+**-z**, **--zero**
+: Delimit entries with NUL (not allowed in the default format).
+
+**-a**
+: Ignored.
+
+**-Z**, **--context**
+: Always fails: no SELinux support.
+
+**--help**, **--version**
+: Print and exit 0.
+
+OPERANDS
+*USER*: zero or more. With several users each is described on its own line.
+
+OUTPUT
+One line per user. With **-n**, an id that has no name is printed as a number and a warning `id: cannot find name for group ID N` goes to standard error just before it (exit 1). In the default format an unnamed id is simply printed without a name.
+
+EXIT STATUS
+Status	Meaning
+0	Success.
+1	Any failure, including a usage error. Processing continues with the next operand after an error on one of them.
+
+EXAMPLES
+    id
+    id -un
+    id -Gn alice
+
+DIAGNOSTICS
+`id: 'X': no such user`; `id: cannot print "only" of more than one choice`; `id: printing only names or real IDs requires -u, -g, or -G`; `id: option --zero not permitted in default format`.
+
+SECURITY CONSIDERATIONS
+Read-only; needs no privileges.
+
+CONCURRENCY AND ATOMICITY
+Reads the account files once per run. The list of supplementary groups of the calling process comes from getgroups(2).
+
+COMPATIBILITY
+Platforms
+Linux. Tested on Linux 6.18 (WSL2) against GNU coreutils 9.7 (getent: glibc 2.43). The executables are static and do not link libc, so musl or glibc matters only for the host's account files; no musl-specific testing has been done. Other Unix-like systems are not supported yet: only Linux has been exercised.
+
+Standards and references
+See docs/compatibility/id.md for the references consulted, what is POSIX and what is a GNU extension, and every known deviation.
+
+LIMITATIONS
+No SELinux context. A process with more than 1024 supplementary groups prints no supplementary groups at all (the buffer holds 1024 entries and getgroups(2) then fails). See docs/compatibility/id.md.
+
+SEE ALSO
+groups(1), passwd(5), group(5), getgroups(2)
+
+VERSION
+This manual describes util-unix 0.1.0 (see build.zig.zon).

@@ -1,0 +1,59 @@
+% TTY(1) Version 0.1.0 | util-unix Manual
+% util-unix contributors
+% 2026-11-07
+
+NAME
+tty - print the file name of the terminal on standard input
+
+SYNOPSIS
+tty [-s | --silent | --quiet]
+
+DESCRIPTION
+Prints the path of the terminal connected to standard input, found through /proc/self/fd/0, or `not a tty`. With **-s** nothing is printed and only the exit status is set.
+
+OPTIONS
+**-s**, **--silent**, **--quiet**: print nothing.
+
+**--help**, **--version**: print and exit 0.
+
+OPERANDS
+None; an operand is an error.
+
+OUTPUT
+Standard output: the terminal path, or `not a tty` unless **-s**.
+
+EXIT STATUS
+Status	Meaning
+0	Standard input is a terminal.
+1	Standard input is not a terminal (or its name cannot be found).
+2	Usage error.
+3	Write error.
+
+EXAMPLES
+    tty
+    tty -s && echo interactive
+
+DIAGNOSTICS
+`tty: extra operand 'X'`.
+
+SECURITY CONSIDERATIONS
+None.
+
+CONCURRENCY AND ATOMICITY
+None.
+
+COMPATIBILITY
+Platforms
+Linux. Tested on Linux 6.18 (WSL2) against GNU coreutils 9.7 (getent: glibc 2.43). The executables are static and do not link libc, so musl or glibc matters only for the host's account files; no musl-specific testing has been done. Other Unix-like systems are not supported yet: only Linux has been exercised.
+
+Standards and references
+See docs/compatibility/tty.md for the references consulted, what is POSIX and what is a GNU extension, and every known deviation.
+
+LIMITATIONS
+Needs /proc to name the terminal; without it a terminal is reported as "not a tty" with status 1. See docs/compatibility/tty.md.
+
+SEE ALSO
+isatty(3), ttyname(3)
+
+VERSION
+This manual describes util-unix 0.1.0 (see build.zig.zon).
