@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Read-only facts about the calling process and the machine that `std.Io`
 //! (Zig 0.17.1) does not expose: credentials, the umask and `uname(2)`.
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! util-unix build script. See ai/SPECS.md §8 for the packaging modes.
 //!
 //! Layout (decision 0002): every command's logic lives in the reusable Zig

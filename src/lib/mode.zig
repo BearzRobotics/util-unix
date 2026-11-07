@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! File mode operands as understood by chmod(1).
 //!
 //! References: POSIX.1-2024 chmod (octal and symbolic modes, the "mode"

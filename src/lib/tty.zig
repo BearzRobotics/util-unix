@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! tty: the terminal connected to a file.
 //!
 //! References: POSIX.1-2024 tty

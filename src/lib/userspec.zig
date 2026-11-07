@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Parsing of `[OWNER][:[GROUP]]` specifications, as used by chown, chgrp and
 //! `chown --from`.
 //!

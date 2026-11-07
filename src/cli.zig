@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Shared command-line facilities for the executable wrappers: the
 //! per-invocation context handed to every command frontend, option-matching
 //! helpers that follow getopt_long, and diagnostics.

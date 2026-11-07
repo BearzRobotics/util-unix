@@ -1,4 +1,5 @@
 #!/bin/busybox sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # init.sh - runs as PID 1 inside the VM that run.sh boots. Everything except
 # /ut/* is busybox; our commands are always called by their /ut path so a
 # busybox applet of the same name is never used by mistake. busybox is also

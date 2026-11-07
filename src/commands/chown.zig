@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! chown: thin wrapper; see src/ownership_cli.zig and src/lib/ownership.zig.
 const cli = @import("../cli.zig");
 const shared = @import("../ownership_cli.zig");

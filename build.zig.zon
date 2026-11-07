@@ -1,8 +1,8 @@
 .{
     .name = .util_unix,
     .fingerprint = 0x5b350c37fd52e8a5,
-    .version = "0.1.0",
+    .version = "0.2.0",
     .minimum_zig_version = "0.17.1",
     .dependencies = .{},
-    .paths = .{ "build.zig", "build.zig.zon", "src" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "LICENSE", "README.md" },
 }

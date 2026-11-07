@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! getent: look up entries in the system's administrative databases.
 //!
 //! References:

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # chown: differential tests against GNU chown. References: POSIX.1-2024 chown;
 # GNU coreutils manual "chown invocation". Runs unprivileged (see ownlib.sh):
 # the owner can only be set to the invoking user, so the owner:group grammar is

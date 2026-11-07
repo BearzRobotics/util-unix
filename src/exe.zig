@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Individual-executable entry point: one binary per command. The command is
 //! fixed at build time through the `build_options.command` option.
 

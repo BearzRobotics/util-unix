@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! User and group databases read directly from /etc/passwd and /etc/group.
 //!
 //! This is the "files" backend only: there is no NSS, so users from LDAP,

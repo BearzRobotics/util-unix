@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # testlib.sh - Shared helpers for all util test scripts
 
 # Safety net: no test may write more than ~100 MB to any one file.

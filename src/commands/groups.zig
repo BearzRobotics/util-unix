@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! groups: thin wrapper over `util_unix.identity`.
 //!
 //! Same data as `id -Gn`; with user names each line is prefixed by `NAME : `.

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # uname: differential tests against GNU uname 9.7 (C locale).
 UTIL="uname"
 . "$(dirname "$0")/testlib.sh"

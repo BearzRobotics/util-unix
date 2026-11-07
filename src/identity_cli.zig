@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Wrapper-side helper shared by id and groups: the warning for an id that has
 //! no name. The library only reports the id (`identity.Unnamed`); the wording
 //! and the stream belong to the executables.

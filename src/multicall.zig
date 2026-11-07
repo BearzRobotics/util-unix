@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Multicall entry point. Dispatch order (SPEC.md §7):
 //!   1. basename of argv[0] names an enabled command  -> run it;
 //!   2. otherwise argv[0] is the multicall binary itself and argv[1] is the

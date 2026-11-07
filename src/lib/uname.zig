@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! uname: select and print system information fields.
 //!
 //! References: POSIX.1-2024 uname

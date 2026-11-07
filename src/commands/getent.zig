@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! getent: thin wrapper over `util_unix.getent` (src/lib/getent.zig).
 //!
 //! Parses glibc/argp-style options, runs one query per key, and maps outcomes

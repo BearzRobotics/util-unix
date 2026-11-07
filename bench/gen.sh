@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # gen.sh DIR - write the benchmark inputs into DIR: a tree of 100 directories
 # with 100 files each (owned by the current user, so ownership changes are
 # no-ops that still cost one syscall per file).

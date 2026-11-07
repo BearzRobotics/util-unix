@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # chmod: differential tests against GNU chmod 9.7 (C locale) using run_tree
 # (modes are part of the compared tree).
 UTIL="chmod"

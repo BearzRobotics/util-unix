@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! util_unix: reusable Unix utility logic as a Zig library.
 //!
 //! This module is the native API (ai/AGENTS.md §13). It contains no argument

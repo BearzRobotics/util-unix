@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! File ownership primitives that `std.Io` (Zig 0.17.1) lacks.
 //!
 //! Two gaps, checked 2026-11-07 against `~/.zvm/0.17.1/lib/std/Io`:

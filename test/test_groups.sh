@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # groups: differential tests against GNU groups 9.7 (C locale).
 UTIL="groups"
 . "$(dirname "$0")/testlib.sh"

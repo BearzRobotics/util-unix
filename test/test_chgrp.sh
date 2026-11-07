@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # chgrp: differential tests against GNU chgrp. References: POSIX.1-2024 chgrp;
 # GNU coreutils manual "chgrp invocation". Runs unprivileged (see ownlib.sh).
 UTIL="chgrp"

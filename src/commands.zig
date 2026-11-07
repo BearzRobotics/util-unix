@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Command registry. Each command lives in src/commands/<name>.zig as a thin
 //! wrapper exporting `pub fn main(ctx: cli.Context) u8`; the logic it calls
 //! lives in the `util_unix` library (src/lib/).

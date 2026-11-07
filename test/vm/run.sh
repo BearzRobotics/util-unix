@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # run.sh - boot a throw-away Linux VM under QEMU and run test/vm/init.sh in it
 # as root. The guest has nothing but busybox and our own executables, so it can
 # exercise what the host tests cannot: a real terminal on standard input,

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # getent: differential tests against glibc's getent. References: getent(1);
 # the file formats in section 5 of the man pages. Our getent reads the files
 # only (decision 0004), so keys are drawn from the files themselves; entries

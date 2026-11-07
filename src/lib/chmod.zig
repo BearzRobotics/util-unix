@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Changing file mode bits: the engine behind chmod.
 //!
 //! References:

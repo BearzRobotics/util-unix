@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! chmod: thin wrapper over `util_unix.chmod` (src/lib/chmod.zig).
 //!
 //! Parses GNU chmod's options, validates in GNU's order, runs the engine on

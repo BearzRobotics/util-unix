@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Changing the owner and group of files: the engine behind chown and chgrp.
 //!
 //! References:

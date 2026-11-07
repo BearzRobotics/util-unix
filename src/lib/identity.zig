@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! id and groups: print user and group identities.
 //!
 //! References: POSIX.1-2024 id

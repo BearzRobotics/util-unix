@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! uname: thin wrapper over `util_unix.uname`.
 //!
 //! References: POSIX.1-2024 uname; GNU coreutils 9.7 "uname invocation".

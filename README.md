@@ -56,3 +56,15 @@ See decision 0002 and the header comment of each `src/lib/*.zig`.
 ## Layout
 
 See `docs/architecture.md`.
+
+## License
+
+Copyright (c) 2026 Dakota Keeler and the util-unix contributors.
+
+util-unix is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 2 of the License, or (at your option) any later
+version (SPDX: `GPL-2.0-or-later`). It is distributed in the hope that it will
+be useful, but WITHOUT ANY WARRANTY. The full text is in `LICENSE`. This is an
+independent implementation: it does not contain code from GNU coreutils, which
+was used only as a behavioural reference.

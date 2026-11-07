@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # run.sh [util ...] - compare our utilities with the GNU originals using poop.
 # See bench/README.md.
 here=$(cd "$(dirname "$0")" && pwd)

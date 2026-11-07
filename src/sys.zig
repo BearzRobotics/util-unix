@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Operating-system facilities that std.Io (Zig 0.17.1) does not provide.
 //!
 //! Commands and the library do their file, stream and process I/O through

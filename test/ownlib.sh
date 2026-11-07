@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # ownlib.sh - shared fixtures for the chown and chgrp differential tests.
 #
 # Tests run unprivileged: they may change a file's group to any group the

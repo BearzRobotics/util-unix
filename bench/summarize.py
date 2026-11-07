@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Read one poop report (two benchmarks) on stdin; print tab-separated
 ratios ours/GNU: wall cycles instructions rss."""
 import re, sys

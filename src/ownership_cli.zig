@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Command-line wrapper shared by chown and chgrp (GNU builds both from one
 //! source file; so do we). It parses arguments in GNU's order, validates them,
 //! builds `util_unix.ownership.Options`, runs the engine, and formats its

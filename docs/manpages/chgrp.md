@@ -1,4 +1,4 @@
-% CHGRP(1) Version 0.1.0 | util-unix Manual
+% CHGRP(1) Version 0.2.0 | util-unix Manual
 % util-unix contributors
 % 2026-11-07
 
@@ -56,5 +56,11 @@ Measured on 2026-11-07 against GNU chgrp 9.7 (docs/benchmarks/2026-11-07.md): re
 SEE ALSO
 chown(1), chmod(1), group(5)
 
+COPYRIGHT
+Copyright (c) 2026 Dakota Keeler and the util-unix contributors. SPDX-License-Identifier: GPL-2.0-or-later.
+
+LICENSE
+This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 2 of the License, or (at your option) any later version. It comes with ABSOLUTELY NO WARRANTY. The full text is in the file LICENSE of the source distribution.
+
 VERSION
-This manual describes util-unix 0.1.0 (see build.zig.zon).
+This manual describes util-unix 0.2.0 (see build.zig.zon).

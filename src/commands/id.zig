@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! id: thin wrapper over `util_unix.identity`.
 //!
 //! Names come from /etc/passwd and /etc/group only (decision 0004). SELinux

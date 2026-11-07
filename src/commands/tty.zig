@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! tty: thin wrapper over `util_unix.tty`.
 //!
 //! References: POSIX.1-2024 tty; GNU coreutils 9.7 "tty invocation".

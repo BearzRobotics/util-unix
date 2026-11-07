@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
 # id: differential tests against GNU id 9.7 (C locale). Users come from this
 # machine's /etc/passwd and /etc/group.
 UTIL="id"
