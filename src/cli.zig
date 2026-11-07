@@ -10,7 +10,8 @@
 const std = @import("std");
 const Io = std.Io;
 
-pub const version = "0.0.0-dev";
+/// From build.zig.zon, through the build script (see build.zig).
+pub const version = @import("build_options").version;
 
 /// Everything a command frontend needs for one invocation.
 pub const Context = struct {

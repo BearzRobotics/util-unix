@@ -20,6 +20,7 @@
 
 const std = @import("std");
 const commands = @import("src/commands.zig");
+const manifest = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -36,10 +37,16 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run Zig unit tests");
 
+    // The version printed by --version comes from build.zig.zon, the single
+    // place it is written down. It reaches the wrappers as "build_options".
+    const version_opts = b.addOptions();
+    version_opts.addOption([]const u8, "version", manifest.version);
+
     // Individual executables.
     for (selected) |name| {
         const opts = b.addOptions();
         opts.addOption([]const u8, "command", name);
+        opts.addOption([]const u8, "version", manifest.version);
         const exe = b.addExecutable(.{
             .name = name,
             .root_module = b.createModule(.{
@@ -58,6 +65,7 @@ pub fn build(b: *std.Build) void {
     {
         const opts = b.addOptions();
         opts.addOption([]const []const u8, "commands", selected);
+        opts.addOption([]const u8, "version", manifest.version);
         const exe = b.addExecutable(.{
             .name = "util-unix",
             .root_module = b.createModule(.{
@@ -84,7 +92,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/test_all.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "util_unix", .module = lib_mod }},
+        .imports = &.{
+            .{ .name = "util_unix", .module = lib_mod },
+            .{ .name = "build_options", .module = version_opts.createModule() },
+        },
     }) });
     test_step.dependOn(&b.addRunArtifact(cli_unit).step);
 }
