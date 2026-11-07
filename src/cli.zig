@@ -101,7 +101,8 @@ pub fn warn(ctx: Context, comptime fmt: []const u8, args: anytype) void {
 pub fn errText(err: anyerror) []const u8 {
     return switch (err) {
         error.FileNotFound => "No such file or directory",
-        error.AccessDenied, error.PermissionDenied => "Permission denied",
+        error.AccessDenied => "Permission denied",
+        error.PermissionDenied => "Operation not permitted",
         error.IsDir => "Is a directory",
         error.NotDir => "Not a directory",
         error.BrokenPipe => "Broken pipe",
@@ -119,6 +120,8 @@ pub fn errText(err: anyerror) []const u8 {
         error.SystemFdQuotaExceeded => "Too many open files in system",
         error.InputOutput => "Input/output error",
         error.FileTooBig => "File too large",
+        error.InvalidArgument => "Invalid argument",
+        error.Unsupported => "Operation not supported",
         else => @errorName(err),
     };
 }

@@ -1,10 +1,14 @@
 #!/bin/sh
-# gen.sh DIR - write the benchmark input files into DIR (deterministic seeds).
+# gen.sh DIR - write the benchmark inputs into DIR: a tree of 100 directories
+# with 100 files each (owned by the current user, so ownership changes are
+# no-ops that still cost one syscall per file).
 dir=$1; mkdir -p "$dir"; cd "$dir" || exit 1
-export LC_ALL=C
-[ -s text.txt ] || awk 'BEGIN { srand(1); split("apple Banana cherry date Elder fig", w, " ")
-    for (i = 0; i < 300000; i++)
-        printf "%s%d %d %.4f the quick brown fox\n", w[1 + int(rand() * 6)], int(rand() * 99999), int(rand() * 2000001) - 1000000, rand() }' > text.txt
-[ -s csv.txt ] || awk 'BEGIN { srand(2)
-    for (i = 0; i < 300000; i++) printf "id%d,%s,%d,%.3f,field%d\n", i, (rand() < 0.5 ? "alpha" : "beta"), int(rand() * 100000), rand() * 1000, int(rand() * 50) }' > csv.txt
-[ -s small.txt ] || head -n 10000 text.txt > small.txt
+if [ ! -d tree/d99 ]; then
+    i=0
+    while [ $i -lt 100 ]; do
+        mkdir -p "tree/d$i"
+        j=0
+        while [ $j -lt 100 ]; do : > "tree/d$i/f$j"; j=$((j + 1)); done
+        i=$((i + 1))
+    done
+fi

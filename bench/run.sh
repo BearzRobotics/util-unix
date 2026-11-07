@@ -16,8 +16,7 @@ sh "$here/gen.sh" "$WORK/data" || exit 2
 D=$WORK/data
 
 subst() {
-    printf '%s' "$1" | sed -e "s#@TEXT#$D/text.txt#g" -e "s#@CSV#$D/csv.txt#g" \
-        -e "s#@SMALL#$D/small.txt#g" -e "s#@WORK#$WORK#g"
+    printf '%s' "$1" | sed -e "s#@TREE#$D/tree#g" -e "s#@WORK#$WORK#g"
 }
 
 printf '| util | args | wall | cycles | instr | rss |\n|---|---|---|---|---|---|\n'
@@ -33,7 +32,6 @@ grep -v '^#' "$here/cases.txt" | while IFS='|' read -r util mode args; do
     esac
     out=$WORK/raw/$util-$(printf '%s' "$args" | tr -c 'A-Za-z0-9' '_' | cut -c1-40).txt
     "$POOP" -f -d "$DURATION" --color never "$c1" "$c2" < /dev/null > "$out" 2>&1
-    rm -rf "$WORK/out"; mkdir -p "$WORK/out" # pieces from the case just run
     row=$(python3 "$here/summarize.py" < "$out")
     shown=$(printf '%s' "$args" | sed "s#$D/##g; s#$WORK/##g")
     printf '| %s | %s | %s |\n' "$util" "${shown:-(none)}" "$(printf '%s' "$row" | sed 's/\t/ | /g')"

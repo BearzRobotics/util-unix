@@ -16,8 +16,12 @@ Notes for reading results:
 
 - poop splits a command on spaces without quoting, so arguments cannot
   contain spaces.
-- `split` writes its pieces under `$WORK/out/`; both sides overwrite the same
-  names on every run, so the file system state is the same for both.
+- The chown/chgrp cases change a tree to the owner it already has, so no
+  privileges are needed and the file system state is identical for both sides;
+  what is measured is the traversal plus one fchownat per file.
+- getent reads the system files only, while glibc's goes through NSS
+  (nsswitch.conf, shared libraries, systemd); the ratios show that cost, not
+  equal work.
 - Wall time on WSL2 is noisy (swings of 2x between runs were seen); cycles and
   instructions are steadier. Treat wall-time ratios within about 20% as noise.
 - Ratios say nothing about correctness; see `test/`.

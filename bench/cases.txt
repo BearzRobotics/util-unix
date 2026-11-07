@@ -1,15 +1,14 @@
 # util|mode|args   (mode f = file arguments)
-# Placeholders: @TEXT @CSV @SMALL @WORK. Output pieces go to @WORK/out/ (overwritten on every run).
-split|f|-l 1000 @TEXT @WORK/out/l_
-split|f|-l 1 @SMALL @WORK/out/l1_
-split|f|-b 1M @TEXT @WORK/out/b_
-split|f|-b 100 @SMALL @WORK/out/b100_
-split|f|-C 64K @TEXT @WORK/out/c_
-split|f|-n 8 @TEXT @WORK/out/n_
-split|f|-n l/8 @TEXT @WORK/out/nl_
-split|f|-n r/8 @TEXT @WORK/out/nr_
-split|f|-n r/200 @SMALL @WORK/out/nr200_
-split|f|-n 3/8 @TEXT
-split|f|-n l/3/8 @TEXT
-split|f|-n r/3/8 @TEXT
-split|f|-d -a 4 -l 100 @TEXT @WORK/out/d_
+# Placeholders: @TREE (10000-file tree, owned by the current user) @WORK
+chown|f|-R dakota @TREE
+chown|f|-R -c dakota:dakota @TREE
+chown|f|dakota @TREE/d0/f0
+chgrp|f|-R dakota @TREE
+chgrp|f|-R -L dakota @TREE
+chgrp|f|dakota @TREE/d0/f0
+getent|f|passwd root
+getent|f|passwd
+getent|f|group adm
+getent|f|services http
+getent|f|services
+getent|f|protocols tcp

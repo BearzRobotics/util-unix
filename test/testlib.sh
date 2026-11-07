@@ -21,8 +21,9 @@ BIN_DIR="$(cd "$(dirname "$0")/../zig-out/bin" 2>/dev/null && pwd)"
 
 # The reference must be GNU: a different implementation (e.g. uutils) would make
 # every differential comparison below meaningless.
-if ! "/usr/bin/$UTIL" --version 2>/dev/null | head -n 1 | grep -q 'GNU'; then
-    echo "FATAL: /usr/bin/$UTIL is not a GNU implementation; refusing to run." >&2
+# (getent is glibc's, not GNU coreutils': a test sets REF_PATTERN=GLIBC.)
+if ! "/usr/bin/$UTIL" --version 2>/dev/null | head -n 1 | grep -q "${REF_PATTERN:-GNU}"; then
+    echo "FATAL: /usr/bin/$UTIL is not a ${REF_PATTERN:-GNU} implementation; refusing to run." >&2
     exit 2
 fi
 
@@ -138,7 +139,7 @@ run_cmp() {
     fi
 }
 TMPDIR_CMP="$(mktemp -d)/cmp"
-trap 'rm -rf "$(dirname "$TMPDIR_CMP")"' EXIT
+trap 'chmod -R u+rwx "$(dirname "$TMPDIR_CMP")" 2>/dev/null; rm -rf "$(dirname "$TMPDIR_CMP")"' EXIT
 
 # run_tree DESC SETUP_CMD ARGS...   (stdin: file $TREE_STDIN, default /dev/null;
 # $TREE_PRE: shell snippet run first in each subshell, e.g. "ulimit -n 20")
@@ -148,13 +149,13 @@ trap 'rm -rf "$(dirname "$TMPDIR_CMP")"' EXIT
 # (path, type, octal mode). Set TREE_UMASK to run both under a given umask.
 run_tree() {
     description="$1"; setup="$2"; shift 2
-    base="$(dirname "$TMPDIR_CMP")/tree"; rm -rf "$base"; mkdir -p "$base/g" "$base/o"
+    base="$(dirname "$TMPDIR_CMP")/tree"; chmod -R u+rwx "$base" 2>/dev/null; rm -rf "$base"; mkdir -p "$base/g" "$base/o"
     for x in g o; do (cd "$base/$x" && eval "$setup"); done
     (umask "${TREE_UMASK:-022}"; eval "${TREE_PRE:-:}"; cd "$base/g" && LC_ALL=C gnu "$@" < "${TREE_STDIN:-/dev/null}" > "$base/g.out" 2> "$base/g.err"; echo $? > "$base/g.rc")
     (umask "${TREE_UMASK:-022}"; eval "${TREE_PRE:-:}"; cd "$base/o" && ours "$@" < "${TREE_STDIN:-/dev/null}" > "$base/o.out" 2> "$base/o.err"; echo $? > "$base/o.rc")
     # The tree listing includes a checksum of every regular file: for split
     # the content of the pieces is the whole point.
-    for x in g o; do (cd "$base/$x" && { find . -printf '%p %y %m\n'; find . -type f -exec md5sum {} + ; } | sort > "$base/$x.tree"); norm_err < "$base/$x.err" > "$base/$x.err2"; norm_err < "$base/$x.out" > "$base/$x.out2"; done
+    for x in g o; do (cd "$base/$x" && { find . -printf '%p %y %m %u %g\n'; find . -type f -exec md5sum {} + ; } 2>/dev/null | sort > "$base/$x.tree"); norm_err < "$base/$x.err" > "$base/$x.err2"; norm_err < "$base/$x.out" > "$base/$x.out2"; done
     if cmp -s "$base/g.out2" "$base/o.out2" && cmp -s "$base/g.err2" "$base/o.err2" && cmp -s "$base/g.rc" "$base/o.rc" && cmp -s "$base/g.tree" "$base/o.tree"; then
         PASS=$((PASS + 1)); printf "PASS %s\n" "$description"
     else
