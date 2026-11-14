@@ -14,13 +14,14 @@ const cli = @import("../cli.zig");
 
 const long_names = [_][]const u8{
     "all",      "boot",  "dead", "heading", "login",   "lookup",   "process", "count",
-    "runlevel", "short", "time", "mesg",    "message", "writable", "users",   "help",
-    "version",
+    "runlevel", "short", "time", "mesg",    "message", "writable", "users",   "json",
+    "help",     "version",
 };
 
 pub fn main(ctx: cli.Context) u8 {
     var o: uu.who.Options = .{ .now = 0 };
     var heading = false;
+    var as_json = false;
     var operands: [3][]const u8 = undefined;
     var n_operands: usize = 0;
     var only_operands = false;
@@ -64,7 +65,8 @@ pub fn main(ctx: cli.Context) u8 {
                 10 => o.clock_change = true,
                 11, 12, 13 => o.include_mesg = true,
                 14 => users(&o),
-                15 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                15 => as_json = true,
+                16 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -121,7 +123,11 @@ pub fn main(ctx: cli.Context) u8 {
     defer zone.deinit();
     var buf: [4096]u8 = undefined;
     var w = Io.File.stdout().writerStreaming(ctx.io, &buf);
-    uu.who.write(ctx.io, &w.interface, data, &zone, o) catch return 1;
+    if (as_json) {
+        uu.who.writeJson(ctx.io, &w.interface, data, o) catch return 1;
+    } else {
+        uu.who.write(ctx.io, &w.interface, data, &zone, o) catch return 1;
+    }
     w.interface.flush() catch return 1;
     return 0;
 }
@@ -183,6 +189,7 @@ const help_text = "Usage: who [OPTION]... [ FILE | ARG1 ARG2 ]\n" ++
     "  -u, --users       list users logged in\n" ++
     "      --message     same as -T\n" ++
     "      --writable    same as -T\n" ++
+    "      --json        print the records as JSON (not GNU)\n" ++
     "      --help        display this help and exit\n" ++
     "      --version     output version information and exit\n\n" ++
     "If FILE is not specified, use /var/run/utmp.  /var/log/wtmp as FILE is common.\n" ++

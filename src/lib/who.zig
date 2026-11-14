@@ -15,6 +15,7 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const utmp = @import("utmp.zig");
 const localtime = @import("localtime.zig");
+const json = @import("json.zig");
 
 pub const TimeStyle = enum {
     /// `2025-11-07 13:39` (any locale but C/POSIX).
@@ -237,6 +238,97 @@ pub fn write(io: Io, w: *Io.Writer, data: []const u8, zone: *const localtime.Zon
     }
 }
 
+/// True when `write` would print record `r` for these options. `boot` is not
+/// needed: only user records depend on it, for the idle column, not selection.
+fn selected(o: Options, r: utmp.Record) bool {
+    return switch (r.kind) {
+        .user_process => o.users and utmp.isUserProcess(r) and blk: {
+            if (!o.my_line_only) break :blk true;
+            const mine = o.my_line orelse break :blk false;
+            const rl = if (std.mem.startsWith(u8, r.line, "/dev/")) r.line[5..] else r.line;
+            break :blk std.mem.eql(u8, rl, mine);
+        },
+        .boot_time => o.boot,
+        .new_time => o.clock_change,
+        .run_level => o.runlevel,
+        .init_process => o.init_spawn,
+        .login_process => o.login,
+        .dead_process => o.dead,
+        else => false,
+    };
+}
+
+fn kindName(k: utmp.Type) []const u8 {
+    return switch (k) {
+        .user_process => "user",
+        .boot_time => "boot",
+        .new_time => "clock_change",
+        .run_level => "run_level",
+        .init_process => "init",
+        .login_process => "login",
+        .dead_process => "dead",
+        else => "other",
+    };
+}
+
+/// Write the records `write` would print as one JSON array, one object per
+/// line (decision 0007). Column options (heading, short, idle) do not apply.
+/// Every record has type, user, line, id, pid, host and time (seconds since
+/// the epoch, UTC); user records add `mesg` ("+", "-" or "?"), dead records
+/// add exit_termination and exit_status, run-level records add `runlevel` and
+/// `previous`. With `o.count` the result is {"users":[...],"count":n}.
+pub fn writeJson(io: Io, w: *Io.Writer, data: []const u8, o: Options) Io.Writer.Error!void {
+    if (o.count) return writeCountJson(w, data);
+    try w.writeByte('[');
+    var n: usize = 0;
+    var i: usize = 0;
+    while (utmp.record(data, i)) |r| : (i += 1) {
+        if (!selected(o, r)) continue;
+        try w.writeAll(if (n == 0) "\n" else ",\n");
+        n += 1;
+        try w.print("{{\"type\":\"{s}\",\"user\":", .{kindName(r.kind)});
+        try json.writeString(w, r.user);
+        try w.writeAll(",\"line\":");
+        try json.writeString(w, r.line);
+        try w.writeAll(",\"id\":");
+        try json.writeString(w, utmp.idText(r));
+        try w.print(",\"pid\":{d},\"host\":", .{r.pid});
+        try json.writeString(w, r.host);
+        try w.print(",\"time\":{d}", .{r.time});
+        switch (r.kind) {
+            .user_process => {
+                const info = ttyInfo(io, r.line);
+                const state: []const u8 = if (!info.exists) "?" else if (info.group_writable) "+" else "-";
+                try w.print(",\"mesg\":\"{s}\"", .{state});
+            },
+            .dead_process => try w.print(",\"exit_termination\":{d},\"exit_status\":{d}", .{ r.exit_termination, r.exit_status }),
+            .run_level => {
+                const raw: u32 = @bitCast(r.pid);
+                const current: u8 = @truncate(raw);
+                const last: u8 = @truncate(raw >> 8);
+                try w.print(",\"runlevel\":\"{c}\",\"previous\":", .{current});
+                if (last != 0) try w.print("\"{c}\"", .{last}) else try w.writeAll("null");
+            },
+            else => {},
+        }
+        try w.writeByte('}');
+    }
+    try w.writeAll(if (n == 0) "]\n" else "\n]\n");
+}
+
+fn writeCountJson(w: *Io.Writer, data: []const u8) Io.Writer.Error!void {
+    try w.writeAll("{\"users\":[");
+    var n: usize = 0;
+    var i: usize = 0;
+    while (utmp.record(data, i)) |r| : (i += 1) {
+        if (!utmp.isUserProcess(r)) continue;
+        if (n > 0) try w.writeByte(',');
+        try json.writeString(w, r.user);
+        n += 1;
+    }
+    try w.print("],\"count\":{d}}}\n", .{n});
+}
+
 fn writeCount(w: *Io.Writer, data: []const u8) Io.Writer.Error!void {
     var n: usize = 0;
     var i: usize = 0;
@@ -273,4 +365,46 @@ test "time formats" {
     var buf: [32]u8 = undefined;
     try std.testing.expectEqualStrings("2025-11-07 12:34", formatTime(&buf, .iso, &zone, 1762518896));
     try std.testing.expectEqualStrings("Nov  7 12:34", formatTime(&buf, .classic, &zone, 1762518896));
+}
+
+fn testRecord(buf: []u8, index: usize, kind: i16, user: []const u8, line: []const u8, time: i32) void {
+    const endian = @import("builtin").cpu.arch.endian();
+    const r = buf[index * utmp.record_size ..][0..utmp.record_size];
+    @memset(r, 0);
+    std.mem.writeInt(i16, r[0..2], kind, endian);
+    std.mem.writeInt(i32, r[4..8], 99, endian);
+    @memcpy(r[8..][0..line.len], line);
+    @memcpy(r[44..][0..user.len], user);
+    std.mem.writeInt(i32, r[340..344], time, endian);
+}
+
+test "json: selects the same records as write and escapes text" {
+    var data: [3 * utmp.record_size]u8 = undefined;
+    testRecord(&data, 0, 2, "", "~", 100); // boot
+    testRecord(&data, 1, 7, "al\"ice", "pts/9", 200); // user (tty does not exist: mesg ?)
+    testRecord(&data, 2, 8, "", "pts/1", 300); // dead
+    var buf: [2048]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try writeJson(std.testing.io, &w, &data, .{ .users = true, .now = 0 });
+    try std.testing.expectEqualStrings(
+        "[\n{\"type\":\"user\",\"user\":\"al\\\"ice\",\"line\":\"pts/9\",\"id\":\"\",\"pid\":99,\"host\":\"\",\"time\":200,\"mesg\":\"?\"}\n]\n",
+        w.buffered(),
+    );
+    var w2: Io.Writer = .fixed(&buf);
+    try writeJson(std.testing.io, &w2, &data, .{ .boot = true, .dead = true, .now = 0 });
+    try std.testing.expect(std.mem.indexOf(u8, w2.buffered(), "\"type\":\"boot\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w2.buffered(), "\"exit_status\":0") != null);
+    var w3: Io.Writer = .fixed(&buf);
+    try writeJson(std.testing.io, &w3, &data, .{ .runlevel = true, .now = 0 });
+    try std.testing.expectEqualStrings("[]\n", w3.buffered());
+}
+
+test "json: -q form" {
+    var data: [2 * utmp.record_size]u8 = undefined;
+    testRecord(&data, 0, 7, "bob", "pts/1", 1);
+    testRecord(&data, 1, 7, "eve", "pts/2", 2);
+    var buf: [256]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try writeJson(std.testing.io, &w, &data, .{ .count = true, .now = 0 });
+    try std.testing.expectEqualStrings("{\"users\":[\"bob\",\"eve\"],\"count\":2}\n", w.buffered());
 }

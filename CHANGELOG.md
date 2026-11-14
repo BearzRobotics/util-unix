@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+**Added**
+- `--json` for `uname`, `id` and `who` (not GNU; decision 0007) and `util_unix.json`.
+
 ## 0.3.0
 
 Six more commands (decision 0006, which lifts the SPEC rule against

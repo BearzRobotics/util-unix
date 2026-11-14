@@ -27,6 +27,7 @@ pub const selinux = @import("lib/selinux.zig");
 pub const stty = @import("lib/stty.zig");
 pub const who = @import("lib/who.zig");
 pub const utmp = @import("lib/utmp.zig");
+pub const json = @import("lib/json.zig");
 
 test {
     _ = fsown;
@@ -48,4 +49,5 @@ test {
     _ = stty;
     _ = who;
     _ = utmp;
+    _ = json;
 }

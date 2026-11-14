@@ -8,11 +8,12 @@ const Io = std.Io;
 const uu = @import("util_unix");
 const cli = @import("../cli.zig");
 
-const long_names = [_][]const u8{ "all", "kernel-name", "nodename", "kernel-release", "kernel-version", "machine", "processor", "hardware-platform", "operating-system", "help", "version" };
+const long_names = [_][]const u8{ "all", "kernel-name", "nodename", "kernel-release", "kernel-version", "machine", "processor", "hardware-platform", "operating-system", "json", "help", "version" };
 
 pub fn main(ctx: cli.Context) u8 {
     var want: uu.uname.Fields = .{};
     var only_operands = false;
+    var as_json = false;
     for (ctx.args) |a_z| {
         const a: []const u8 = a_z;
         if (only_operands or a.len < 2 or a[0] != '-') {
@@ -47,7 +48,8 @@ pub fn main(ctx: cli.Context) u8 {
                 6 => want.processor = true,
                 7 => want.hardware_platform = true,
                 8 => want.operating_system = true,
-                9 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                9 => as_json = true,
+                10 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -72,7 +74,11 @@ pub fn main(ctx: cli.Context) u8 {
     const info = uu.proc.uname();
     var buf: [1024]u8 = undefined;
     var stdout = Io.File.stdout().writerStreaming(ctx.io, &buf);
-    uu.uname.write(&info, want, &stdout.interface) catch return 1;
+    if (as_json) {
+        uu.uname.writeJson(&info, want, &stdout.interface) catch return 1;
+    } else {
+        uu.uname.write(&info, want, &stdout.interface) catch return 1;
+    }
     stdout.interface.flush() catch return 1;
     return 0;
 }
@@ -89,5 +95,6 @@ const help_text = "Usage: uname [OPTION]...\n" ++
     "  -p, --processor          print the processor type (non-portable)\n" ++
     "  -i, --hardware-platform  print the hardware platform (non-portable)\n" ++
     "  -o, --operating-system   print the operating system\n" ++
+    "      --json            print the fields as a JSON object (not GNU)\n" ++
     "      --help        display this help and exit\n" ++
     "      --version     output version information and exit\n";

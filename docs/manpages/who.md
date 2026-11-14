@@ -28,6 +28,8 @@ OPTIONS
 
 **--lookup**: accepted and ignored (no DNS).
 
+**--json**: print the selected records as a JSON array, one object per line (not in GNU); with **-q**, {"users":[...],"count":n}. Fields: type, user, line, id, pid, host, time (epoch seconds), plus mesg, exit_termination and exit_status, or runlevel and previous, depending on the record type. Column options such as -H and -s do not apply.
+
 **--help**, **--version**: print and exit 0.
 
 OUTPUT

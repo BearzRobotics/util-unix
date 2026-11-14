@@ -15,6 +15,7 @@
 const std = @import("std");
 const Io = std.Io;
 const proc = @import("proc.zig");
+const json = @import("json.zig");
 
 pub const Fields = struct {
     kernel_name: bool = false, // -s
@@ -66,6 +67,48 @@ pub fn write(info: *const proc.Uname, fields: Fields, w: *Io.Writer) Io.Writer.E
         try w.writeAll(item.text);
     }
     try w.writeByte('\n');
+}
+
+/// Write the selected fields as one JSON object and a newline. Unlike `write`,
+/// selecting nothing selects every field (decision 0007).
+pub fn writeJson(info: *const proc.Uname, fields: Fields, w: *Io.Writer) Io.Writer.Error!void {
+    const f = if (fields.any()) fields else Fields.all;
+    const os_name: []const u8 = if (@import("builtin").os.tag == .linux) "GNU/Linux" else info.sysname();
+    const items = [_]struct { on: bool, key: []const u8, text: []const u8 }{
+        .{ .on = f.kernel_name, .key = "kernel_name", .text = info.sysname() },
+        .{ .on = f.nodename, .key = "nodename", .text = info.nodename() },
+        .{ .on = f.kernel_release, .key = "kernel_release", .text = info.release() },
+        .{ .on = f.kernel_version, .key = "kernel_version", .text = info.version() },
+        .{ .on = f.machine, .key = "machine", .text = info.machine() },
+        .{ .on = f.processor, .key = "processor", .text = info.machine() },
+        .{ .on = f.hardware_platform, .key = "hardware_platform", .text = info.machine() },
+        .{ .on = f.operating_system, .key = "operating_system", .text = os_name },
+    };
+    try w.writeByte('{');
+    var first = true;
+    for (items) |item| {
+        if (!item.on) continue;
+        if (!first) try w.writeByte(',');
+        first = false;
+        try json.writeString(w, item.key);
+        try w.writeByte(':');
+        try json.writeString(w, item.text);
+    }
+    try w.writeAll("}\n");
+}
+
+test "json: no selection prints every field, a selection only those" {
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
+    const info = proc.uname();
+    var buf: [2048]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try writeJson(&info, .{ .machine = true, .kernel_name = true }, &w);
+    var want: [512]u8 = undefined;
+    const expected = try std.fmt.bufPrint(&want, "{{\"kernel_name\":\"{s}\",\"machine\":\"{s}\"}}\n", .{ info.sysname(), info.machine() });
+    try std.testing.expectEqualStrings(expected, w.buffered());
+    var w2: Io.Writer = .fixed(&buf);
+    try writeJson(&info, .{}, &w2);
+    try std.testing.expect(std.mem.indexOf(u8, w2.buffered(), "\"operating_system\":\"GNU/Linux\"") != null);
 }
 
 test "fields print in POSIX/GNU order regardless of selection order" {

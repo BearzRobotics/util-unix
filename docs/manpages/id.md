@@ -30,6 +30,8 @@ OPTIONS
 **-Z**, **--context**
 : Always fails: no SELinux support.
 
+**--json**: print one JSON object per operand (not in GNU): uid, user, gid, group, euid, euser, egid, egroup, and groups as a list of {id, name}; a name the database lacks is null. Cannot be combined with -u, -g, -G, -n, -r, -z or -Z.
+
 **--help**, **--version**
 : Print and exit 0.
 

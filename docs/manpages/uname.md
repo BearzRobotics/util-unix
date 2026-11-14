@@ -16,6 +16,8 @@ OPTIONS
 
 **-s**, **--kernel-name**; **-n**, **--nodename**; **-r**, **--kernel-release**; **-v**, **--kernel-version**; **-m**, **--machine**; **-p**, **--processor**; **-i**, **--hardware-platform**; **-o**, **--operating-system**.
 
+**--json**: print the selected fields as one JSON object (not in GNU). With no field option, every field is included; with field options, only those. Keys: kernel_name, nodename, kernel_release, kernel_version, machine, processor, hardware_platform, operating_system.
+
 **--help**, **--version**: print and exit 0.
 
 OPERANDS

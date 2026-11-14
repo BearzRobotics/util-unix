@@ -12,7 +12,7 @@ const uu = @import("util_unix");
 const cli = @import("../cli.zig");
 const shared = @import("../identity_cli.zig");
 
-const long_names = [_][]const u8{ "context", "group", "groups", "name", "real", "user", "zero", "help", "version" };
+const long_names = [_][]const u8{ "context", "group", "groups", "name", "real", "user", "zero", "json", "help", "version" };
 
 pub fn main(ctx: cli.Context) u8 {
     var user = false;
@@ -22,6 +22,7 @@ pub fn main(ctx: cli.Context) u8 {
     var real = false;
     var zero = false;
     var context = false;
+    var as_json = false;
     var users: std.ArrayList([]const u8) = .empty;
     defer users.deinit(ctx.gpa);
     var only_operands = false;
@@ -57,7 +58,8 @@ pub fn main(ctx: cli.Context) u8 {
                 4 => real = true,
                 5 => user = true,
                 6 => zero = true,
-                7 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                7 => as_json = true,
+                8 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -91,6 +93,10 @@ pub fn main(ctx: cli.Context) u8 {
         cli.warn(ctx, "option --zero not permitted in default format", .{});
         return 1;
     }
+    if (as_json and (only_one != 0 or names or real or zero or context)) {
+        cli.warn(ctx, "option --json cannot be combined with -u, -g, -G, -n, -r, -z or -Z", .{});
+        return 1;
+    }
     if (context) {
         cli.warn(ctx, "--context (-Z) works only on an SELinux-enabled kernel", .{});
         return 1;
@@ -121,7 +127,9 @@ pub fn main(ctx: cli.Context) u8 {
         };
         defer ctx.gpa.free(sup);
         const ids: uu.identity.Ids = .{ .uid = me.uid, .euid = me.euid, .gid = me.gid, .egid = me.egid, .groups = sup };
-        if (!(uu.identity.write(w, &db, opts, ids) catch return 1)) status = 1;
+        if (as_json) {
+            uu.identity.writeJson(w, &db, ids) catch return 1;
+        } else if (!(uu.identity.write(w, &db, opts, ids) catch return 1)) status = 1;
     } else for (users.items) |name| {
         const pw = uu.identity.findUser(&db, name) orelse {
             w.flush() catch {};
@@ -131,7 +139,9 @@ pub fn main(ctx: cli.Context) u8 {
         };
         const ids = uu.identity.idsOfUser(&db, pw) catch return 1;
         defer ctx.gpa.free(ids.groups);
-        if (!(uu.identity.write(w, &db, opts, ids) catch return 1)) status = 1;
+        if (as_json) {
+            uu.identity.writeJson(w, &db, ids) catch return 1;
+        } else if (!(uu.identity.write(w, &db, opts, ids) catch return 1)) status = 1;
     }
     w.flush() catch return 1;
     return status;
@@ -149,6 +159,7 @@ const help_text = "Usage: id [OPTION]... [USER]...\n" ++
     "  -u, --user     print only the effective user ID\n" ++
     "  -z, --zero     delimit entries with NUL characters, not whitespace;\n" ++
     "                   not permitted in default format\n" ++
+    "      --json        print one JSON object per user (not GNU)\n" ++
     "      --help        display this help and exit\n" ++
     "      --version     output version information and exit\n\n" ++
     "Without any OPTION, print some useful set of identified information.\n";

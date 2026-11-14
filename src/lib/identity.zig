@@ -18,6 +18,7 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const userdb = @import("userdb.zig");
+const json = @import("json.zig");
 
 pub const Which = enum {
     /// uid=1000(alice) gid=1000(alice) groups=1000(alice),...
@@ -136,6 +137,33 @@ pub fn write(w: *Io.Writer, db: *const userdb.Db, opts: Options, ids: Ids) Io.Wr
     }
 }
 
+/// Write the default `id` description as one JSON object and a newline:
+/// uid/user, gid/group, euid/euser, egid/egroup, and `groups`, a list of
+/// {id, name} with the effective group first (as in the text format). A name
+/// the database lacks is null. Unlike the text format, euid and egid are
+/// always present (decision 0007).
+pub fn writeJson(w: *Io.Writer, db: *const userdb.Db, ids: Ids) Io.Writer.Error!void {
+    try w.print("{{\"uid\":{d},\"user\":", .{ids.uid});
+    try json.writeOptString(w, userName(db, ids.uid));
+    try w.print(",\"gid\":{d},\"group\":", .{ids.gid});
+    try json.writeOptString(w, groupName(db, ids.gid));
+    try w.print(",\"euid\":{d},\"euser\":", .{ids.euid});
+    try json.writeOptString(w, userName(db, ids.euid));
+    try w.print(",\"egid\":{d},\"egroup\":", .{ids.egid});
+    try json.writeOptString(w, groupName(db, ids.egid));
+    try w.writeAll(",\"groups\":[");
+    try w.print("{{\"id\":{d},\"name\":", .{ids.egid});
+    try json.writeOptString(w, groupName(db, ids.egid));
+    try w.writeByte('}');
+    for (ids.groups) |g| {
+        if (g == ids.egid) continue;
+        try w.print(",{{\"id\":{d},\"name\":", .{g});
+        try json.writeOptString(w, groupName(db, g));
+        try w.writeByte('}');
+    }
+    try w.writeAll("]}\n");
+}
+
 fn userName(db: *const userdb.Db, uid: u32) ?[]const u8 {
     return if (db.userById(uid)) |u| u.name else null;
 }
@@ -224,4 +252,19 @@ test "findUser prefers a name over a number and falls back to a uid" {
     try std.testing.expectEqualStrings("alice", findUser(&db, "alice").?.name);
     try std.testing.expectEqualStrings("1000", findUser(&db, "5").?.name); // no name "5": uid 5
     try std.testing.expect(findUser(&db, "77") == null);
+}
+
+test "json: names, nulls, and the effective group first" {
+    var db = try userdb.Db.fromText(std.testing.allocator, test_passwd, test_group);
+    defer db.deinit();
+    var buf: [512]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    const ids: Ids = .{ .uid = 1000, .euid = 0, .gid = 1000, .egid = 0, .groups = &.{ 50, 1000, 77, 0 } };
+    try writeJson(&w, &db, ids);
+    try std.testing.expectEqualStrings(
+        "{\"uid\":1000,\"user\":\"alice\",\"gid\":1000,\"group\":\"alice\",\"euid\":0,\"euser\":\"root\"," ++
+            "\"egid\":0,\"egroup\":\"root\",\"groups\":[{\"id\":0,\"name\":\"root\"},{\"id\":50,\"name\":\"staff\"}," ++
+            "{\"id\":1000,\"name\":\"alice\"},{\"id\":77,\"name\":null}]}\n",
+        w.buffered(),
+    );
 }
