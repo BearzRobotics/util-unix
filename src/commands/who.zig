@@ -189,7 +189,6 @@ const help_text = "Usage: who [OPTION]... [ FILE | ARG1 ARG2 ]\n" ++
     "  -u, --users       list users logged in\n" ++
     "      --message     same as -T\n" ++
     "      --writable    same as -T\n" ++
-    "      --json        print the records as JSON (not GNU)\n" ++
     "      --help        display this help and exit\n" ++
     "      --version     output version information and exit\n\n" ++
     "If FILE is not specified, use /var/run/utmp.  /var/log/wtmp as FILE is common.\n" ++

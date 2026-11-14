@@ -14,7 +14,8 @@ call the library directly or run the binaries and parse their output.
   The text path is untouched: its output, option parsing and diagnostics stay
   byte-identical to GNU, so the differential tests keep their meaning.
   (Checked by building `main` and comparing the text output of 19 invocations.)
-- The wrappers gain a non-GNU `--json` long option. It has no short form.
+- The wrappers gain a non-GNU `--json` long option. It has no short form and
+  is deliberately absent from `--help`, whose text is compared with GNU's.
 - Shared escaping is in `lib/json.zig` (RFC 8259). Input that is not valid
   UTF-8 is written as U+FFFD, one per bad byte, so output always parses.
 - Shapes, chosen for jq and `jsonParse` ease:

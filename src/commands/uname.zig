@@ -95,6 +95,5 @@ const help_text = "Usage: uname [OPTION]...\n" ++
     "  -p, --processor          print the processor type (non-portable)\n" ++
     "  -i, --hardware-platform  print the hardware platform (non-portable)\n" ++
     "  -o, --operating-system   print the operating system\n" ++
-    "      --json            print the fields as a JSON object (not GNU)\n" ++
     "      --help        display this help and exit\n" ++
     "      --version     output version information and exit\n";
