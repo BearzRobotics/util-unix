@@ -29,6 +29,35 @@ call the library directly or run the binaries and parse their output.
 - Library consumers need no JSON: the data types the text writers already
   take (`proc.Uname`, `identity.Ids`, `utmp.Record`) are the structured form.
 
+## Conventions for every `--json` command (util-unix and util-core)
+
+These apply to all later commands so that scripts can rely on them.
+
+1. **When a command gets `--json`:** only when its output is records or a
+   structured value (stat, ls, df, du, find, who, id, ...). Byte-stream
+   filters (cat, sort, sed, cut) and actions (cp, rm, chmod) do not get one.
+   Commands whose whole output is one string or number (whoami, nproc) do not
+   either: `$(cmd)` already is that value.
+2. **Framing:** one JSON document per invocation, then a newline. One entity
+   is an object, a list is an array. A streaming `--json=lines` may be added
+   later for `find`/`locate`; it is not part of this decision.
+3. **Keys:** snake_case, stable, never localized, never reordered between
+   releases within a major version. Add keys freely; never repurpose one.
+4. **Values keep their type:** sizes, counts, ids, pids and modes are numbers
+   (modes also as an octal string under `mode_octal`); times are integer
+   seconds since the epoch, with `_nsec` for the fraction where the source has
+   it; booleans are true/false; text is a UTF-8 string (invalid bytes are
+   U+FFFD, see `lib/json.zig`); an unknown or absent value is `null`, never
+   an empty string or a made-up number.
+5. **Raw bytes are not lost:** where a name may not be UTF-8 (file names), the
+   entry also carries `name_bytes`, the name in hex, only when it differs from
+   the UTF-8 form.
+6. **Errors:** diagnostics go to stderr in the normal text form and the exit
+   status is the command's usual one. Standard output still holds valid JSON
+   for the part that succeeded.
+7. **No effect without the flag:** `--json` is a long option only, absent from
+   `--help`, and the text path stays byte-identical to GNU.
+
 ## Alternatives considered
 
 - Build an entries list first and format both text and JSON from it. Cleaner
