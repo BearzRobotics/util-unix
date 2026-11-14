@@ -38,9 +38,11 @@ These apply to all later commands so that scripts can rely on them.
    filters (cat, sort, sed, cut) and actions (cp, rm, chmod) do not get one.
    Commands whose whole output is one string or number (whoami, nproc) do not
    either: `$(cmd)` already is that value.
-2. **Framing:** one JSON document per invocation, then a newline. One entity
-   is an object, a list is an array. A streaming `--json=lines` may be added
-   later for `find`/`locate`; it is not part of this decision.
+2. **Framing:** a command that reports on each operand (id, stat) prints one
+   JSON object per operand, one per line, so a failed operand costs only its
+   own line. A command whose output is a listing (who, df, ls, du) prints one
+   JSON array. A streaming `--json=lines` may be added later for
+   `find`/`locate`; it is not part of this decision.
 3. **Keys:** snake_case, stable, never localized, never reordered between
    releases within a major version. Add keys freely; never repurpose one.
 4. **Values keep their type:** sizes, counts, ids, pids and modes are numbers
