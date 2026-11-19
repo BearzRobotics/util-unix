@@ -14,7 +14,9 @@ compared with the reference program and what was not; `runcon`'s transition and
 ## Build, test, benchmark
 
 ```
-zig build                      # one binary per command in zig-out/bin, plus util-unix (multicall)
+zig build                      # everything: one binary per command, plus util-unix (multicall)
+zig build -Dmode=standalone    # only the one-binary-per-command executables
+zig build -Dmode=multicall     # only the util-unix multicall binary
 zig build test                 # library and wrapper unit tests
 sh test/run_all_tests.sh       # differential tests against the GNU binaries in /usr/bin
 OURS_MULTICALL=1 sh test/test_chmod.sh   # same tests through `util-unix chmod`

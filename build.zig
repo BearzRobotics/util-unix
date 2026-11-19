@@ -12,21 +12,34 @@
 //!
 //! Options:
 //!   -Dcommands=a,b,c   build only these commands (default: all)
+//!   -Dmode=standalone|multicall|all
+//!                      what to install (default: all)
 //!   -Dstrip=bool       strip debug info (default: on unless -Doptimize=Debug)
 //!
 //! Outputs (zig-out/bin):
-//!   <command>   one executable per selected command   (individual mode)
+//!   <command>   one executable per selected command   (-Dmode=standalone, all)
 //!   util-unix   multicall binary; `util-unix <command> ...` or invoked
-//!               through a link named after a command   (multicall modes)
+//!               through a link named after a command  (-Dmode=multicall, all)
 
 const std = @import("std");
 const commands = @import("src/commands.zig");
 const manifest = @import("build.zig.zon");
 
+/// Which executables `zig build` installs.
+const Mode = enum {
+    /// One executable per command, no multicall binary.
+    standalone,
+    /// Only the `util-unix` multicall binary.
+    multicall,
+    /// Both.
+    all,
+};
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const strip = b.option(bool, "strip", "Strip debug info from command executables (default: on unless Debug)") orelse (optimize != .debug);
+    const mode = b.option(Mode, "mode", "What to build: standalone (one binary per command), multicall (util-unix only) or all (default)") orelse .all;
     const selected = selectCommands(b);
 
     // The reusable library. Exported to dependents as "util_unix".
@@ -44,7 +57,7 @@ pub fn build(b: *std.Build) void {
     version_opts.addOption([]const u8, "version", manifest.version);
 
     // Individual executables.
-    for (selected) |name| {
+    if (mode != .multicall) for (selected) |name| {
         const opts = b.addOptions();
         opts.addOption([]const u8, "command", name);
         opts.addOption([]const u8, "version", manifest.version);
@@ -60,10 +73,10 @@ pub fn build(b: *std.Build) void {
         });
         exe.root_module.addOptions("build_options", opts);
         b.installArtifact(exe);
-    }
+    };
 
     // Multicall executable.
-    {
+    if (mode != .standalone) {
         const opts = b.addOptions();
         opts.addOption([]const []const u8, "commands", selected);
         opts.addOption([]const u8, "version", manifest.version);
