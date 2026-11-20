@@ -117,14 +117,46 @@ pub const Parser = struct {
     diag: *Diag,
     aliases: ?AliasLookup = null,
     /// Last alias expanded; stops direct self-reference.
-    last_alias: []const u8 = "",
+    /// Aliases being read: (name, end offset of its text in `src`); an alias
+    /// is not expanded again inside its own text (POSIX 2.3.1).
+    active: std.ArrayList(struct { name: []const u8, end: usize }) = .empty,
     alias_budget: u32 = 200,
     blank_marks: std.ArrayList(usize) = .empty,
+    /// Offsets (in `src`) where a backslash-newline was removed by `joinLines`,
+    /// so line numbers stay those of the original text.
+    conts: []const usize = &.{},
+    cont_idx: usize = 0,
     /// A line number offset for sub-parsers.
     depth: u32 = 0,
 
     pub fn init(a: Allocator, src: []const u8, diag: *Diag) Parser {
         return .{ .a = a, .src = src, .diag = diag };
+    }
+
+    /// Parser for a whole program: line continuations (backslash-newline,
+    /// POSIX 2.2.1) are removed everywhere but in single quotes and comments.
+    pub fn initProgram(a: Allocator, src: []const u8, diag: *Diag) Allocator.Error!Parser {
+        var p = init(a, src, diag);
+        const j = try joinLines(a, src);
+        p.src = j.text;
+        p.conts = j.conts;
+        return p;
+    }
+
+    /// Length of the unread original text (undoing `joinLines`).
+    pub fn origTailLen(self: *const Parser) usize {
+        var n = self.src.len - @min(self.pos, self.src.len);
+        for (self.conts) |c| if (c >= self.pos) {
+            n += 2;
+        };
+        return n;
+    }
+
+    fn fixLine(self: *Parser) void {
+        while (self.cont_idx < self.conts.len and self.conts[self.cont_idx] <= self.pos) {
+            self.line += 1;
+            self.cont_idx += 1;
+        }
     }
 
     // --- diagnostics -------------------------------------------------------
@@ -145,6 +177,7 @@ pub const Parser = struct {
     }
 
     fn failK(self: *Parser, kind: diagmod.Kind, comptime fmt: []const u8, args: anytype) Error {
+        self.fixLine();
         const msg = std.fmt.bufPrint(&self.diag.buf, fmt, args) catch self.diag.buf[0..0];
         self.diag.len = msg.len;
         self.diag.line = self.line;
@@ -245,6 +278,7 @@ pub const Parser = struct {
 
     fn lexRaw(self: *Parser) Error!Token {
         while (true) {
+            self.fixLine();
             self.tok_start = self.pos;
             const c = self.cur() orelse return .{ .tag = .eof, .line = self.line };
             if (lexer.isBlank(c)) {
@@ -677,7 +711,10 @@ pub const Parser = struct {
         }
         p.op = op;
         var inner: Builder = .{};
-        try self.scanParts(&inner, .brace, in_dq);
+        // the word of `#` `##` `%` `%%` is a pattern even inside double quotes:
+        // its own quotes and unquoted characters keep their meaning (POSIX 2.6.2)
+        const trim_op = op == .trim_prefix_small or op == .trim_prefix_large or op == .trim_suffix_small or op == .trim_suffix_large;
+        try self.scanParts(&inner, .brace, in_dq and !trim_op);
         self.pos += 1; // the closing brace
         p.arg = try inner.finish(a);
         try b.push(a, .{ .param = p });
@@ -875,6 +912,7 @@ pub const Parser = struct {
         const first_line = (try self.peek()).line;
         if (ctx == .compound) try self.skipNewlines();
         while (true) {
+            try self.aliasAt();
             const t = try self.peek();
             if (ctx == .compound) {
                 if (t.tag == .eof or isTerminator(t)) break;
@@ -965,7 +1003,7 @@ pub const Parser = struct {
     /// Replace the peeked word by its alias value if it names one. A value
     /// ending in a blank makes the word after it eligible too (POSIX 2.3.1);
     /// `blank_marks` holds the offsets where such values end.
-    fn aliasStep(self: *Parser) Error!bool {
+    fn aliasStep(self: *Parser, allow_reserved: bool) Error!bool {
         const al = self.aliases orelse return false;
         if (self.alias_budget == 0) return false;
         const t = try self.peek();
@@ -978,14 +1016,22 @@ pub const Parser = struct {
             .text => |s| s,
             else => return false,
         };
-        if (lexer.reservedOf(w) != null or std.mem.eql(u8, name, self.last_alias)) return false;
+        if (!allow_reserved and lexer.reservedOf(w) != null) return false;
+        for (self.active.items) |ac| if (ac.end > t.start and std.mem.eql(u8, ac.name, name)) return false;
         const val = al.get(al.ctx, name) orelse return false;
         self.alias_budget -= 1;
-        self.last_alias = name;
+        for (self.active.items) |*ac| ac.end = (ac.end + val.len) -| self.pos;
+        try self.active.append(self.a, .{ .name = name, .end = val.len });
         const ns = try self.a.alloc(u8, val.len + self.src.len - self.pos);
         @memcpy(ns[0..val.len], val);
         @memcpy(ns[val.len..], self.src[self.pos..]);
         for (self.blank_marks.items) |*m| m.* = (m.* + val.len) -| self.pos;
+        if (self.conts.len > 0) {
+            var keep: std.ArrayList(usize) = .empty;
+            for (self.conts) |c| if (c >= self.pos) try keep.append(self.a, c - self.pos + val.len);
+            self.conts = keep.items;
+            self.cont_idx = 0;
+        }
         if (val.len > 0 and (val[val.len - 1] == ' ' or val[val.len - 1] == '\t')) try self.blank_marks.append(self.a, val.len);
         self.src = ns;
         self.pos = 0;
@@ -994,7 +1040,13 @@ pub const Parser = struct {
     }
 
     fn maybeAlias(self: *Parser) Error!void {
-        while (try self.aliasStep()) {}
+        while (try self.aliasStep(false)) {}
+    }
+
+    /// Alias substitution at a position where a command or a reserved word can start.
+    fn aliasAt(self: *Parser) Error!void {
+        try self.aliasPending();
+        try self.maybeAlias();
     }
 
     /// Called before each word of a simple command: the word right after an
@@ -1011,7 +1063,7 @@ pub const Parser = struct {
                 } else i += 1;
             }
             if (!due) return;
-            if (!(try self.aliasStep())) return;
+            if (!(try self.aliasStep(true))) return;
         }
     }
 
@@ -1064,6 +1116,7 @@ pub const Parser = struct {
     }
 
     fn expectReserved(self: *Parser, want: Reserved) Error!void {
+        try self.aliasAt();
         const t = try self.next();
         switch (t.tag) {
             .word => |w| if (lexer.reservedOf(w) == want) return,
@@ -1073,6 +1126,7 @@ pub const Parser = struct {
     }
 
     fn peekIs(self: *Parser, want: Reserved) Error!bool {
+        try self.aliasAt();
         const t = try self.peek();
         return switch (t.tag) {
             .word => |w| lexer.reservedOf(w) == want,
@@ -1192,16 +1246,22 @@ pub const Parser = struct {
         var items: std.ArrayList(ast.CaseItem) = .empty;
         while (true) {
             if (try self.peekIs(.kw_esac)) break;
+            try self.aliasAt();
             var t = try self.next();
-            if (t.tag == .op and t.tag.op == .lparen) t = try self.next();
+            if (t.tag == .op and t.tag.op == .lparen) {
+                try self.aliasAt();
+                t = try self.next();
+            }
             var pats: std.ArrayList(ast.Word) = .empty;
             while (true) {
                 switch (t.tag) {
                     .word => |w| try pats.append(self.a, w),
                     else => return self.unexpected(t, if (pats.items.len == 0) "esac" else ")"),
                 }
+                try self.aliasAt();
                 t = try self.next();
                 if (t.tag == .op and t.tag.op == .pipe) {
+                    try self.aliasAt();
                     t = try self.next();
                     continue;
                 }
@@ -1210,6 +1270,7 @@ pub const Parser = struct {
             }
             const body = try self.parseList(.compound);
             try items.append(self.a, .{ .patterns = try pats.toOwnedSlice(self.a), .body = body });
+            try self.aliasAt();
             const e = try self.peek();
             if (e.tag == .op and e.tag.op == .dsemi) {
                 _ = try self.next();
@@ -1302,6 +1363,8 @@ pub const Parser = struct {
                 continue;
             }
             try self.aliasPending();
+            // the command name after assignments or redirections is in command position
+            if (words.items.len == 0 and (assigns.items.len > 0 or redirs.items.len > 0)) try self.maybeAlias();
             const t = try self.peek();
             const w = switch (t.tag) {
                 .word => |w| w,
@@ -1362,13 +1425,111 @@ pub const Parser = struct {
 
 };
 
+const HereDelim = struct { text: []const u8, strip: bool };
+
+/// Remove backslash-newline pairs (POSIX 2.2.1) outside single quotes, comments
+/// and here-document bodies. Returns the new text and the offsets in it where
+/// a pair was removed.
+fn joinLines(a: Allocator, src: []const u8) Allocator.Error!struct { text: []const u8, conts: []const usize } {
+    if (std.mem.indexOf(u8, src, "\\\n") == null) return .{ .text = src, .conts = &.{} };
+    var out: std.ArrayList(u8) = .empty;
+    var conts: std.ArrayList(usize) = .empty;
+    var pending: std.ArrayList(HereDelim) = .empty;
+    var i: usize = 0;
+    var dq = false;
+    var word_start = true;
+    while (i < src.len) {
+        const c = src[i];
+        if (c == '\n' and pending.items.len > 0) {
+            try out.append(a, '\n');
+            i += 1;
+            for (pending.items) |h| {
+                while (i < src.len) {
+                    const e = std.mem.indexOfScalarPos(u8, src, i, '\n') orelse src.len;
+                    var ln = src[i..e];
+                    const full = if (e < src.len) src[i .. e + 1] else src[i..e];
+                    try out.appendSlice(a, full);
+                    i = @min(e + 1, src.len);
+                    if (h.strip) ln = std.mem.trimStart(u8, ln, "\t");
+                    if (std.mem.eql(u8, ln, h.text)) break;
+                }
+            }
+            pending.clearRetainingCapacity();
+            word_start = true;
+            continue;
+        }
+        switch (c) {
+            '\\' => {
+                if (i + 1 < src.len and src[i + 1] == '\n') {
+                    try conts.append(a, out.items.len);
+                    i += 2;
+                    continue;
+                }
+                try out.append(a, c);
+                if (i + 1 < src.len) try out.append(a, src[i + 1]);
+                i += 2;
+                word_start = false;
+                continue;
+            },
+            '\'' => if (!dq) {
+                const e = std.mem.indexOfScalarPos(u8, src, i + 1, '\'') orelse src.len - 1;
+                try out.appendSlice(a, src[i .. e + 1]);
+                i = e + 1;
+                word_start = false;
+                continue;
+            },
+            '"' => dq = !dq,
+            '#' => if (!dq and word_start) {
+                const e = std.mem.indexOfScalarPos(u8, src, i, '\n') orelse src.len;
+                try out.appendSlice(a, src[i..e]);
+                i = e;
+                continue;
+            },
+            '<' => if (!dq and i + 2 < src.len and src[i + 1] == '<' and src[i + 2] != '<') {
+                var j = i + 2;
+                var strip = false;
+                if (src[j] == '-') {
+                    strip = true;
+                    j += 1;
+                }
+                try out.appendSlice(a, src[i..j]);
+                while (j < src.len and (src[j] == ' ' or src[j] == '\t')) : (j += 1) try out.append(a, src[j]);
+                var dl: std.ArrayList(u8) = .empty;
+                while (j < src.len) {
+                    const d = src[j];
+                    if (d == ' ' or d == '\t' or d == '\n' or d == ';' or d == '&' or d == '|' or d == '<' or d == '>' or d == '(' or d == ')') break;
+                    try out.append(a, d);
+                    j += 1;
+                    if (d == '\'' or d == '"') continue;
+                    if (d == '\\' and j < src.len) {
+                        try out.append(a, src[j]);
+                        try dl.append(a, src[j]);
+                        j += 1;
+                        continue;
+                    }
+                    try dl.append(a, d);
+                }
+                try pending.append(a, .{ .text = dl.items, .strip = strip });
+                i = j;
+                word_start = false;
+                continue;
+            },
+            else => {},
+        }
+        try out.append(a, c);
+        word_start = c == ' ' or c == '\t' or c == '\n' or c == ';' or c == '&' or c == '|' or c == '(' or c == ')';
+        i += 1;
+    }
+    return .{ .text = out.items, .conts = conts.items };
+}
+
 /// Parse a whole source text. The result owns its arena. On a syntax error
 /// `diag` is filled and `error.Syntax` returned.
 pub fn parseProgram(gpa: Allocator, src: []const u8, diag: *Diag) Error!ast.Program {
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
     const a = arena.allocator();
-    var p = Parser.init(a, src, diag);
+    var p = try Parser.initProgram(a, src, diag);
     var cmds: std.ArrayList(*const Node) = .empty;
     while (try p.nextCommand()) |n| try cmds.append(a, n);
     return .{ .arena = arena, .commands = try cmds.toOwnedSlice(a) };

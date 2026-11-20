@@ -43,7 +43,7 @@ pub fn runSource(sh: *Shell, src: []const u8, o: RunOpts) error{OutOfMemory}!u8 
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     const a = arena.allocator();
     var d: parser.Diag = .{};
-    var p = parser.Parser.init(a, src, &d);
+    var p = try parser.Parser.initProgram(a, src, &d);
     p.aliases = .{ .ctx = sh, .get = aliasGet };
     const defined_before = sh.funcs_defined;
     const saved_src = sh.cur_src;
@@ -111,7 +111,10 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
             return error.OutOfMemory;
         };
         var d: parser.Diag = .{};
-        var p = parser.Parser.init(a, text, &d);
+        var p = parser.Parser.initProgram(a, text, &d) catch {
+            arena.deinit();
+            return error.OutOfMemory;
+        };
         p.line = line;
         p.aliases = .{ .ctx = sh, .get = aliasGet };
         const maybe = p.nextCommand() catch |e| switch (e) {
@@ -134,8 +137,8 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
                 return error.OutOfMemory;
             },
         };
-        const tail = p.src.len - @min(p.pos, p.src.len);
-        const complete = eof or (p.pos < p.src.len) or (text.len > 0 and text[text.len - 1] == '\n' and p.src.len == text.len);
+        const tail = p.origTailLen();
+        const complete = eof or (p.pos < p.src.len) or (p.src.len > 0 and p.src[p.src.len - 1] == '\n');
         if (!eof and (maybe == null or !complete or p.warn_heredoc != null)) {
             arena.deinit();
             eof = readMore(gpa, &buf, fd, &chunk);
@@ -220,6 +223,9 @@ pub fn checkTraps(sh: *Shell) void {
         const saved = sh.status;
         const copy = sh.gpa.dupe(u8, cmd) catch continue;
         defer sh.gpa.free(copy);
+        const prev_ts = sh.trap_status;
+        sh.trap_status = saved;
+        defer sh.trap_status = prev_ts;
         sh.in_trap += 1;
         const saved_flow = sh.flow;
         sh.flow = .none;
@@ -240,6 +246,7 @@ pub fn runExitTrap(sh: *Shell) void {
     if (cmd.len == 0) return;
     const saved = sh.status;
     sh.flow = .none;
+    sh.trap_status = saved;
     _ = runSource(sh, cmd, .{}) catch {};
     if (sh.flow != .exit_shell) sh.status = saved;
 }
@@ -890,7 +897,16 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     sh.last_subst_status = null;
 
     var args: std.ArrayList([]const u8) = .empty;
-    expand.fields(sh, a, s.words, &args) catch |e| return xerr(sh, e);
+    // Declaration utilities (`export`, `readonly`, also behind `command`):
+    // operands of the form name=word are expanded like assignments, with
+    // neither field splitting nor pathname expansion (POSIX 2.14 export).
+    const decl = declStart(s.words);
+    for (s.words, 0..) |w, i| {
+        if (decl != null and i >= decl.? and isAssignWord(w)) {
+            const v = expand.assignValue(sh, a, w) catch |e| return xerr(sh, e);
+            args.append(a, v) catch return 2;
+        } else expand.fields(sh, a, &.{w}, &args) catch |e| return xerr(sh, e);
+    }
     const vals = a.alloc([]const u8, s.assigns.len) catch return 2;
     // `export x=~` style operands expand tildes after `=` like assignments.
     for (vals) |*v| v.* = "";
@@ -917,7 +933,10 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
         var saved: Redirs = .{};
         const ok = applyRedirs(sh, a, s.redirs, &saved);
         defer saved.restore(sh.gpa);
-        if (!ok) return 2;
+        if (!ok) {
+            errexitCheck(sh, 2, "redirection");
+            return 2;
+        }
         // POSIX 2.9.1 (Issue 8): each assignment is expanded and made in order,
         // so a later one sees an earlier one.
         for (s.assigns) |asg| {
@@ -947,6 +966,14 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     };
     const r = resolve(sh, a, name);
     if (path_saved) |ps| restoreVar(sh, ps);
+    // A variable assignment error ends a non-interactive shell for every kind of
+    // command (POSIX 2.8.1); builtins check it themselves.
+    switch (r) {
+        .external, .not_found => for (s.assigns) |asg| {
+            if (sh.vars.get(asg.name)) |ov| if (ov.readonly) return assignError(sh, asg.name);
+        },
+        else => {},
+    }
     const st: u8 = switch (r) {
         .not_found => blk: {
             // Redirections still happen (to a forked child in real shells).
@@ -974,6 +1001,37 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     return st;
 }
 
+/// A word that reads `name=...` (the name literal and unquoted).
+fn isAssignWord(w: ast.Word) bool {
+    if (w.len == 0) return false;
+    const first = switch (w[0]) {
+        .text => |t| t,
+        else => return false,
+    };
+    const eq = std.mem.indexOfScalar(u8, first, '=') orelse return false;
+    return eq > 0 and lexer.isName(first[0..eq]);
+}
+
+fn literalWord(w: ast.Word) ?[]const u8 {
+    if (w.len != 1) return null;
+    return switch (w[0]) {
+        .text => |t| t,
+        else => null,
+    };
+}
+
+/// Index of the first operand of a declaration utility command, if it is one.
+fn declStart(words: []const ast.Word) ?usize {
+    var i: usize = 0;
+    while (i < words.len) : (i += 1) {
+        const t = literalWord(words[i]) orelse return null;
+        if (std.mem.eql(u8, t, "command")) continue;
+        if (std.mem.eql(u8, t, "export") or std.mem.eql(u8, t, "readonly")) return i + 1;
+        return null;
+    }
+    return null;
+}
+
 fn hasAssignTilde(w: ast.Word) bool {
     for (w) |p| if (p == .atilde) return true;
     return false;
@@ -983,7 +1041,7 @@ fn hasAssignTilde(w: ast.Word) bool {
 fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s: ast.Simple, vals: []const []const u8) u8 {
     const is_special = r == .special;
     var saved: Redirs = .{};
-    const is_exec = std.mem.eql(u8, args[0], "exec");
+    const is_exec = std.mem.eql(u8, args[0], "exec") or (args.len > 1 and std.mem.eql(u8, args[0], "command") and execBehindCommand(args);
     if (!applyRedirs(sh, a, s.redirs, &saved)) {
         saved.restore(sh.gpa);
         if (is_special) {
@@ -1032,6 +1090,17 @@ fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s
         saved.commit(sh.gpa);
     } else saved.restore(sh.gpa);
     return st;
+}
+
+fn execBehindCommand(args: []const []const u8) bool {
+    var i: usize = 1;
+    while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--")) {
+            i += 1;
+            break;
+        }
+    }
+    return i < args.len and std.mem.eql(u8, args[i], "exec");
 }
 
 fn restoreVar(sh: *Shell, sv: shell.Saved) void {

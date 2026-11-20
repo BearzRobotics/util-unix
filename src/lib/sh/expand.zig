@@ -366,6 +366,7 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
             if (missing) {
                 const tf: u8 = if (p.quoted) quoted else field;
                 for (p.arg) |ap| try part(x, ap, tf);
+                if (p.quoted) x.marker = true;
             } else try emit(x, pv, p.name, p.quoted);
         },
         .use_alternate => {
@@ -373,7 +374,7 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
                 const tf: u8 = if (p.quoted) quoted else field;
                 for (p.arg) |ap| try part(x, ap, tf);
                 if (p.arg.len == 0 and p.quoted) x.marker = true;
-            } else if (p.quoted and false) {}
+            } else if (p.quoted) x.marker = true;
         },
         .assign_default => {
             if (missing) {

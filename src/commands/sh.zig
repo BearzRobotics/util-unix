@@ -37,6 +37,15 @@ fn readAll(gpa: std.mem.Allocator, fd: i32) ?[]u8 {
     return data.toOwnedSlice(gpa) catch null;
 }
 
+/// argv[0] of this process (Linux), or null.
+fn argv0(buf: *[512]u8) ?[]const u8 {
+    const fd = sys.open("/proc/self/cmdline", .{ .cloexec = true }, 0) catch return null;
+    defer sys.close(fd);
+    const n = sys.read(fd, buf) catch return null;
+    const end = std.mem.indexOfScalar(u8, buf[0..n], 0) orelse n;
+    return if (end == 0) null else buf[0..end];
+}
+
 fn parseStyle(s: []const u8) ?diag.Style {
     if (std.mem.eql(u8, s, "posix")) return .posix;
     if (std.mem.eql(u8, s, "rich")) return .rich;
@@ -108,15 +117,11 @@ pub fn main(ctx: cli.Context) u8 {
     const args = ctx.args;
     while (i < args.len) {
         const a: []const u8 = args[i];
+        if (std.mem.eql(u8, a, "-") or std.mem.eql(u8, a, "--")) {
+            i += 1;
+            break;
+        }
         if (a.len < 2 or (a[0] != '-' and a[0] != '+')) break;
-        if (std.mem.eql(u8, a, "--")) {
-            i += 1;
-            break;
-        }
-        if (std.mem.eql(u8, a, "-")) {
-            i += 1;
-            break;
-        }
         if (std.mem.startsWith(u8, a, "--")) {
             if (std.mem.startsWith(u8, a, "--diagnostics=")) {
                 const v = a["--diagnostics=".len..];
@@ -256,7 +261,9 @@ pub fn main(ctx: cli.Context) u8 {
     }
     if (list_diag or explain_arg != null) return listOrExplain(ctx, list_diag, explain_arg, style_opt == .json);
     var rest = args[i..];
-    var name: []const u8 = ctx.name;
+    // $0 of a script read from standard input is the name the shell was invoked by
+    var argv0_buf: [512]u8 = undefined;
+    var name: []const u8 = argv0(&argv0_buf) orelse ctx.name;
     var label: []const u8 = "stdin";
     var script: ?[]u8 = null;
     defer if (script) |s| gpa.free(s);

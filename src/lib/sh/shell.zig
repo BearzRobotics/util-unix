@@ -133,6 +133,9 @@ pub const Shell = struct {
     getopts_last_optind: usize = 1,
     exit_status_override: ?u8 = null,
     in_exit_trap: bool = false,
+    /// `$?` when the running trap action was entered: `exit` without an
+    /// operand in a trap uses it (POSIX 2.14 exit).
+    trap_status: ?u8 = null,
     /// Set while the shell is executing a trap handler.
     in_trap: u32 = 0,
     last_subst_status: ?u8 = null,

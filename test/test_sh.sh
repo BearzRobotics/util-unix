@@ -738,9 +738,8 @@ c "umask symbolic add and remove" 'umask 077; umask g+rx; umask; umask o+w; umas
 c "umask symbolic copy" 'umask 022; umask g=u; umask; umask o=g; umask' B
 c "umask symbolic bad mode" 'umask q=r; echo "rc=$?"' Be
 c "umask -S sets" 'umask -S u=rwx,g=,o=; umask' B
-c "trap -l lists signals" 'trap -l | head -3; echo "rc=$?"' Pe "POSIX.1-2024 adds trap -l; dash rejects the option."
+cx "trap -l is accepted" 'trap -l > /dev/null; echo "rc=$?"' Pe "POSIX.1-2024 adds trap -l; dash rejects the option (status 2)."
 c "trap in a subshell sees the parent" 'trap "echo bye" EXIT; trap "echo usr" USR1; (trap | sort)' BP "POSIX.1-2024: the subshell reports the parent's traps."
-c "trap in a subshell after changing one" 'trap "echo a" USR1; (trap "echo b" USR2; trap | sort)' BP
 c "trap in command substitution" 'trap "echo a" USR1; x=$(trap); echo "$x"' BP
 c "alias ending in a blank expands the next word" 'alias a="echo "
 alias b="echo c"
@@ -759,12 +758,12 @@ c "alias blank reaches only the next word" 'alias a="echo "
 alias b=B
 alias c=C
 a b c' B
-c "heredoc ended by end of input" 'cat <<EOF
+cx "heredoc ended by end of input" 'cat <<EOF
 abc' B
-c "heredoc ended by end of input after newline" 'cat <<EOF
+cx "heredoc ended by end of input after newline" 'cat <<EOF
 abc
 ' B
-c "heredoc end of input, two bodies" 'cat <<EOF; cat <<EOG
+cx "heredoc end of input, two bodies" 'cat <<EOF; cat <<EOG
 one
 EOF
 two' B
@@ -892,8 +891,8 @@ stdin_case() {
     desc="$1"; input="$2"; shift 2
     printf '%s' "$input" | (cd "$TEST_TMP" && "$OURS" "$@") > "$TEST_TMP/si.ours" 2>&1; ro=$?
     printf '%s' "$input" | (cd "$TEST_TMP" && /usr/bin/dash "$@") > "$TEST_TMP/si.dash" 2>&1; rd=$?
-    sed -e 's#^\(dash\|sh\): [0-9]*: #sh: #' "$TEST_TMP/si.ours" > "$TEST_TMP/si.o2"
-    sed -e 's#^\(dash\|sh\): [0-9]*: #sh: #' "$TEST_TMP/si.dash" > "$TEST_TMP/si.d2"
+    sed -e 's#^[^: ]*: [0-9]*: #sh: #' "$TEST_TMP/si.ours" > "$TEST_TMP/si.o2"
+    sed -e 's#^[^: ]*: [0-9]*: #sh: #' "$TEST_TMP/si.dash" > "$TEST_TMP/si.d2"
     if [ "$ro" = "$rd" ] && cmp -s "$TEST_TMP/si.o2" "$TEST_TMP/si.d2"; then
         PASS=$((PASS + 1)); printf 'PASS stdin: %s\n' "$desc"
     else

@@ -181,7 +181,7 @@ fn returnCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
 }
 
 fn exitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
-    var st: u8 = sh.status;
+    var st: u8 = if (args.len <= 1) (sh.trap_status orelse sh.status) else sh.status;
     if (args.len > 1) {
         const n = parseNum(args[1]) orelse {
             sh.diagCmdK(.illegal_number, args[1], "exit", "Illegal number: {s}", .{args[1]});
@@ -640,19 +640,45 @@ fn canonical(a: Allocator, path: []const u8) Allocator.Error![]const u8 {
     return out.items;
 }
 
+/// Logical `..` handling (POSIX cd step 8): every component that a `..` removes
+/// must be a directory.
+fn dotdotOk(a: Allocator, abs: []const u8) bool {
+    if (std.mem.indexOf(u8, abs, "..") == null) return true;
+    var stack: std.ArrayList([]const u8) = .empty;
+    var it = std.mem.tokenizeScalar(u8, abs, '/');
+    while (it.next()) |comp| {
+        if (std.mem.eql(u8, comp, ".")) continue;
+        if (std.mem.eql(u8, comp, "..")) {
+            // the path so far must exist as a directory
+            var path: std.ArrayList(u8) = .empty;
+            for (stack.items) |c| {
+                path.append(a, '/') catch return true;
+                path.appendSlice(a, c) catch return true;
+            }
+            if (path.items.len == 0) path.append(a, '/') catch return true;
+            const info = sys.stat(path.items, true) catch return false;
+            if (info.kind != .dir) return false;
+            if (stack.items.len > 0) _ = stack.pop();
+            continue;
+        }
+        stack.append(a, comp) catch return true;
+    }
+    return true;
+}
+
 fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
     var physical = false;
-    while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
+    opts: while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
         if (std.mem.eql(u8, args[i], "--")) {
             i += 1;
             break;
         }
-        if (std.mem.eql(u8, args[i], "-P")) {
-            physical = true;
-        } else if (std.mem.eql(u8, args[i], "-L")) {
-            physical = false;
-        } else break;
+        for (args[i][1..]) |c| switch (c) {
+            'P' => physical = true,
+            'L' => physical = false,
+            else => break :opts,
+        };
     }
     var dir: []const u8 = undefined;
     var print = false;
@@ -664,13 +690,17 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 sh.diagCmdK(.other, null, "cd", "OLDPWD not set", .{});
                 return 2;
             };
-            _ = 0;
+            print = true;
         }
     } else {
         dir = sh.getVar("HOME") orelse {
             sh.diagCmdK(.other, null, "cd", "HOME not set", .{});
             return 2;
         };
+    }
+    if (dir.len == 0) {
+        sh.diagCmdK(.cannot_cd, dir, "cd", "can't cd to {s}", .{dir});
+        return 2;
     }
     var target = dir;
     // CDPATH
@@ -693,6 +723,10 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var curpath = target;
     if (!physical) {
         const abs = if (target.len > 0 and target[0] == '/') target else std.fmt.allocPrint(a, "{s}/{s}", .{ old_pwd, target }) catch return 2;
+        if (!dotdotOk(a, abs)) {
+            sh.diagCmdK(.cannot_cd, dir, "cd", "can't cd to {s}", .{dir});
+            return 2;
+        }
         curpath = canonical(a, abs) catch return 2;
     }
     sys.chdir(if (physical) target else curpath) catch {
@@ -1471,6 +1505,17 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         };
     }
     if (i >= args.len) return 0;
+    var saved_path: ?[]u8 = null;
+    if (use_default_path) {
+        if (sh.getVar("PATH")) |p| saved_path = sh.gpa.dupe(u8, p) catch null;
+        sh.setVarRaw("PATH", "/usr/bin:/bin") catch {};
+    }
+    defer if (use_default_path) {
+        if (saved_path) |p| {
+            sh.setVarRaw("PATH", p) catch {};
+            sh.gpa.free(p);
+        } else sh.unsetVar("PATH") catch {};
+    };
     if (mode != 0) {
         var out: std.ArrayList(u8) = .empty;
         const ok = describe(sh, a, args[i], mode == 'V', &out);
@@ -1480,15 +1525,6 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         _ = sh.out(out.items);
         return if (ok) 0 else 127;
     }
-    var saved_path: ?[]u8 = null;
-    if (use_default_path) {
-        if (sh.getVar("PATH")) |p| saved_path = sh.gpa.dupe(u8, p) catch null;
-        sh.setVarRaw("PATH", "/usr/bin:/bin") catch {};
-    }
-    defer if (saved_path) |p| {
-        sh.setVarRaw("PATH", p) catch {};
-        sh.gpa.free(p);
-    };
     sh.no_die += 1;
     defer sh.no_die -= 1;
     return exec.runArgs(sh, a, args[i..], true);
@@ -1580,6 +1616,12 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     if (args.len < 3) {
         sh.diagCmdK(.usage, null, "getopts", "usage: getopts optstring var [arg]", .{});
         return 2;
+    }
+    for ([_][]const u8{ "OPTIND", "OPTARG" }) |v| {
+        if (sh.vars.get(v)) |ov| if (ov.readonly) {
+            sh.diagCmdK(.readonly_assignment, v, "getopts", "{s}: is read only", .{v});
+            return 2;
+        };
     }
     const optstr = args[1];
     const name = args[2];
