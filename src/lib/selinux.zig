@@ -216,6 +216,15 @@ pub fn enabled(io: Io, gpa: Allocator) bool {
 }
 
 /// The context of this process (/proc/self/attr/current), owned by the caller.
+/// The context exactly as the kernel returns it (up to a NUL), including any
+/// trailing newline: AppArmor reports "unconfined\n", SELinux no newline. This is
+/// what libselinux's getcon hands GNU runcon, which prints it plus a newline.
+pub fn currentContextRaw(io: Io, gpa: Allocator) ?[]u8 {
+    const text = readSmall(io, gpa, "/proc/self/attr/current") orelse return null;
+    defer gpa.free(text);
+    return gpa.dupe(u8, std.mem.sliceTo(text, 0)) catch null;
+}
+
 pub fn currentContext(io: Io, gpa: Allocator) ?[]u8 {
     const text = readSmall(io, gpa, "/proc/self/attr/current") orelse return null;
     defer gpa.free(text);

@@ -67,7 +67,9 @@ run_cmp "networks unknown"               networks nosuchnet
 
 printf "\n[ hosts: entries that the files answer unambiguously ]\n"
 run_cmp "hosts by address 127.0.0.1"     hosts 127.0.0.1
-run_cmp "hosts by address ::1"           hosts ::1
+# GNU answers ::1 from an NSS module (nss-myhostname) when /etc/hosts has no entry; this
+# getent reads files only (decision 0004), so compare only when the file has the line.
+if grep -q '^::1[[:space:]]' /etc/hosts; then run_cmp "hosts by address ::1"           hosts ::1; fi
 run_cmp "hosts alias lookup"             hosts ip6-localhost
 run_cmp "hosts unknown name"             hosts nosuch.invalid
 run_cmp "ahostsv4 localhost"             ahostsv4 localhost

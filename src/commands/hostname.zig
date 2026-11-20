@@ -112,8 +112,10 @@ pub fn main(ctx: cli.Context) u8 {
     }
 
     const setting = file != null or operands > 0;
-    if (operands > 1 or (setting and show != null)) return usageStderr(ctx);
-    if (file != null and operands > 0) return usageStderr(ctx);
+    // hostname 3.25 acts on -F before it checks for stray operands or display options,
+    // so a refused change is reported ("Permission denied") instead of the usage text.
+    const file_conflict = file != null and (operands > 0 or show != null);
+    if (!file_conflict and (operands > 1 or (setting and show != null))) return usageStderr(ctx);
 
     if (setting) {
         var text_buf: ?[]u8 = null;
@@ -126,7 +128,9 @@ pub fn main(ctx: cli.Context) u8 {
             };
             new_name = hn.fromFileText(text_buf.?) orelse "";
         }
-        return setName(ctx, new_name);
+        const rc = setNameFrom(ctx, new_name, file != null);
+        if (rc != 0 or !file_conflict) return rc;
+        return usageStderr(ctx);
     }
 
     var info = uu.proc.uname();
@@ -142,9 +146,15 @@ pub fn main(ctx: cli.Context) u8 {
 }
 
 fn setName(ctx: cli.Context, name: []const u8) u8 {
+    return setNameFrom(ctx, name, false);
+}
+
+/// `from_file`: hostname 3.25 reports a refused change from -F with the bare system
+/// message ("Permission denied"), and from an operand with "you must be root ...".
+fn setNameFrom(ctx: cli.Context, name: []const u8, from_file: bool) u8 {
     hn.set(name) catch |e| {
         switch (e) {
-            error.PermissionDenied => cli.warn(ctx, "you must be root to change the host name", .{}),
+            error.PermissionDenied => if (from_file) cli.warn(ctx, "Permission denied", .{}) else cli.warn(ctx, "you must be root to change the host name", .{}),
             error.NameTooLong => cli.warn(ctx, "name too long", .{}),
             else => cli.warn(ctx, "{s}", .{cli.errText(e)}),
         }
@@ -168,7 +178,16 @@ fn display(ctx: cli.Context, show: Show, node: []const u8, nis: []const u8) u8 {
     switch (show) {
         .name => out.print("{s}\n", .{node}) catch return 1,
         .short => out.print("{s}\n", .{hn.short(node)}) catch return 1,
-        .yp => out.print("{s}\n", .{nis}) catch return 1,
+        .yp => {
+            // Newer hostname(1) refuses to print the placeholder for an unset NIS domain.
+            if (nis.len == 0 or std.mem.eql(u8, nis, "(none)")) {
+                // hostname 3.25 prints this on standard output, not standard error.
+                out.print("{s}: Local domain name not set\n", .{ctx.name}) catch return 1;
+                out.flush() catch {};
+                return 1;
+            }
+            out.print("{s}\n", .{nis}) catch return 1;
+        },
         .all_fqdns, .all_ips => {
             cli.warn(ctx, "{s} is not supported (it needs the network interface list)", .{if (show == .all_ips) "-I" else "-A"});
             return 1;

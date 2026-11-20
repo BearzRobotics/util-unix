@@ -103,7 +103,7 @@ pub fn main(ctx: cli.Context) u8 {
 
     if (operands.len == 0) {
         // Neither context nor command: show the current context.
-        const cur = sel.currentContext(ctx.io, ctx.gpa) orelse {
+        const cur = sel.currentContextRaw(ctx.io, ctx.gpa) orelse {
             cli.warn(ctx, "failed to get current context: No such file or directory", .{});
             return 125;
         };
