@@ -28,7 +28,7 @@ def short(r):
     o = r["out"].replace("\n", "~")
     if len(o) > 70:
         o = o[:67] + "..."
-    return "%src=%d" % (o, r["rc"]) if o else "rc=%d" % r["rc"]
+    return "%s rc=%d" % (o, r["rc"]) if o else "rc=%d" % r["rc"]
 
 
 def esc(s):

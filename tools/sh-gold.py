@@ -22,7 +22,7 @@ Sources (--source, repeatable):
   freebsd            freebsd bin/sh/tests/*/NAME.N (script file)
   oils               oils spec/*.test.sh (script file; argv.py helpers are POSIX sh)
   dir:PATH           every *.sh file in PATH (script file); PATH/*.c for -c mode
-  list:FILE          snippets separated by lines of exactly `#---` (run with -c);
+  list:FILE          (default: every test/sh_gold/*.txt) snippets separated by lines of exactly `#---` (run with -c);
                      a `# name` first line of a snippet names it
 Corpora come from tools/fetch-sh-corpora.sh (SH_CORPORA_DIR).
 
@@ -197,6 +197,10 @@ def run_one(shells, name, case, base):
         e = err.decode("utf-8", "replace")
         if rc == 137:
             rc = 124  # timeout -s KILL
+        # $0 and the like: the spelling of the shell's own path is not a behaviour
+        if name != "freebsd":
+            o = o.replace(exe, "sh")
+            e = e.replace(exe, "sh")
         return {"out": norm_out(o, wr)[:20000], "err": norm_err(e, wr)[:2000], "rc": rc}
     finally:
         shutil.rmtree(w, ignore_errors=True)
@@ -409,7 +413,8 @@ def main():
     ap.add_argument("--filter", default="")
     ap.add_argument("--list", action="store_true", help="only extract and count the snippets")
     a = ap.parse_args()
-    srcs = a.source or ["test_sh", "yash", "freebsd", "oils"]
+    gold_dir = os.path.join(ROOT, "test/sh_gold")
+    srcs = a.source or (["test_sh", "yash", "freebsd", "oils"] + ["list:" + os.path.join(gold_dir, f) for f in sorted(os.listdir(gold_dir)) if f.endswith(".txt")])
     cases = []
     for s in srcs:
         if s.startswith("dir:"):
