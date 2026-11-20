@@ -1,2 +1,2 @@
-{"code":"SH1008","kind":"bad_for_variable","severity":"error","file":"-c","line":1,"column":5,"end":7,"message":"'1x' is not a valid variable name for `for`","help":"use letters, digits and underscores, not starting with a digit","token":"1x","expected":"","posix":"Syntax error: Bad for loop variable"}
+{"code":"SH1008","kind":"bad_for_variable","severity":"error","file":"-c","line":1,"column":5,"end":7,"message":"'1x' is not a valid variable name for `for`","help":"use letters, digits and underscores, not starting with a digit","token":"1x","expected":"","posix":"Syntax error: Bad for loop variable","shellcheck":"SC1073"}
 rc=2

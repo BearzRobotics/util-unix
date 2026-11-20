@@ -42,12 +42,16 @@ Diagnostics (these change only what is written to standard error):
                        json:  one JSON object per diagnostic
                        gcc:   FILE:LINE:COL: message, for editors and CI
                        auto:  choose posix or rich as described
+  --color=WHEN         auto (default: only on a terminal, never when NO_COLOR is
+                       set), always or never; also --diagnostics-color=WHEN.
+                       Only the rich style has colour
   --check FILE...      lint the scripts without running them: unquoted
                        expansions, unchecked `cd`, `rm -r "$x/"`, non-POSIX
                        constructs. Exit 0 clean, 1 findings, 2 syntax error.
   --explain CODE       explain a diagnostic code such as SH1007, with a bad and
-                       a good example
-  --list-diagnostics   list every diagnostic code
+                       a good example (one JSON object with --diagnostics=json)
+  --list-diagnostics   list every diagnostic code (the whole catalog, one JSON
+                       object per line, with --diagnostics=json)
   --diagnostics-catalog  print the full catalog as Markdown
   --help               show this help and exit
   --version            show version, license and project address, and exit

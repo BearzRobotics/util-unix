@@ -1,2 +1,2 @@
-{"code":"SH1007","kind":"mismatched_closer","severity":"error","file":"-c","line":3,"column":1,"end":3,"message":"unexpected 'fi', expected 'done' to close the 'while' started at 1:1","help":"insert 'done' where the construct should end","token":"fi","expected":"done","posix":"Syntax error: \"fi\" unexpected (expecting \"done\")"}
+{"code":"SH1007","kind":"mismatched_closer","severity":"error","file":"-c","line":3,"column":1,"end":3,"message":"unexpected 'fi', expected 'done' to close the 'while' started at 1:1","help":"insert 'done' where the construct should end","token":"fi","expected":"done","posix":"Syntax error: \"fi\" unexpected (expecting \"done\")","shellcheck":"SC1061"}
 rc=2

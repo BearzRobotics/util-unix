@@ -1,2 +1,2 @@
--c:1:1: error: division by zero in '1/0' [SH2001]
+-c:1:6: error: division by zero in '1/0' [SH2001]
 rc=2

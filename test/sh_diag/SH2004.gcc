@@ -1,2 +1,2 @@
--c:1:9: error: variable 'x' is not set [SH2004]
+-c:1:14: error: variable 'x' is not set [SH2004]
 rc=2

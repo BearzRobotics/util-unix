@@ -210,7 +210,7 @@ pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
     sh.ignoreJobSignals();
     sh.flags.monitor = true;
     if (!jobs.enable(sh, true)) {
-        sh.diagBare("can't access tty; job control turned off");
+        sh.diagBareK(.no_job_control, null, "can't access tty; job control turned off");
         sh.flags.monitor = false;
     }
     if (!sh.flags.vi and !sh.flags.emacs) sh.flags.emacs = true;
@@ -362,7 +362,7 @@ pub fn loop(s: *Session) u8 {
                     }
                     if (sh.jc and jobs.anyStopped(sh) and sh.exit_warned + 1 != sh.cmd_seq) {
                         sh.exit_warned = sh.cmd_seq;
-                        sh.diagBare("You have stopped jobs.");
+                        sh.diagBareK(.stopped_jobs, "", "You have stopped jobs.");
                         text.clearRetainingCapacity();
                         break;
                     }

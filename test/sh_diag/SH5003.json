@@ -1,2 +1,2 @@
-{"code":"SH5003","kind":"cannot_cd","severity":"error","file":"-c","line":1,"column":1,"end":3,"message":"cannot change directory to '/nonexistent'","help":"check that it exists and you may enter it","token":"","expected":"","posix":"cd: can't cd to /nonexistent"}
+{"code":"SH5003","kind":"cannot_cd","severity":"error","file":"-c","line":1,"column":1,"end":3,"message":"cannot change directory to '/nonexistent'","help":"check that it exists and you may enter it","token":"","expected":"","posix":"cd: can't cd to /nonexistent","shellcheck":null}
 rc=2

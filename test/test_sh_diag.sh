@@ -55,16 +55,31 @@ for pair in "echo )|2" "nosuch|127" "echo x > /nonexistent/f; echo \$?|0"; do
     [ "$(cat "$TMP/rc")" = "${pair#*|}" ] && ok "status ${pair%|*}" || bad "status ${pair%|*}: got $(cat "$TMP/rc")"
 done
 
-# explain, catalog and coverage
+# explain, catalog and coverage: driven by the machine-readable catalog
+"$OURS" --list-diagnostics --diagnostics=json > "$TMP/catalog.json"
 "$OURS" --list-diagnostics | while read -r c k; do
     echo "$c $k"
 done > "$TMP/codes"
+# every plain-text code appears in the JSON catalog with the same kind, and vice versa
+[ "$(wc -l < "$TMP/catalog.json")" = "$(wc -l < "$TMP/codes")" ] && ok "json catalog lists every code" || bad "json catalog differs in size from the plain list"
 while read -r c k; do
+    grep -q "^{\"code\":\"$c\",\"kind\":\"$k\"" "$TMP/catalog.json" && ok "json catalog has $c" || bad "json catalog lacks $c"
+    for field in severity exit summary message posix shellcheck help explain bad good; do
+        grep "^{\"code\":\"$c\"" "$TMP/catalog.json" | grep -q "\"$field\":" || bad "json catalog $c lacks $field"
+    done
     if "$OURS" --explain "$c" > "$TMP/exp" 2>&1 && grep -q "^$c:" "$TMP/exp"; then ok "explain $c"; else bad "explain $c"; fi
+    "$OURS" --explain "$c" --diagnostics=json | grep -q "^{\"code\":\"$c\"" && ok "explain json $c" || bad "explain json $c"
     if grep -q "## $c $k" "$HERE/../docs/sh-diagnostics.md"; then ok "catalog documents $c"; else bad "docs/sh-diagnostics.md lacks $c"; fi
-    case "$c" in SH9000|SH4003|SH4004|SH4006|SH5012|SH5013|SH5015|SH6001|SH6002) continue;; esac
+    sc=$(grep "^{\"code\":\"$c\"" "$TMP/catalog.json" | sed 's/.*"shellcheck":\([^,]*\),.*/\1/')
+    case "$sc" in null) ;; \"SC[0-9]*\") grep -q "^ShellCheck: ${sc#\"}" "$TMP/exp" 2>/dev/null || { "$OURS" --explain "$c" | grep -q "^ShellCheck: " && ok "explain names ShellCheck for $c" || bad "explain lacks the ShellCheck id of $c"; };; *) bad "bad shellcheck field of $c: $sc";; esac
+    case "$c" in SH9000|SH4004|SH4006|SH5013|SH5015|SH6001|SH6002) continue;; esac
     if grep -q "^$c	" "$D/cases.txt"; then ok "test covers $c"; else bad "no test case for $c"; fi
 done < "$TMP/codes"
+# the shellcheck id also appears in the json diagnostic of a case (SH1001 maps to SC1089)
+run_case 'echo )' json
+grep -q '"shellcheck":"SC1089"' "$TMP/err" && ok "json diagnostic carries the shellcheck id" || bad "json diagnostic lacks the shellcheck id"
+run_case 'nosuch' json
+grep -q '"shellcheck":null' "$TMP/err" && ok "json diagnostic shellcheck null when none" || bad "json diagnostic shellcheck null"
 "$OURS" --diagnostics-catalog > "$TMP/cat.md"
 cmp -s "$TMP/cat.md" "$HERE/../docs/sh-diagnostics.md" && ok "docs/sh-diagnostics.md is current" || bad "docs/sh-diagnostics.md is stale: regenerate with sh --diagnostics-catalog"
 
@@ -79,6 +94,58 @@ cmp -s "$TMP/cat.md" "$HERE/../docs/sh-diagnostics.md" && ok "docs/sh-diagnostic
 
 # colour: never without a terminal, even when asked for rich
 "$OURS" --diagnostics=rich -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && bad "no colour off a terminal" || ok "no colour off a terminal"
+
+
+# colour: --color=always forces escapes in the rich style, never suppresses
+# them, NO_COLOR is honoured by auto; off a terminal auto prints none
+"$OURS" --diagnostics=rich --color=always -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && ok "--color=always forces escapes" || bad "--color=always forces escapes"
+"$OURS" --diagnostics=rich --diagnostics-color=always -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && ok "--diagnostics-color=always" || bad "--diagnostics-color=always"
+"$OURS" --diagnostics=rich --color=never -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && bad "--color=never" || ok "--color=never"
+"$OURS" --diagnostics=rich --color=auto -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && bad "--color=auto off a terminal" || ok "--color=auto off a terminal"
+"$OURS" --color=sometimes -c : 2> /dev/null; [ $? = 2 ] && ok "--color rejects a bad value" || bad "--color rejects a bad value"
+if command -v script > /dev/null 2>&1; then
+    esc=$(printf '\033')
+    script -qec "$OURS --diagnostics=rich -c nosuch" /dev/null 2>&1 | grep -q "$esc" && ok "auto colours on a pty" || bad "auto colours on a pty"
+    NO_COLOR=1 script -qec "$OURS --diagnostics=rich -c nosuch" /dev/null 2>&1 | grep -q "$esc" && bad "NO_COLOR on a pty" || ok "NO_COLOR on a pty"
+    script -qec "$OURS --diagnostics=rich --color=never -c nosuch" /dev/null 2>&1 | grep -q "$esc" && bad "--color=never on a pty" || ok "--color=never on a pty"
+    script -qec "$OURS -c nosuch" /dev/null 2>&1 | grep -q "error\[SH4001\]" && ok "auto is rich on a pty" || bad "auto is rich on a pty"
+else
+    printf 'SKIP pty colour tests (no script(1))\n'
+fi
+
+# the environment is inherited: an inner shell under SH_DIAGNOSTICS=json prints json,
+# an explicit option on the inner shell wins
+SH_DIAGNOSTICS=json "$OURS" -c "$OURS -c 'echo )'" 2> "$TMP/err"
+grep -q '^{"code":"SH1001"' "$TMP/err" && ok "inner sh inherits SH_DIAGNOSTICS=json" || bad "inner sh inherits SH_DIAGNOSTICS=json"
+SH_DIAGNOSTICS=json "$OURS" -c "$OURS --diagnostics=posix -c 'echo )'" 2> "$TMP/err"
+grep -q 'Syntax error: ")" unexpected' "$TMP/err" && ! grep -q '^{' "$TMP/err" && ok "explicit --diagnostics on the inner shell wins" || bad "explicit --diagnostics on the inner shell wins"
+SH_DIAGNOSTICS=rich "$OURS" -c "$OURS --diagnostics=gcc -c 'echo )'" 2> "$TMP/err"
+grep -q '^-c:1:' "$TMP/err" && ok "inner --diagnostics=gcc beats SH_DIAGNOSTICS=rich" || bad "inner --diagnostics=gcc beats SH_DIAGNOSTICS=rich"
+SH_DIAGNOSTICS=rich "$OURS" --color=always -c "$OURS -c 'nosuch'" 2>&1 | grep -q "$(printf '\033')" && bad "colour is not inherited off a terminal" || ok "colour is not inherited off a terminal"
+
+# stable exit status and stdout: the style and the terminal never change what a
+# script observes, only the text of stderr
+for snippet in 'echo before; echo )' 'echo before; nosuch; echo after' 'echo before; echo x > notexec.f; ./notexec.f; echo after' \
+    'echo before; set -e; false; echo after' 'echo before; set -u; echo $nope; echo after' 'echo before; echo ${x!}; echo after' \
+    'echo before; echo $((1/0)); echo after' 'echo before; readonly r=1; r=2; echo after' 'echo before; cat < /nonexistent/f; echo after' \
+    'echo before; while true; do echo x; fi' 'echo before; echo ${y?need}; echo after'; do
+    ref=""
+    for style in posix rich json gcc; do
+        for term in notty pty; do
+            rm -rf "$TMP/w"; mkdir -p "$TMP/w"
+            if [ "$term" = pty ]; then
+                command -v script > /dev/null 2>&1 || continue
+                (cd "$TMP/w" && script -qec "$OURS --diagnostics=$style -c '$snippet' 2>/dev/null; echo rc=\$?" /dev/null > "$TMP/o" < /dev/null)
+                got="$(tr -d '\r' < "$TMP/o")"
+            else
+                (cd "$TMP/w" && "$OURS" --diagnostics="$style" -c "$snippet" > "$TMP/o" 2> /dev/null < /dev/null; echo "rc=$?" >> "$TMP/o")
+                got="$(cat "$TMP/o")"
+            fi
+            [ -z "$ref" ] && ref="$got"
+            if [ "$got" = "$ref" ]; then ok "stable status+stdout [$style $term] $snippet"; else bad "status/stdout differ [$style $term] $snippet"; fi
+        done
+    done
+done
 
 printf '\n======================================\n'
 printf ' sh diagnostics: %d/%d passed\n' "$PASS" "$((PASS + FAIL))"

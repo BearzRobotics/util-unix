@@ -1,2 +1,2 @@
-{"code":"SH5014","kind":"no_such_job","severity":"error","file":"-c","line":1,"column":1,"end":3,"message":"current job: no such job","help":"`jobs` lists the jobs; a specification is `%n`, `%%`, `%+`, `%-`, `%string` or `%?string`","token":"","expected":"","posix":"fg: No current job"}
+{"code":"SH5014","kind":"no_such_job","severity":"error","file":"-c","line":1,"column":1,"end":3,"message":"current job: no such job","help":"`jobs` lists the jobs; a specification is `%n`, `%%`, `%+`, `%-`, `%string` or `%?string`","token":"","expected":"","posix":"fg: No current job","shellcheck":null}
 rc=1

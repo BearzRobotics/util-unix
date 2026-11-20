@@ -1,2 +1,2 @@
-{"code":"SH1009","kind":"bad_function_name","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"'eval' cannot be used as a function name","help":"choose another name: special builtins such as eval, set or exit cannot be redefined as functions","token":"eval","expected":"","posix":"Syntax error: Bad function name"}
+{"code":"SH1009","kind":"bad_function_name","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"'eval' cannot be used as a function name","help":"choose another name: special builtins such as eval, set or exit cannot be redefined as functions","token":"eval","expected":"","posix":"Syntax error: Bad function name","shellcheck":null}
 rc=2

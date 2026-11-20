@@ -1,2 +1,2 @@
-{"code":"SH2004","kind":"unset_variable","severity":"error","file":"-c","line":1,"column":9,"end":13,"message":"variable 'x' is not set","help":"assign it first or use `${name-default}`","token":"","expected":"","posix":"x: parameter not set"}
+{"code":"SH2004","kind":"unset_variable","severity":"error","file":"-c","line":1,"column":14,"end":16,"message":"variable 'x' is not set","help":"assign it first or use `${name-default}`","token":"","expected":"","posix":"x: parameter not set","shellcheck":"SC2154"}
 rc=2

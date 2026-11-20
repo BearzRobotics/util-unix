@@ -1,6 +1,6 @@
-sh: -c:1:1: error[SH3003]: file descriptor 9 is not open
+sh: -c:1:11: error[SH3003]: file descriptor 9 is not open
   |
 1 | echo hi >&9
-  | ^^^^
+  |           ^
 help: open it first with `exec N>file`, or redirect to an existing one
 rc=2

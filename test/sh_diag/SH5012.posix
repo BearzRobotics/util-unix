@@ -1,0 +1,2 @@
+sh: 1: ulimit: error setting limit (Operation not permitted)
+rc=2

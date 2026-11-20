@@ -1,2 +1,2 @@
-{"code":"SH3004","kind":"noclobber","severity":"error","file":"-c","line":1,"column":21,"end":25,"message":"'f' exists and `set -C` (noclobber) is on","help":"use `>|` to overwrite on purpose, or `>>` to append","token":"","expected":"","posix":"cannot create f: File exists"}
+{"code":"SH3004","kind":"noclobber","severity":"error","file":"-c","line":1,"column":30,"end":31,"message":"'f' exists and `set -C` (noclobber) is on","help":"use `>|` to overwrite on purpose, or `>>` to append","token":"","expected":"","posix":"cannot create f: File exists","shellcheck":null}
 rc=2

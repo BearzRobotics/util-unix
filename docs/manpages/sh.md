@@ -78,11 +78,17 @@ Bold type is literal text. Italic or uppercase names are values you supply. A di
 --diagnostics=STYLE
 : How diagnostics are written to standard error: **posix** (dash's one-line wording), **rich** (see DIAGNOSTICS), **json** (one object per line), **gcc** (file:line:column: severity: message) or **auto**. The environment variable SH_DIAGNOSTICS supplies a default. Default **auto**: rich when standard error is a terminal, posix otherwise. Colour is used only in the rich style, only on a terminal and never when NO_COLOR is set. The style never changes standard output, exit statuses or any behaviour POSIX specifies.
 
---explain CODE
-: Print the long explanation of a diagnostic (for example `sh --explain SH1007`) with a bad and a good example.
+--color=WHEN, --diagnostics-color=WHEN
+: Colour of the rich style: **auto** (the default: only when standard error is a terminal and NO_COLOR is not set), **always** (escapes even off a terminal, also with NO_COLOR) or **never**. The other styles never use colour.
 
---diagnostics-catalog, --list-diagnostics
-: Print the catalog as markdown (the source of docs/sh-diagnostics.md) or the code and kind per line.
+--explain CODE
+: Print the long explanation of a diagnostic (for example `sh --explain SH1007`) with a bad and a good example, and the ShellCheck id where one exists. With `--diagnostics=json` one JSON object with the keys code, kind, severity, exit, summary, message, posix, shellcheck, help, explain, bad and good.
+
+--diagnostics-catalog
+: Print the catalog as markdown (the source of docs/sh-diagnostics.md).
+
+--list-diagnostics
+: Print the code and kind of every diagnostic, one per line; with `--diagnostics=json` the whole catalog, one object (as for --explain) per line.
 
 --help, --version
 : Print and exit 0.
@@ -157,23 +163,25 @@ Special builtins (an error in one exits a non-interactive shell; their variable 
 | eval exec exit | `exec` with only redirections makes them permanent |
 | export readonly | `-p` lists |
 | return set shift | `set -o` names listed under OPTIONS |
-| times trap unset | `trap` accepts signal names and numbers and `EXIT` |
+| times trap unset | `trap` accepts signal names and numbers and `EXIT`; `trap -l` lists the signals; `trap` with no operands in a subshell reports the parent's traps (POSIX.1-2024) |
 
 Regular builtins:
 
 | Name | Notes |
 |------|-------|
-| alias unalias | expansion at command position |
+| alias unalias | expansion at every command and reserved-word position; a value ending in a blank makes the next word eligible too |
 | cd pwd | `-L` `-P`, CDPATH, OLDPWD |
 | command type hash | `command -v -V -p` |
-| echo printf | `echo` is dash's (XSI escapes, only `-n`); `printf` supports `d i u o x X c s b %`, flags, width, precision |
+| echo printf | `echo` is dash's (XSI escapes, only `-n`); `printf` supports `d i u o x X c s b %` and the floating conversions `e E f F g G a A` (exact, round-half-even as C), flags, width, precision |
 | getopts read test [ | the POSIX argument-count rules for `test` |
-| kill wait umask ulimit jobs fg bg fc | `ulimit` supports -c -d -f -n -s -t -v -m, -S, -H |
+| kill wait umask ulimit jobs fg bg fc | `umask` takes an octal or a symbolic mode (`umask u=rwx,g=rx,o=`, `-S` prints it); `ulimit` supports -c -d -f -n -s -t -v -m, -S, -H |
 | true false local | `local` is not POSIX; see CHECK MODE |
 
 # ENVIRONMENT
 
-HOME, PATH, IFS, PWD, OLDPWD, PS1, PS2, PS4, OPTIND, OPTARG, CDPATH, PPID, ENV, HISTFILE, HISTSIZE and FCEDIT are used or set as POSIX describes (TMOUT and MAIL are not implemented). SH_DIAGNOSTICS and NO_COLOR affect only the diagnostics style.
+HOME, PATH, IFS, PWD, OLDPWD, PS1, PS2, PS4, OPTIND, OPTARG, CDPATH, PPID, ENV, HISTFILE, HISTSIZE and FCEDIT are used or set as POSIX describes (TMOUT and MAIL are not implemented). PS4 is expanded (parameters, command substitution, arithmetic) each time it is printed.
+
+SH_DIAGNOSTICS (`posix`, `rich`, `json`, `gcc`) is the default of `--diagnostics`. Like every variable it is inherited: when it is set to `json`, a `sh -c` started by a script also prints JSON. An explicit `--diagnostics=STYLE` or `--color=WHEN` on the inner shell wins over the environment, and the colour setting is not inherited (it is decided from the terminal and NO_COLOR of each shell). NO_COLOR (any value) turns colour off in `auto` mode. These variables change only what is written to standard error, never standard output or an exit status.
 
 # EXIT STATUS
 
@@ -285,6 +293,10 @@ Each row is an improvement of a message or a deliberate choice; stdout and the e
 | Descriptor numbers of two or more digits (`exec 10>f`) | rejected (`exec: 10: not found`) | accepted, per POSIX 2.7 |
 | `$((` without a matching `))` | `Missing '))'` | same |
 | Here-document ended by end of input | no warning | warning SH1003 in rich and json styles; posix style is silent |
+
+The first word of the header is always the program (`sh`), then the script as it was named on the command line; the posix style keeps dash's `$0: line: message`. The caret underlines the offending part (the redirection target, the `${...}` or `$((...))` expansion, the command word), not only the command word.
+
+A script on standard input is read and run command by command, 8192 bytes at a time as dash does: a command such as `cat` or `read` sees the input the shell has not yet buffered.
 
 # EXAMPLES
 

@@ -1,2 +1,2 @@
-{"code":"SH1004","kind":"unterminated_command_substitution","severity":"error","file":"-c","line":1,"column":6,"end":8,"message":"unterminated command substitution (opened at line 1, column 6)","help":"add the closing `)`","token":"","expected":"","posix":"Syntax error: end of file unexpected (expecting \")\")"}
+{"code":"SH1004","kind":"unterminated_command_substitution","severity":"error","file":"-c","line":1,"column":6,"end":8,"message":"unterminated command substitution (opened at line 1, column 6)","help":"add the closing `)`","token":"","expected":"","posix":"Syntax error: end of file unexpected (expecting \")\")","shellcheck":"SC1073"}
 rc=2

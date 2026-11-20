@@ -150,7 +150,7 @@ fn clamp(h: *const History, n: u64) u64 {
 
 pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     const hreal = sh.history orelse {
-        sh.diagCmd("fc", "history not active", .{});
+        sh.diagCmdK(.history_error, null, "fc", "history not active", .{});
         return 1;
     };
     // The command line that runs `fc` is already the newest entry: hide it.
@@ -185,7 +185,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     } else {
                         i += 1;
                         if (i >= args.len) {
-                            sh.diagCmd("fc", "option requires an argument -- e", .{});
+                            sh.diagCmdK(.usage, null, "fc", "option requires an argument -- e", .{});
                             return 2;
                         }
                         editor = args[i];
@@ -193,7 +193,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     j = arg.len;
                 },
                 else => {
-                    sh.diagCmd("fc", "Illegal option -{c}", .{arg[j]});
+                    sh.diagCmdK(.illegal_option, &[_]u8{ '-', arg[j] }, "fc", "Illegal option -{c}", .{arg[j]});
                     return 2;
                 },
             }
@@ -206,7 +206,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     const ops = args[i..];
     if (h.entries.items.len == 0) {
         if (list) return 0;
-        sh.diagCmd("fc", "history is empty", .{});
+        sh.diagCmdK(.history_error, null, "fc", "history is empty", .{});
         return 1;
     }
 
@@ -223,7 +223,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         if (k < ops.len) switch (resolveOperand(h, ops[k])) {
             .num => |n| num = clamp(h, n),
             else => {
-                sh.diagCmd("fc", "history pattern not found: {s}", .{ops[k]});
+                sh.diagCmdK(.history_error, null, "fc", "history pattern not found: {s}", .{ops[k]});
                 return 1;
             },
         };
@@ -241,7 +241,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var first_n: u64 = if (list) (if (last_num >= h.first + 15) last_num - 15 else h.first) else last_num;
     var last_n: u64 = last_num;
     if (ops.len > 2) {
-        sh.diagCmd("fc", "too many arguments", .{});
+        sh.diagCmdK(.usage, null, "fc", "too many arguments", .{});
         return 2;
     }
     if (ops.len >= 1) switch (resolveOperand(h, ops[0])) {
@@ -250,14 +250,14 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             if (ops.len < 2) last_n = if (list) last_num else first_n;
         },
         else => {
-            sh.diagCmd("fc", "history pattern not found: {s}", .{ops[0]});
+            sh.diagCmdK(.history_error, null, "fc", "history pattern not found: {s}", .{ops[0]});
             return 1;
         },
     };
     if (ops.len == 2) switch (resolveOperand(h, ops[1])) {
         .num => |n| last_n = clamp(h, n),
         else => {
-            sh.diagCmd("fc", "history pattern not found: {s}", .{ops[1]});
+            sh.diagCmdK(.history_error, null, "fc", "history pattern not found: {s}", .{ops[1]});
             return 1;
         },
     };
@@ -295,7 +295,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     const tmpdir = sh.getVar("TMPDIR") orelse "/tmp";
     const path = std.fmt.allocPrint(a, "{s}/sh-fc.{d}", .{ tmpdir, sys.getpid() }) catch return 2;
     const fd = sys.open(path, .{ .read = false, .write = true, .create = true, .trunc = true, .cloexec = true }, 0o600) catch {
-        sh.diagCmd("fc", "cannot create {s}", .{path});
+        sh.diagCmdK(.cannot_create, path, "fc", "cannot create {s}", .{path});
         return 1;
     };
     sys.writeAll(fd, body.items) catch {};

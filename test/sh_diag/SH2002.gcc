@@ -1,2 +1,2 @@
--c:1:1: error: arithmetic expression: expecting primary: "1+" [SH2002]
+-c:1:6: error: arithmetic expression: expecting primary: "1+" [SH2002]
 rc=2

@@ -12,6 +12,7 @@ pub const ast = @import("sh/ast.zig");
 pub const lexer = @import("sh/lexer.zig");
 pub const parser = @import("sh/parser.zig");
 pub const arith = @import("sh/arith.zig");
+pub const fmtfloat = @import("sh/fmtfloat.zig");
 pub const pattern = @import("sh/pattern.zig");
 pub const expand = @import("sh/expand.zig");
 pub const exec = @import("sh/exec.zig");
@@ -38,6 +39,7 @@ test {
     _ = lexer;
     _ = parser;
     _ = arith;
+    _ = fmtfloat;
     _ = pattern;
     _ = expand;
     _ = exec;

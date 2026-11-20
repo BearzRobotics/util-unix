@@ -1,2 +1,2 @@
-{"code":"SH5004","kind":"bad_trap","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"'NOSUCH' is not a signal","help":"use `kill -l` to list names; `trap` also accepts numbers and `EXIT`","token":"","expected":"","posix":"trap: NOSUCH: bad trap"}
+{"code":"SH5004","kind":"bad_trap","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"'NOSUCH' is not a signal","help":"use `kill -l` to list names; `trap` also accepts numbers and `EXIT`","token":"","expected":"","posix":"trap: NOSUCH: bad trap","shellcheck":null}
 rc=1

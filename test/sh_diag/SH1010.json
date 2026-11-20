@@ -1,2 +1,2 @@
-{"code":"SH1010","kind":"missing_redirect_target","severity":"error","file":"-c","line":1,"column":7,"end":8,"message":"redirection '>' needs a file name or descriptor","help":"write the target after the operator, e.g. `> file` or `>&2`","token":"","expected":">","posix":"Syntax error: end of file unexpected"}
+{"code":"SH1010","kind":"missing_redirect_target","severity":"error","file":"-c","line":1,"column":7,"end":8,"message":"redirection '>' needs a file name or descriptor","help":"write the target after the operator, e.g. `> file` or `>&2`","token":"","expected":">","posix":"Syntax error: end of file unexpected","shellcheck":"SC1073"}
 rc=2

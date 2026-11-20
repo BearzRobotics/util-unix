@@ -18,6 +18,7 @@ const ast = @import("ast.zig");
 const arith = @import("arith.zig");
 const pattern = @import("pattern.zig");
 const lexer = @import("lexer.zig");
+const diagmod = @import("diag.zig");
 const exec = @import("exec.zig");
 const shell = @import("shell.zig");
 const Shell = shell.Shell;
@@ -28,6 +29,9 @@ pub const Error = error{ Fatal, OutOfMemory };
 const lit: u8 = 0;
 const quoted: u8 = 1;
 const field: u8 = 2;
+/// Zero-width mark of an empty quoted part (`''`, `""`): it keeps a field
+/// alive and separates it from neighbouring split results; never output.
+const empty_q: u8 = 3;
 
 const FieldBuf = struct {
     b: std.ArrayList(u8) = .empty,
@@ -76,8 +80,8 @@ const X = struct {
 
 /// Report a fatal expansion error: the (non-interactive) shell exits with
 /// status 2, as dash does.
-pub fn fatal(sh: *Shell, comptime fmt: []const u8, args: anytype) Error {
-    sh.diag(fmt, args);
+pub fn fatal(sh: *Shell, kind: diagmod.Kind, subject: ?[]const u8, comptime fmt: []const u8, args: anytype) Error {
+    sh.diagK(kind, subject, fmt, args);
     sh.status = 2;
     sh.flow = .exit_shell;
     return error.Fatal;
@@ -115,6 +119,7 @@ fn stringMode(sh: *Shell, a: Allocator, w: ast.Word, assign: bool, as_pattern: b
     for (w) |p| try part(&x, p, lit);
     var out: std.ArrayList(u8) = .empty;
     for (x.cur.b.items, x.cur.f.items) |c, fl| {
+        if (fl == empty_q) continue;
         if (as_pattern and fl == quoted and isPatternSpecial(c)) try out.append(a, '\\');
         try out.append(a, c);
     }
@@ -134,7 +139,7 @@ fn part(x: *X, p: ast.Part, text_flag: u8) Error!void {
     switch (p) {
         .text => |t| try x.putAll(t, text_flag),
         .quoted => |t| {
-            try x.putAll(t, quoted);
+            if (t.len == 0) try x.put(0, empty_q) else try x.putAll(t, quoted);
             x.marker = true;
         },
         .tilde => |u| try tilde(x, u, false),
@@ -174,7 +179,7 @@ const ArithHost = struct {
 pub fn evalArith(sh: *Shell, text: []const u8) Error!i64 {
     var h: ArithHost = .{ .sh = sh };
     var ev: arith.Evaluator = .{ .host = .{ .ctx = &h, .get = ArithHost.get, .set = ArithHost.set }, .text = text };
-    return ev.run() catch return fatal(sh, "{s}", .{ev.message()});
+    return ev.run() catch return fatal(sh, ev.kind, ev.subject, "{s}", .{ev.message()});
 }
 
 fn homeOf(sh: *Shell, a: Allocator, user: []const u8) ?[]const u8 {
@@ -274,13 +279,15 @@ fn ifsFirst(sh: *Shell) ?u8 {
 fn emit(x: *X, pv: PV, name: []const u8, is_quoted: bool) Error!void {
     const fl: u8 = if (is_quoted) quoted else field;
     switch (pv) {
-        .unset => {},
+        .unset => if (is_quoted and !(name.len > 0 and name[0] == '@')) {
+            x.marker = true; // "$unset" is one empty field
+        },
         .one => |v| {
             try x.putAll(v, fl);
             if (is_quoted) x.marker = true;
         },
         .many => |list| {
-            if (name[0] == '*' and is_quoted) {
+            if (name.len > 0 and name[0] == '*' and is_quoted) {
                 var first = true;
                 const sep = ifsFirst(x.sh);
                 for (list) |v| {
@@ -318,8 +325,14 @@ fn joined(x: *X, pv: PV) Error![]const u8 {
 
 fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
     const sh = x.sh;
+    if (p.op == .bad_subst) {
+        sh.diagKind(.bad_substitution, p.name, "Bad substitution");
+        sh.status = 2;
+        sh.flow = .exit_shell;
+        return error.Fatal;
+    }
     const pv = try lookup(x, p.name);
-    const multi = p.name[0] == '@' or p.name[0] == '*';
+    const multi = p.name.len > 0 and (p.name[0] == '@' or p.name[0] == '*');
     const is_unset = switch (pv) {
         .unset => true,
         .many => |l| l.len == 0,
@@ -346,11 +359,11 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
             return error.Fatal;
         },
         .plain => {
-            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, "{s}: parameter not set", .{p.name});
+            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
             try emit(x, pv, p.name, p.quoted);
         },
         .length => {
-            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, "{s}: parameter not set", .{p.name});
+            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
             const n: usize = switch (pv) {
                 .unset => 0,
                 .one => |v| v.len,
@@ -365,6 +378,7 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
             if (missing) {
                 const tf: u8 = if (p.quoted) quoted else field;
                 for (p.arg) |ap| try part(x, ap, tf);
+                if (p.quoted) x.marker = true;
             } else try emit(x, pv, p.name, p.quoted);
         },
         .use_alternate => {
@@ -372,14 +386,14 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
                 const tf: u8 = if (p.quoted) quoted else field;
                 for (p.arg) |ap| try part(x, ap, tf);
                 if (p.arg.len == 0 and p.quoted) x.marker = true;
-            } else if (p.quoted and false) {}
+            } else if (p.quoted) x.marker = true;
         },
         .assign_default => {
             if (missing) {
-                if (!lexer.isName(p.name)) return fatal(sh, "{s}: cannot assign in this way", .{p.name});
+                if (!lexer.isName(p.name)) return fatal(sh, .cannot_assign, p.name, "{s}: cannot assign in this way", .{p.name});
                 const v = try stringMode(sh, x.a, p.arg, false, false);
                 sh.setVar(p.name, v) catch |e| switch (e) {
-                    error.ReadOnly => return fatal(sh, "{s}: is read only", .{p.name}),
+                    error.ReadOnly => return fatal(sh, .readonly_assignment, p.name, "{s}: is read only", .{p.name}),
                     error.OutOfMemory => return error.OutOfMemory,
                 };
                 try x.putAll(v, if (p.quoted) quoted else field);
@@ -390,8 +404,8 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
             if (missing) {
                 const msg = try stringMode(sh, x.a, p.arg, false, false);
                 if (p.arg.len == 0) {
-                    if (p.colon) return fatal(sh, "{s}: parameter null or not set", .{p.name});
-                    return fatal(sh, "{s}: parameter not set", .{p.name});
+                    if (p.colon) return fatal(sh, .parameter_error, null, "{s}: parameter null or not set", .{p.name});
+                    return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
                 }
                 var kb: [512]u8 = undefined;
                 const text = std.fmt.bufPrint(&kb, "{s}: {s}", .{ p.name, msg }) catch p.name;
@@ -403,7 +417,7 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
             try emit(x, pv, p.name, p.quoted);
         },
         .trim_prefix_small, .trim_prefix_large, .trim_suffix_small, .trim_suffix_large => {
-            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, "{s}: parameter not set", .{p.name});
+            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
             const v = try joined(x, pv);
             const pat = try stringMode(sh, x.a, p.arg, false, true);
             const r = trim(v, pat, p.op);
@@ -474,6 +488,7 @@ fn splitAndGlob(x: *X, fb: FieldBuf, out: *std.ArrayList([]const u8)) Error!void
             const c = b[i];
             if (f[i] == field and std.mem.indexOfScalar(u8, ifs, c) != null) {
                 if (isWs(ifs, c)) {
+                    const was_have = have;
                     if (have) {
                         try pieces.append(x.a, cur);
                         cur = .{};
@@ -482,6 +497,8 @@ fn splitAndGlob(x: *X, fb: FieldBuf, out: *std.ArrayList([]const u8)) Error!void
                     i += 1;
                     while (i < b.len and f[i] == field and isWs(ifs, b[i])) i += 1;
                     if (i < b.len and f[i] == field and std.mem.indexOfScalar(u8, ifs, b[i]) != null and !isWs(ifs, b[i])) {
+                        // leading white space then a delimiter: an empty field before it
+                        if (!was_have and pieces.items.len == 0) try pieces.append(x.a, .{});
                         i += 1;
                         while (i < b.len and f[i] == field and isWs(ifs, b[i])) i += 1;
                     }
@@ -501,7 +518,24 @@ fn splitAndGlob(x: *X, fb: FieldBuf, out: *std.ArrayList([]const u8)) Error!void
         }
         if (have) try pieces.append(x.a, cur);
     }
-    for (pieces.items) |pc| try glob(sh, x.a, pc, out);
+    for (pieces.items) |pc| {
+        var has_mark = false;
+        for (pc.f.items) |fl| if (fl == empty_q) {
+            has_mark = true;
+            break;
+        };
+        if (!has_mark) {
+            try glob(sh, x.a, pc, out);
+            continue;
+        }
+        var clean: FieldBuf = .{};
+        for (pc.b.items, pc.f.items) |c, fl| {
+            if (fl == empty_q) continue;
+            try clean.b.append(x.a, c);
+            try clean.f.append(x.a, fl);
+        }
+        try glob(sh, x.a, clean, out);
+    }
 }
 
 fn glob(sh: *Shell, a: Allocator, fb: FieldBuf, out: *std.ArrayList([]const u8)) Error!void {

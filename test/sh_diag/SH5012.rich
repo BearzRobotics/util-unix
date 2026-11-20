@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5012]: ulimit: error setting limit (Operation not permitted)
+  |
+1 | ulimit -n 2000000000
+  | ^^^^^^
+help: the hard limit cannot be raised without privilege
+rc=2

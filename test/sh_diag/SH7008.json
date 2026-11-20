@@ -1,2 +1,2 @@
-{"code":"SH7008","kind":"lint_echo_option","severity":"warning","file":"s.sh","line":1,"column":1,"end":5,"message":"`echo -e` prints the option itself in some shells and escapes in others","help":"use `printf`","token":"","expected":"","posix":"`echo -e`/`-E` is not portable"}
+{"code":"SH7008","kind":"lint_echo_option","severity":"warning","file":"s.sh","line":1,"column":1,"end":5,"message":"`echo -e` prints the option itself in some shells and escapes in others","help":"use `printf`","token":"","expected":"","posix":"`echo -e`/`-E` is not portable","shellcheck":"SC3037"}
 rc=1

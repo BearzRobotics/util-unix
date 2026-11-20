@@ -1,2 +1,2 @@
-{"code":"SH7009","kind":"lint_double_equals","severity":"warning","file":"s.sh","line":1,"column":1,"end":2,"message":"'==' is a bash extension in `[`; POSIX has `=`","help":"use `=`","token":"","expected":"","posix":"`==` in `[` is not POSIX"}
+{"code":"SH7009","kind":"lint_double_equals","severity":"warning","file":"s.sh","line":1,"column":1,"end":2,"message":"'==' is a bash extension in `[`; POSIX has `=`","help":"use `=`","token":"","expected":"","posix":"`==` in `[` is not POSIX","shellcheck":"SC3014"}
 rc=1

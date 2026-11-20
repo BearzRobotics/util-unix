@@ -14,9 +14,9 @@ const Allocator = std.mem.Allocator;
 /// Report a failed specification; returns false.
 pub fn specError(sh: *Shell, cmd: []const u8, spec: []const u8, err: jobs.SpecError) void {
     switch (err) {
-        .no_current => sh.diagCmd(cmd, "No current job", .{}),
-        .ambiguous => sh.diagCmd(cmd, "{s}: Ambiguous", .{spec}),
-        else => sh.diagCmd(cmd, "No such job: {s}", .{spec}),
+        .no_current => sh.diagCmdK(.no_such_job, "current job", cmd, "No current job", .{}),
+        .ambiguous => sh.diagCmdK(.ambiguous_job, spec, cmd, "{s}: Ambiguous", .{spec}),
+        else => sh.diagCmdK(.no_such_job, spec, cmd, "No such job: {s}", .{spec}),
     }
 }
 
@@ -34,7 +34,7 @@ pub fn jobsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             'l' => mode = .long,
             'p' => mode = .pids,
             else => {
-                sh.diagCmd("jobs", "Illegal option -{c}", .{c});
+                sh.diagCmdK(.illegal_option, &[_]u8{ '-', c }, "jobs", "Illegal option -{c}", .{c});
                 return 2;
             },
         };
@@ -76,7 +76,7 @@ pub fn jobsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 
 fn resumeJob(sh: *Shell, cmd: []const u8, args: []const []const u8, fg: bool) u8 {
     if (args.len > 2) {
-        sh.diagCmd(cmd, "too many arguments", .{});
+        sh.diagCmdK(.usage, null, cmd, "too many arguments", .{});
         return 2;
     }
     jobs.update(sh);
@@ -87,7 +87,7 @@ fn resumeJob(sh: *Shell, cmd: []const u8, args: []const []const u8, fg: bool) u8
         return 1;
     };
     if (!fg and j.state() == .running) {
-        sh.diagCmd(cmd, "job {d} already in background", .{j.id});
+        sh.diagCmdK(.usage, null, cmd, "job {d} already in background", .{j.id});
         return 0;
     }
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
@@ -154,7 +154,7 @@ pub fn waitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             pid_found = job.?.lastPid();
         } else {
             const pid = std.fmt.parseInt(i32, arg, 10) catch {
-                sh.diagCmd("wait", "Illegal number: {s}", .{arg});
+                sh.diagCmdK(.illegal_number, arg, "wait", "Illegal number: {s}", .{arg});
                 return 2;
             };
             for (sh.jobs.items) |j| for (j.procs.items) |p| if (p.pid == pid) {
@@ -212,13 +212,13 @@ pub fn killJob(sh: *Shell, spec: []const u8, sig: u8) ?u8 {
     };
     if (j.grouped and j.pgid != 0) {
         sys.killpg(j.pgid, sig) catch {
-            sh.diagCmd("kill", "{s}", .{sys.strerror(sys.errno())});
+            sh.diagCmdK(.kill_error, null, "kill", "{s}", .{sys.strerror(sys.errno())});
             return 1;
         };
     } else for (j.procs.items) |p| {
         if (p.state == .done) continue;
         sys.kill(p.pid, sig) catch {
-            sh.diagCmd("kill", "{s}", .{sys.strerror(sys.errno())});
+            sh.diagCmdK(.kill_error, null, "kill", "{s}", .{sys.strerror(sys.errno())});
             return 1;
         };
     }

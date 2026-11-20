@@ -1,6 +1,6 @@
-sh: -c:1:1: error[SH2005]: x: need x
+sh: -c:1:6: error[SH2005]: x: need x
   |
 1 | echo ${x?need x}
-  | ^^^^
+  |      ^^^^^^^^^^^
 help: set the variable or catch the error with `${name-default}`
 rc=2

@@ -1,2 +1,2 @@
-{"code":"SH5011","kind":"alias_not_found","severity":"error","file":"-c","line":1,"column":1,"end":8,"message":"no alias named 'nosuch'","help":"`alias` with no arguments lists the defined aliases","token":"","expected":"","posix":"unalias: nosuch: not found"}
+{"code":"SH5011","kind":"alias_not_found","severity":"error","file":"-c","line":1,"column":1,"end":8,"message":"no alias named 'nosuch'","help":"`alias` with no arguments lists the defined aliases","token":"","expected":"","posix":"unalias: nosuch: not found","shellcheck":null}
 rc=1

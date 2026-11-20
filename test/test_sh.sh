@@ -522,7 +522,7 @@ c "trap dollar question in handler" 'trap "echo [\$?]" EXIT; false' B
 c "trap bad signal" 'trap "echo x" NOSUCHSIG; echo "rc=$?"' e
 c "trap EXIT zero" 'trap "echo z" 0; echo main' B
 cx "trap numeric reset" 'trap "echo x" EXIT; trap 0; echo done' B
-c "trap in subshell reset" 'trap "echo parent" USR1; (trap; echo in) ' B
+c "trap in subshell reset" 'trap "echo parent" USR1; (trap; echo in) ' BP "POSIX.1-2024 trap: a subshell reports the parent's traps; dash and FreeBSD sh print nothing (deviation recorded in docs/posix-shell-differences.md)."
 
 # ---- eval / dot / exec / command / type ----
 c "eval simple" 'eval echo hi' B
@@ -733,6 +733,53 @@ c "times" 'times | wc -l' B
 c "ulimit -n" 'ulimit -n | grep -c "^[0-9]"' B
 c "ulimit -f unlimited or number" 'ulimit -f | grep -c .' B
 c "umask bad" 'umask 999; echo "rc=$?"' e
+c "umask symbolic assignment" 'umask 022; umask u=rwx,g=rx,o=; umask; umask -S' BP
+c "umask symbolic add and remove" 'umask 077; umask g+rx; umask; umask o+w; umask; umask a-w; umask' B
+c "umask symbolic copy" 'umask 022; umask g=u; umask; umask o=g; umask' B
+c "umask symbolic bad mode" 'umask q=r; echo "rc=$?"' Be
+c "umask -S sets" 'umask -S u=rwx,g=,o=; umask' B
+cx "trap -l is accepted" 'trap -l > /dev/null; echo "rc=$?"' Pe "POSIX.1-2024 adds trap -l; dash rejects the option (status 2)."
+c "trap in a subshell sees the parent" 'trap "echo bye" EXIT; trap "echo usr" USR1; (trap | sort)' BP "POSIX.1-2024: the subshell reports the parent's traps."
+c "trap in command substitution" 'trap "echo a" USR1; x=$(trap); echo "$x"' BP
+c "alias ending in a blank expands the next word" 'alias a="echo "
+alias b="echo c"
+a b' B
+c "alias ending in a blank, twice" 'alias a="echo "
+alias b=hello
+a b b' B
+c "alias without a trailing blank" 'alias a="echo"
+alias b=hello
+a b' B
+c "alias blank chain" 'alias a="b "
+alias b="echo "
+alias c=X
+a c c' B
+c "alias blank reaches only the next word" 'alias a="echo "
+alias b=B
+alias c=C
+a b c' B
+cx "heredoc ended by end of input" 'cat <<EOF
+abc' B
+cx "heredoc ended by end of input after newline" 'cat <<EOF
+abc
+' B
+cx "heredoc end of input, two bodies" 'cat <<EOF; cat <<EOG
+one
+EOF
+two' B
+c "printf %f" 'printf "%f %.2f %10.3f|%-10.1f|\n" 3.14159 2.5 1.0005 7' e
+c "printf %e" 'printf "%e %.0e %.3E\n" 12345.678 5 0.000123456' e
+c "printf %g" 'printf "%g %g %g %.3g %G\n" 100000 1000000 0.0001 3.14159 1e-10' e
+c "printf %a" 'printf "%a %A %.2a\n" 1 0.5 3.14159' e
+c "printf float rounding" 'printf "%.0f %.0f %.0f %.0f %.1f %.2f\n" 0.5 1.5 2.5 3.5 0.25 1.005' e
+c "printf float flags" 'printf "%+f|% f|%08.3f|%-8.2f|%#.0f\n" 1.5 1.5 -1.5 1.5 3' e
+c "printf float huge and tiny" 'printf "%f\n%e\n%.20g\n" 1e30 1e-300 0.1' e
+c "printf float non-number" 'printf "%f\n" abc; echo "rc=$?"' e
+c "printf float partial" 'printf "%f\n" 1.5x; echo "rc=$?"' e
+c "printf float char code" "printf '%f\\n' \"'A\"" e
+c "printf float inf nan" 'printf "%f %e %g %F\n" inf -inf nan INF' e
+c "printf float hex input" 'printf "%f %f\n" 0x10 0x1p-2' e
+c "printf float missing argument" 'printf "%f|%e|%g\n"' e
 
 # ---- lexical and grammar corner cases ----
 c "semicolon after brace group" '{ echo a; }; echo b' B
@@ -838,6 +885,65 @@ c "sh -c with dollar zero" 'sh -c "echo \$0" myname' B
 # These probe behaviour POSIX leaves undefined or that bash/ksh scripts rely
 # on; they are excluded from the shellcheck hygiene check (shellcheck -s dash
 # rightly flags them) and compare only against references where it matters.
+
+# ---- script on standard input is run incrementally (compared with dash only) ----
+stdin_case() {
+    desc="$1"; input="$2"; shift 2
+    printf '%s' "$input" | (cd "$TEST_TMP" && "$OURS" "$@") > "$TEST_TMP/si.ours" 2>&1; ro=$?
+    printf '%s' "$input" | (cd "$TEST_TMP" && /usr/bin/dash "$@") > "$TEST_TMP/si.dash" 2>&1; rd=$?
+    sed -e 's#^[^: ]*: [0-9]*: #sh: #' "$TEST_TMP/si.ours" > "$TEST_TMP/si.o2"
+    sed -e 's#^[^: ]*: [0-9]*: #sh: #' "$TEST_TMP/si.dash" > "$TEST_TMP/si.d2"
+    if [ "$ro" = "$rd" ] && cmp -s "$TEST_TMP/si.o2" "$TEST_TMP/si.d2"; then
+        PASS=$((PASS + 1)); printf 'PASS stdin: %s\n' "$desc"
+    else
+        FAIL=$((FAIL + 1)); printf 'FAIL stdin: %s (ours rc=%s dash rc=%s)\n' "$desc" "$ro" "$rd"
+        diff "$TEST_TMP/si.d2" "$TEST_TMP/si.o2" | head -5
+    fi
+}
+if [ -x /usr/bin/dash ] && [ -z "${SHCMP_DUMP:-}" ]; then
+    stdin_case "cat in the script sees the buffered rest" 'echo a; cat; echo b
+echo c
+'
+    stdin_case "read consumes nothing already buffered" 'read x
+hello
+echo got $x
+'
+    stdin_case "commands before a syntax error run" 'echo one
+echo )
+echo two
+'
+    stdin_case "positional parameters with -s" 'echo $# $1 $2; set -- x; echo $1
+' -s p q
+    stdin_case "function and alias definitions persist" 'alias hi="echo hello"
+hi
+f() { echo in f; }
+f
+'
+    stdin_case "if spanning lines" 'if true
+then echo yes
+else echo no
+fi
+echo done
+'
+    stdin_case "heredoc in stdin script" 'cat <<EOF
+body $((1+1))
+EOF
+echo after
+'
+    stdin_case "no trailing newline" 'echo last'
+    stdin_case "exit status" 'echo x
+exit 7
+echo not reached
+'
+    big=$(i=0; while [ $i -lt 3000 ]; do echo "echo line$i"; i=$((i + 1)); done)
+    stdin_case "script larger than the read buffer" "$big
+"
+    stdin_case "cat after the buffer is exhausted" "$big
+cat
+echo end
+"
+fi
+
 SHCMP_EXEMPT=1
 c "exempt: local variable" 'f() { local x=1; echo $x; }; f; echo "[$x]"' e "POSIX has no local; dash, bash, busybox, yash all accept it."
 c "exempt: echo -e" 'echo -e "a\tb"' e "XSI echo interprets escapes; -e is an option in bash and literal in dash."

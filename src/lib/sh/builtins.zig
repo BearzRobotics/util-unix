@@ -19,6 +19,8 @@ const pattern = @import("pattern.zig");
 const jobs = @import("jobs.zig");
 const jobcmd = @import("jobcmd.zig");
 const history = @import("history.zig");
+const mode_mod = @import("../mode.zig");
+const fmtfloat = @import("fmtfloat.zig");
 const Shell = shell.Shell;
 const Allocator = std.mem.Allocator;
 
@@ -81,6 +83,10 @@ pub fn find(name: []const u8) ?Builtin {
 // --- helpers --------------------------------------------------------------------
 
 /// A special-builtin error: the non-interactive shell exits.
+fn optText(a: Allocator, comptime fmt: []const u8, args: anytype) []const u8 {
+    return std.fmt.allocPrint(a, fmt, args) catch "";
+}
+
 fn die(sh: *Shell, st: u8) u8 {
     if (sh.no_die > 0 or sh.flags.interactive) return st;
     sh.status = st;
@@ -92,7 +98,7 @@ fn die(sh: *Shell, st: u8) u8 {
 fn leave(sh: *Shell, st: u8) u8 {
     if (sh.flags.interactive and sh.jc and jobs.anyStopped(sh) and sh.exit_warned + 1 != sh.cmd_seq) {
         sh.exit_warned = sh.cmd_seq;
-        sh.diagBare("You have stopped jobs.");
+        sh.diagBareK(.stopped_jobs, "", "You have stopped jobs.");
         sh.status = 1;
         return 1;
     }
@@ -147,12 +153,12 @@ fn loopArg(sh: *Shell, name: []const u8, args: []const []const u8) ?u32 {
     var n: i64 = 1;
     if (args.len > 1) {
         n = parseNum(args[1]) orelse {
-            sh.diagCmd(name, "Illegal number: {s}", .{args[1]});
+            sh.diagCmdK(.illegal_number, args[1], name, "Illegal number: {s}", .{args[1]});
             _ = die(sh, 2);
             return null;
         };
         if (n < 1) {
-            sh.diagCmd(name, "Illegal number: {s}", .{args[1]});
+            sh.diagCmdK(.illegal_number, args[1], name, "Illegal number: {s}", .{args[1]});
             _ = die(sh, 2);
             return null;
         }
@@ -180,11 +186,11 @@ fn returnCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
     var st: u8 = sh.status;
     if (args.len > 1) {
         const n = parseNum(args[1]) orelse {
-            sh.diagCmd("return", "Illegal number: {s}", .{args[1]});
+            sh.diagCmdK(.illegal_number, args[1], "return", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         };
         if (n < 0) {
-            sh.diagCmd("return", "Illegal number: {s}", .{args[1]});
+            sh.diagCmdK(.illegal_number, args[1], "return", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         }
         st = @truncate(@as(u64, @bitCast(n)));
@@ -195,14 +201,14 @@ fn returnCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
 }
 
 fn exitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
-    var st: u8 = sh.status;
+    var st: u8 = if (args.len <= 1) (sh.trap_status orelse sh.status) else sh.status;
     if (args.len > 1) {
         const n = parseNum(args[1]) orelse {
-            sh.diagCmd("exit", "Illegal number: {s}", .{args[1]});
+            sh.diagCmdK(.illegal_number, args[1], "exit", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         };
         if (n < 0) {
-            sh.diagCmd("exit", "Illegal number: {s}", .{args[1]});
+            sh.diagCmdK(.illegal_number, args[1], "exit", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         }
         st = @truncate(@as(u64, @bitCast(n)));
@@ -218,9 +224,11 @@ fn eval(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     return exec.runSource(sh, text, .{ .prefix = "eval" }) catch 2;
 }
 
-fn dot(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
+fn dot(sh: *Shell, a: Allocator, args_in: []const []const u8) u8 {
+    var args = args_in;
+    if (args.len > 1 and std.mem.eql(u8, args[1], "--")) args = args[1..];
     if (args.len < 2) {
-        sh.diagCmd(".", "filename argument required", .{});
+        sh.diagCmdK(.usage, null, ".", "filename argument required", .{});
         return die(sh, 2);
     }
     const name = args[1];
@@ -238,12 +246,12 @@ fn dot(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             break :blk null;
         };
         if (found) |f| path = f else {
-            sh.diagCmd(".", "{s}: not found", .{name});
+            sh.diagCmdK(.not_found, name, ".", "{s}: not found", .{name});
             return die(sh, 2);
         }
     }
     const text = exec.readFile(a, path) orelse {
-        sh.diagCmd(".", "cannot open {s}: No such file", .{path});
+        sh.diagCmdK(.cannot_open, path, ".", "cannot open {s}: No such file", .{path});
         return die(sh, 2);
     };
     var old: std.ArrayList([]u8) = .empty;
@@ -279,7 +287,7 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     const name = rest[0];
     const path = if (std.mem.indexOfScalar(u8, name, '/') != null) name else exec.findExecutable(sh, a, name) orelse {
-        sh.diagCmd("exec", "{s}: not found", .{name});
+        sh.diagCmdK(.not_found, name, "exec", "{s}: not found", .{name});
         return die(sh, 127);
     };
     const env = sh.environ(a) catch return 2;
@@ -292,10 +300,10 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     sys.execve(a, path, rest, env) catch {};
     const e = sys.errno();
     if (e == sys.E_NOENT or e == sys.E_NOTDIR) {
-        sh.diagCmd("exec", "{s}: not found", .{name});
+        sh.diagCmdK(.not_found, name, "exec", "{s}: not found", .{name});
         return die(sh, 127);
     }
-    sh.diagCmd("exec", "{s}: {s}", .{ name, sys.strerror(e) });
+    sh.diagCmdK(if (e == sys.E_ACCES) .not_executable else .other, name, "exec", "{s}: {s}", .{ name, sys.strerror(e) });
     return die(sh, 126);
 }
 
@@ -330,7 +338,7 @@ fn declare(sh: *Shell, a: Allocator, args: []const []const u8, comptime cmd: []c
         if (std.mem.eql(u8, args[i], "-p")) {
             _ = 0;
         } else {
-            sh.diagCmd(cmd, "Illegal option {s}", .{args[i]});
+            sh.diagCmdK(.illegal_option, args[i], cmd, "Illegal option {s}", .{args[i]});
             return die(sh, 2);
         }
     }
@@ -340,13 +348,13 @@ fn declare(sh: *Shell, a: Allocator, args: []const []const u8, comptime cmd: []c
         const eq = std.mem.indexOfScalar(u8, arg, '=');
         const name = if (eq) |e| arg[0..e] else arg;
         if (!lexer.isName(name)) {
-            sh.diagCmd(cmd, "{s}: bad variable name", .{name});
+            sh.diagCmdK(.bad_variable_name, name, cmd, "{s}: bad variable name", .{name});
             return die(sh, 2);
         }
         if (eq) |e| {
             sh.setVar(name, arg[e + 1 ..]) catch |err| switch (err) {
                 error.ReadOnly => {
-                    sh.diagCmd(cmd, "{s}: is read only", .{name});
+                    sh.diagCmdK(.readonly_assignment, name, cmd, "{s}: is read only", .{name});
                     return die(sh, 2);
                 },
                 error.OutOfMemory => return 2,
@@ -368,15 +376,24 @@ fn readonlyCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 
 fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
     if (sh.func_depth == 0) {
-        sh.diagCmd("local", "not in a function", .{});
+        sh.diagCmdK(.not_in_function, "", "local", "not in a function", .{});
         return 2;
     }
     for (args[1..]) |arg| {
         const eq = std.mem.indexOfScalar(u8, arg, '=');
         const name = if (eq) |e| arg[0..e] else arg;
         if (!lexer.isName(name)) {
-            sh.diagCmd("local", "{s}: bad variable name", .{name});
+            sh.diagCmdK(.bad_variable_name, name, "local", "{s}: bad variable name", .{name});
             return 2;
+        }
+        // `local x` again in the same function keeps the value
+        var again = false;
+        for (sh.locals.items[sh.locals_base..]) |l| if (std.mem.eql(u8, l.name, name)) {
+            again = true;
+        };
+        if (again) {
+            if (eq) |e| sh.setVar(name, arg[e + 1 ..]) catch return 2;
+            continue;
         }
         const old: ?shell.Var = if (sh.vars.get(name)) |ov| .{
             .value = if (ov.value) |x| sh.gpa.dupe(u8, x) catch null else null,
@@ -404,7 +421,7 @@ fn unsetCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
         } else if (std.mem.eql(u8, args[i], "-v")) {
             funcs = false;
         } else {
-            sh.diagCmd("unset", "Illegal option {s}", .{args[i]});
+            sh.diagCmdK(.illegal_option, args[i], "unset", "Illegal option {s}", .{args[i]});
             return die(sh, 2);
         }
     }
@@ -413,9 +430,13 @@ fn unsetCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             if (sh.funcs.fetchRemove(name)) |kv| sh.gpa.free(kv.key);
             continue;
         }
+        if (!lexer.isName(name)) {
+            sh.diagCmdK(.bad_variable_name, name, "unset", "{s}: bad variable name", .{name});
+            return die(sh, 2);
+        }
         sh.unsetVar(name) catch |e| switch (e) {
             error.ReadOnly => {
-                sh.diagCmd("unset", "{s}: is read only", .{name});
+                sh.diagCmdK(.readonly_assignment, name, "unset", "{s}: is read only", .{name});
                 return die(sh, 2);
             },
             error.OutOfMemory => return 2,
@@ -428,17 +449,17 @@ fn shiftCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
     var n: usize = 1;
     if (args.len > 1) {
         const v = parseNum(args[1]) orelse {
-            sh.diagCmd("shift", "Illegal number: {s}", .{args[1]});
+            sh.diagCmdK(.illegal_number, args[1], "shift", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         };
         if (v < 0) {
-            sh.diagCmd("shift", "Illegal number: {s}", .{args[1]});
+            sh.diagCmdK(.illegal_number, args[1], "shift", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         }
         n = @intCast(v);
     }
     if (n > sh.params.items.len) {
-        sh.diagCmd("shift", "can't shift that many", .{});
+        sh.diagCmdK(.cannot_shift, "", "shift", "can't shift that many", .{});
         return die(sh, 2);
     }
     for (sh.params.items[0..n]) |p| sh.gpa.free(p);
@@ -535,13 +556,20 @@ fn setCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             i += 1;
             break;
         }
-        if (arg.len < 2 or (arg[0] != '-' and arg[0] != '+')) break;
         if (std.mem.eql(u8, arg, "-")) {
+            // `set -`: turn off -x and -v and end the options (POSIX, obsolescent)
             sh.flags.xtrace = false;
             sh.flags.verbose = false;
             i += 1;
+            if (i >= args.len) return 0;
             break;
         }
+        if (std.mem.eql(u8, arg, "+")) {
+            // a lone `+` is an ignored option
+            i += 1;
+            continue;
+        }
+        if (arg.len < 2 or (arg[0] != '-' and arg[0] != '+')) break;
         const on = arg[0] == '-';
         var j: usize = 1;
         while (j < arg.len) : (j += 1) {
@@ -553,13 +581,13 @@ fn setCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 }
                 i += 1;
                 if (!setNamedOption(sh, args[i], on)) {
-                    sh.diagCmd("set", "Illegal option {s}o {s}", .{ if (on) "-" else "+", args[i] });
+                    sh.diagCmdK(.illegal_option, optText(a, "{s}o {s}", .{ if (on) "-" else "+", args[i] }), "set", "Illegal option {s}o {s}", .{ if (on) "-" else "+", args[i] });
                     return die(sh, 2);
                 }
                 continue;
             }
             if (!setOption(sh, c, on)) {
-                sh.diagCmd("set", "Illegal option {c}{c}", .{ arg[0], c });
+                sh.diagCmdK(.illegal_option, optText(a, "{c}{c}", .{ arg[0], c }), "set", "Illegal option {c}{c}", .{ arg[0], c });
                 return die(sh, 2);
             }
         }
@@ -567,6 +595,9 @@ fn setCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     if (i <= args.len and (i < args.len or (i > 1 and std.mem.eql(u8, args[i - 1], "--")))) {
         sh.setParams(args[i..]) catch return 2;
+        // new positional parameters restart option parsing (dash, bash)
+        sh.setVarRaw("OPTIND", "1") catch {};
+        sh.getopts_sub = 0;
     }
     return 0;
 }
@@ -588,10 +619,16 @@ fn timesCmd(sh: *Shell, a: Allocator, _: []const []const u8) u8 {
 
 fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
-    if (i < args.len and std.mem.eql(u8, args[i], "--")) i += 1;
+    var had_dd = false;
+    if (i < args.len and std.mem.eql(u8, args[i], "--")) {
+        i += 1;
+        had_dd = true;
+    }
     if (i >= args.len) {
         var out: std.ArrayList(u8) = .empty;
-        for (sh.traps, 0..) |t, n| {
+        for (sh.traps, 0..) |own, n| {
+            // a subshell reports the parent's traps until it sets its own
+            const t = if (sh.in_subshell and !sh.trap_set[n]) (sh.parent_traps[n] orelse own) else own;
             const cmd = t orelse continue;
             const q = quoteSingle(a, cmd) catch return 2;
             out.print(a, "trap -- {s} {s}\n", .{ q, sys.signal_names[n] }) catch return 2;
@@ -600,12 +637,24 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         return 0;
     }
     if (std.mem.eql(u8, args[i], "-l")) {
+        var out: std.ArrayList(u8) = .empty;
+        for (sys.signal_names[1..]) |nm| out.print(a, "{s}\n", .{nm}) catch return 2;
+        _ = sh.out(out.items);
         return 0;
+    }
+    if (!had_dd and args[i].len > 1 and args[i][0] == '-' and std.mem.indexOfAny(u8, args[i], " \t\n") == null) {
+        sh.diagBareK(.illegal_option, args[i], std.fmt.allocPrint(a, "trap: Illegal option {s}", .{args[i]}) catch "");
+        return die(sh, 2);
     }
     var action: ?[]const u8 = null;
     if (sys.signalNumber(args[i]) == null or args[i].len == 0) {
         action = args[i];
         i += 1;
+        if (i >= args.len) {
+            // an action with no condition: the operand was taken for a condition
+            sh.diagBareK(.bad_trap, action.?, std.fmt.allocPrint(a, "trap: {s}: bad trap", .{action.?}) catch "");
+            return 1;
+        }
     } else if (std.mem.eql(u8, args[i], "-")) {
         i += 1;
     } else if (parseNum(args[i]) != null) {
@@ -615,12 +664,13 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var st: u8 = 0;
     for (args[i..]) |s| {
         const n = sys.signalNumber(s) orelse {
-            sh.diagBare(std.fmt.allocPrint(a, "trap: {s}: bad trap", .{s}) catch "");
+            sh.diagBareK(.bad_trap, s, std.fmt.allocPrint(a, "trap: {s}: bad trap", .{s}) catch "");
             st = 1;
             continue;
         };
         if (sh.traps[n]) |old| sh.gpa.free(old);
         sh.traps[n] = null;
+        sh.trap_set[n] = true;
         if (action) |cmd| {
             sh.traps[n] = sh.gpa.dupe(u8, cmd) catch return 2;
             if (n > 0 and !sh.inherited_ignore[n]) _ = sys.setSignal(n, if (cmd.len == 0) .ignore else .catch_flag);
@@ -657,19 +707,45 @@ fn canonical(a: Allocator, path: []const u8) Allocator.Error![]const u8 {
     return out.items;
 }
 
+/// Logical `..` handling (POSIX cd step 8): every component that a `..` removes
+/// must be a directory.
+fn dotdotOk(a: Allocator, abs: []const u8) bool {
+    if (std.mem.indexOf(u8, abs, "..") == null) return true;
+    var stack: std.ArrayList([]const u8) = .empty;
+    var it = std.mem.tokenizeScalar(u8, abs, '/');
+    while (it.next()) |comp| {
+        if (std.mem.eql(u8, comp, ".")) continue;
+        if (std.mem.eql(u8, comp, "..")) {
+            // the path so far must exist as a directory
+            var path: std.ArrayList(u8) = .empty;
+            for (stack.items) |c| {
+                path.append(a, '/') catch return true;
+                path.appendSlice(a, c) catch return true;
+            }
+            if (path.items.len == 0) path.append(a, '/') catch return true;
+            const info = sys.stat(path.items, true) catch return false;
+            if (info.kind != .dir) return false;
+            if (stack.items.len > 0) _ = stack.pop();
+            continue;
+        }
+        stack.append(a, comp) catch return true;
+    }
+    return true;
+}
+
 fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
     var physical = false;
-    while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
+    opts: while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
         if (std.mem.eql(u8, args[i], "--")) {
             i += 1;
             break;
         }
-        if (std.mem.eql(u8, args[i], "-P")) {
-            physical = true;
-        } else if (std.mem.eql(u8, args[i], "-L")) {
-            physical = false;
-        } else break;
+        for (args[i][1..]) |c| switch (c) {
+            'P' => physical = true,
+            'L' => physical = false,
+            else => break :opts,
+        };
     }
     var dir: []const u8 = undefined;
     var print = false;
@@ -678,16 +754,20 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         dir = args[i];
         if (std.mem.eql(u8, dir, "-")) {
             dir = sh.getVar("OLDPWD") orelse {
-                sh.diagCmd("cd", "OLDPWD not set", .{});
+                sh.diagCmdK(.other, null, "cd", "OLDPWD not set", .{});
                 return 2;
             };
-            _ = 0;
+            print = true;
         }
     } else {
         dir = sh.getVar("HOME") orelse {
-            sh.diagCmd("cd", "HOME not set", .{});
+            sh.diagCmdK(.other, null, "cd", "HOME not set", .{});
             return 2;
         };
+    }
+    if (dir.len == 0) {
+        sh.diagCmdK(.cannot_cd, dir, "cd", "can't cd to {s}", .{dir});
+        return 2;
     }
     var target = dir;
     // CDPATH
@@ -710,11 +790,15 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var curpath = target;
     if (!physical) {
         const abs = if (target.len > 0 and target[0] == '/') target else std.fmt.allocPrint(a, "{s}/{s}", .{ old_pwd, target }) catch return 2;
+        if (!dotdotOk(a, abs)) {
+            sh.diagCmdK(.cannot_cd, dir, "cd", "can't cd to {s}", .{dir});
+            return 2;
+        }
         curpath = canonical(a, abs) catch return 2;
     }
     sys.chdir(if (physical) target else curpath) catch {
         const e = sys.errno();
-        sh.diagCmd("cd", "can't cd to {s}", .{dir});
+        sh.diagCmdK(.cannot_cd, dir, "cd", "can't cd to {s}", .{dir});
         _ = e;
         return 2;
     };
@@ -741,7 +825,7 @@ fn pwdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         }
     }
     if (path.len == 0) path = physicalCwd(a) orelse {
-        sh.diagCmd("pwd", "getcwd() failed: {s}", .{sys.strerror(sys.errno())});
+        sh.diagCmdK(.other, null, "pwd", "getcwd() failed: {s}", .{sys.strerror(sys.errno())});
         return 1;
     };
     _ = sh.out(std.fmt.allocPrint(a, "{s}\n", .{path}) catch return 2);
@@ -780,18 +864,15 @@ fn escapes(a: Allocator, out: *std.ArrayList(u8), s: []const u8, is_b: bool) All
                 try out.append(a, @truncate(v));
             },
             '1'...'7' => |d| {
-                if (is_b) {
-                    try out.append(a, '\\');
-                    try out.append(a, d);
-                } else {
-                    var v: u32 = d - '0';
-                    var n: usize = 0;
-                    while (n < 2 and i + 1 < s.len and s[i + 1] >= '0' and s[i + 1] <= '7') : (n += 1) {
-                        i += 1;
-                        v = v * 8 + (s[i] - '0');
-                    }
-                    try out.append(a, @truncate(v));
+                // \ddd (also in a %b operand, as dash, bash and FreeBSD sh)
+                _ = is_b;
+                var v: u32 = d - '0';
+                var n: usize = 0;
+                while (n < 2 and i + 1 < s.len and s[i + 1] >= '0' and s[i + 1] <= '7') : (n += 1) {
+                    i += 1;
+                    v = v * 8 + (s[i] - '0');
                 }
+                try out.append(a, @truncate(v));
             },
             else => |o| {
                 try out.append(a, '\\');
@@ -819,7 +900,7 @@ fn echoCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     if (go and newline) out.append(a, '\n') catch return 2;
     if (!sh.out(out.items)) {
-        sh.diagCmd("echo", "I/O error", .{});
+        sh.diagCmdK(.io_error, "I/O error", "echo", "I/O error", .{});
         return 1;
     }
     return 0;
@@ -829,26 +910,47 @@ fn printfNumber(sh: *Shell, s: []const u8, st: *u8) i64 {
     if (s.len == 0) return 0;
     if (s[0] == '\'' or s[0] == '"') return if (s.len > 1) s[1] else 0;
     if (arith.parseNumber(s)) |v| return v;
-    // partial conversion
+    // partial conversion: the longest numeric prefix (leading blanks allowed)
     var end: usize = 0;
+    while (end < s.len and (s[end] == ' ' or (s[end] >= '\t' and s[end] <= '\r'))) end += 1;
+    const num_start = end;
     if (end < s.len and (s[end] == '-' or s[end] == '+')) end += 1;
     const digits_start = end;
     while (end < s.len and std.ascii.isDigit(s[end])) end += 1;
     if (end > digits_start) {
-        sh.diagCmd("printf", "{s}: not completely converted", .{s});
+        sh.diagCmdK(.printf_number, s, "printf", "{s}: not completely converted", .{s});
         st.* = 1;
-        return std.fmt.parseInt(i64, s[0..end], 10) catch 0;
+        return std.fmt.parseInt(i64, s[num_start..end], 10) catch 0;
     }
-    sh.diagCmd("printf", "{s}: expected numeric value", .{s});
+    sh.diagCmdK(.printf_number, s, "printf", "{s}: expected numeric value", .{s});
     st.* = 1;
     return 0;
+}
+
+fn printfFloat(sh: *Shell, s: []const u8, st: *u8) f64 {
+    if (s.len == 0) return 0;
+    if (s[0] == '\'' or s[0] == '"') return if (s.len > 1) @floatFromInt(s[1]) else 0;
+    const p = fmtfloat.parsePrefix(s);
+    if (p.used == 0) {
+        sh.diagCmdK(.printf_number, s, "printf", "{s}: expected numeric value", .{s});
+        st.* = 1;
+        return 0;
+    }
+    if (p.used < s.len) {
+        sh.diagCmdK(.printf_number, s, "printf", "{s}: not completely converted", .{s});
+        st.* = 1;
+    } else if (p.range) {
+        sh.diagCmdK(.printf_number, s, "printf", "{s}: Numerical result out of range", .{s});
+        st.* = 1;
+    }
+    return p.value;
 }
 
 fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
     if (i < args.len and std.mem.eql(u8, args[i], "--")) i += 1;
     if (i >= args.len) {
-        sh.diagCmd("printf", "usage: printf format [arg ...]", .{});
+        sh.diagCmdK(.usage, null, "printf", "usage: printf format [arg ...]", .{});
         return 2;
     }
     const fmt = args[i];
@@ -900,7 +1002,7 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             }
             k += 1;
             if (k >= fmt.len) {
-                sh.diagCmd("printf", "%: invalid directive", .{});
+                sh.diagCmdK(.usage, null, "printf", "%: invalid directive", .{});
                 _ = sh.out(out.items);
                 return 1;
             }
@@ -945,7 +1047,7 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 prec = p;
             }
             if (k >= fmt.len) {
-                sh.diagCmd("printf", "%: invalid directive", .{});
+                sh.diagCmdK(.usage, null, "printf", "%: invalid directive", .{});
                 _ = sh.out(out.items);
                 return 1;
             }
@@ -999,8 +1101,25 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     padNum(a, &body, pre, digits.items, width, left, zero and prec == null) catch return 2;
                     width = 0;
                 },
+                'e', 'E', 'f', 'F', 'g', 'G', 'a', 'A' => {
+                    ai += 1;
+                    const x = if (arg) |s| printfFloat(sh, s, &st) else 0.0;
+                    const r = fmtfloat.format(a, x, .{ .conv = conv, .prec = prec, .alt = alt }) catch return 2;
+                    const sign: []const u8 = if (r.neg) "-" else if (plus) "+" else if (space) " " else "";
+                    const hex_prefix: usize = if (std.ascii.toLower(conv) == 'a' and r.finite) 2 else 0;
+                    if (zero and !left and r.finite and width > sign.len + r.body.len) {
+                        // zeros go after the sign (and the 0x of %a)
+                        body.appendSlice(a, sign) catch return 2;
+                        body.appendSlice(a, r.body[0..hex_prefix]) catch return 2;
+                        body.appendNTimes(a, '0', width - sign.len - r.body.len) catch return 2;
+                        body.appendSlice(a, r.body[hex_prefix..]) catch return 2;
+                    } else {
+                        body.appendSlice(a, sign) catch return 2;
+                        body.appendSlice(a, r.body) catch return 2;
+                    }
+                },
                 else => {
-                    sh.diagCmd("printf", "%{c}: invalid directive", .{conv});
+                    sh.diagCmdK(.usage, null, "printf", "%{c}: invalid directive", .{conv});
                     _ = sh.out(out.items);
                     return 1;
                 },
@@ -1021,7 +1140,7 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         if (ai >= rest.len or ai == start_ai or !consumed_any) break;
     }
     if (!sh.out(out.items)) {
-        sh.diagCmd("printf", "I/O error", .{});
+        sh.diagCmdK(.io_error, "I/O error", "printf", "I/O error", .{});
         return 1;
     }
     return st;
@@ -1058,13 +1177,13 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         if (std.mem.eql(u8, args[i], "-r")) {
             raw = true;
         } else {
-            sh.diagCmd("read", "Illegal option {s}", .{args[i]});
+            sh.diagCmdK(.illegal_option, args[i], "read", "Illegal option {s}", .{args[i]});
             return 2;
         }
     }
     const names = args[i..];
     if (names.len == 0) {
-        sh.diagCmd("read", "arg count", .{});
+        sh.diagCmdK(.usage, null, "read", "arg count", .{});
         return 2;
     }
     var bytes: std.ArrayList(u8) = .empty;
@@ -1117,7 +1236,7 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var pos: usize = 0;
     for (names, 0..) |name, idx| {
         if (!lexer.isName(name)) {
-            sh.diagCmd("read", "{s}: bad variable name", .{name});
+            sh.diagCmdK(.bad_variable_name, name, "read", "{s}: bad variable name", .{name});
             return 2;
         }
         while (pos < b.len and !esc.items[pos] and isWs(ifs, b[pos])) pos += 1;
@@ -1128,6 +1247,25 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             while (val.items.len > 0) {
                 const li = pos + val.items.len - 1;
                 if (!esc.items[li] and isWs(ifs, b[li])) _ = val.pop() else break;
+            }
+            // a single trailing non-whitespace delimiter ends the last field too
+            // (POSIX 2.6.5: "A-B-" with two names gives "B"); not when the
+            // remainder holds another such delimiter ("C-D -")
+            if (val.items.len > 0) {
+                const li = pos + val.items.len - 1;
+                if (!esc.items[li] and isIfs(ifs, b[li]) and !isWs(ifs, b[li])) {
+                    var other = false;
+                    for (val.items[0 .. val.items.len - 1], 0..) |ch, k| if (!esc.items[pos + k] and isIfs(ifs, ch) and !isWs(ifs, ch)) {
+                        other = true;
+                    };
+                    if (!other) {
+                        _ = val.pop();
+                        while (val.items.len > 0) {
+                            const lj = pos + val.items.len - 1;
+                            if (!esc.items[lj] and isWs(ifs, b[lj])) _ = val.pop() else break;
+                        }
+                    }
+                }
             }
             pos = b.len;
         } else {
@@ -1140,7 +1278,7 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             }
         }
         sh.setVar(name, val.items) catch {
-            sh.diagCmd("read", "{s}: is read only", .{name});
+            sh.diagCmdK(.readonly_assignment, name, "read", "{s}: is read only", .{name});
             return 2;
         };
     }
@@ -1371,7 +1509,7 @@ fn evalCounted(t: *T, args: []const []const u8) TestErr!bool {
 fn runTest(sh: *Shell, name: []const u8, args: []const []const u8) u8 {
     var t: T = .{ .sh = sh, .args = args, .name = name };
     const r = evalCounted(&t, args) catch {
-        sh.diagCmd(name, "{s}", .{t.err[0..t.err_len]});
+        sh.diagCmdK(.test_error, null, name, "{s}", .{t.err[0..t.err_len]});
         return 2;
     };
     return if (r) 0 else 1;
@@ -1383,7 +1521,7 @@ fn testCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
 
 fn bracketCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
     if (args.len < 2 or !std.mem.eql(u8, args[args.len - 1], "]")) {
-        sh.diagCmd("[", "missing ]", .{});
+        sh.diagCmdK(.test_error, null, "[", "missing ]", .{});
         return 2;
     }
     return runTest(sh, "[", args[1 .. args.len - 1]);
@@ -1446,12 +1584,23 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             'v', 'V' => mode = c,
             'p' => use_default_path = true,
             else => {
-                sh.diagCmd("command", "Illegal option -{c}", .{c});
+                sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), "command", "Illegal option -{c}", .{c});
                 return 2;
             },
         };
     }
     if (i >= args.len) return 0;
+    var saved_path: ?[]u8 = null;
+    if (use_default_path) {
+        if (sh.getVar("PATH")) |p| saved_path = sh.gpa.dupe(u8, p) catch null;
+        sh.setVarRaw("PATH", "/usr/bin:/bin") catch {};
+    }
+    defer if (use_default_path) {
+        if (saved_path) |p| {
+            sh.setVarRaw("PATH", p) catch {};
+            sh.gpa.free(p);
+        } else sh.unsetVar("PATH") catch {};
+    };
     if (mode != 0) {
         var out: std.ArrayList(u8) = .empty;
         const ok = describe(sh, a, args[i], mode == 'V', &out);
@@ -1461,15 +1610,6 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         _ = sh.out(out.items);
         return if (ok) 0 else 127;
     }
-    var saved_path: ?[]u8 = null;
-    if (use_default_path) {
-        if (sh.getVar("PATH")) |p| saved_path = sh.gpa.dupe(u8, p) catch null;
-        sh.setVarRaw("PATH", "/usr/bin:/bin") catch {};
-    }
-    defer if (saved_path) |p| {
-        sh.setVarRaw("PATH", p) catch {};
-        sh.gpa.free(p);
-    };
     sh.no_die += 1;
     defer sh.no_die -= 1;
     return exec.runArgs(sh, a, args[i..], true);
@@ -1496,7 +1636,7 @@ fn hashCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var st: u8 = 0;
     for (args[i..]) |n| {
         const p = exec.findExecutable(sh, a, n) orelse {
-            sh.diagCmd("hash", "{s}: not found", .{n});
+            sh.diagCmdK(.not_found, n, "hash", "{s}: not found", .{n});
             st = 1;
             continue;
         };
@@ -1525,7 +1665,7 @@ fn aliasCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         } else if (sh.aliases.get(arg)) |v| {
             _ = sh.out(std.fmt.allocPrint(a, "{s}={s}\n", .{ arg, quoteSingle(a, v) catch "" }) catch return 2);
         } else {
-            sh.diagCmd("alias", "{s} not found", .{arg});
+            sh.diagCmdK(.alias_not_found, arg, "alias", "{s} not found", .{arg});
             st = 1;
         }
     }
@@ -1548,7 +1688,7 @@ fn unaliasCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             sh.gpa.free(kv.key);
             sh.gpa.free(kv.value);
         } else {
-            sh.diagCmd("unalias", "{s}: not found", .{arg});
+            sh.diagCmdK(.alias_not_found, arg, "unalias", "{s}: not found", .{arg});
             st = 1;
         }
     }
@@ -1559,11 +1699,21 @@ fn unaliasCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
 
 fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     if (args.len < 3) {
-        sh.diagCmd("getopts", "usage: getopts optstring var [arg]", .{});
+        sh.diagCmdK(.usage, null, "getopts", "usage: getopts optstring var [arg]", .{});
         return 2;
+    }
+    for ([_][]const u8{ "OPTIND", "OPTARG" }) |v| {
+        if (sh.vars.get(v)) |ov| if (ov.readonly) {
+            sh.diagCmdK(.readonly_assignment, v, "getopts", "{s}: is read only", .{v});
+            return 2;
+        };
     }
     const optstr = args[1];
     const name = args[2];
+    if (!lexer.isName(name)) {
+        sh.diagCmdK(.bad_variable_name, name, "getopts", "{s}: bad variable name", .{name});
+        return 2;
+    }
     const list: []const []const u8 = if (args.len > 3) args[3..] else @as([]const []const u8, @ptrCast(sh.params.items));
     const silent = optstr.len > 0 and optstr[0] == ':';
     const os = if (silent) optstr[1..] else optstr;
@@ -1600,7 +1750,7 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             sh.setVar("OPTARG", &cbuf) catch {};
         } else {
             sh.unsetVar("OPTARG") catch {};
-            sh.diagBare(std.fmt.allocPrint(a, "Illegal option -{c}", .{c}) catch "");
+            sh.diagBareK(.illegal_option, optText(a, "-{c}", .{c}), std.fmt.allocPrint(a, "Illegal option -{c}", .{c}) catch "");
         }
         return finish(sh, name, "?", idx + 1, if (more) sub else 0, 0);
     }
@@ -1616,7 +1766,7 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 return finish(sh, name, ":", idx + 1, 0, 0);
             }
             sh.unsetVar("OPTARG") catch {};
-            sh.diagBare(std.fmt.allocPrint(a, "No arg for -{c} option", .{c}) catch "");
+            sh.diagBareK(.usage, null, std.fmt.allocPrint(a, "No arg for -{c} option", .{c}) catch "");
             return finish(sh, name, "?", idx + 1, 0, 0);
         }
         sh.setVar("OPTARG", list[idx]) catch {};
@@ -1644,24 +1794,24 @@ fn killCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     if (i < args.len and (std.mem.eql(u8, args[i], "-s") or std.mem.eql(u8, args[i], "-n"))) {
         if (i + 1 >= args.len) {
-            sh.diagCmd("kill", "usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or kill -l [exitstatus]", .{});
+            sh.diagCmdK(.usage, null, "kill", "usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or kill -l [exitstatus]", .{});
             return 2;
         }
         sig = sys.signalNumber(args[i + 1]) orelse {
-            sh.diagCmd("kill", "invalid signal number or name: {s}", .{args[i + 1]});
+            sh.diagCmdK(.kill_error, null, "kill", "invalid signal number or name: {s}", .{args[i + 1]});
             return 2;
         };
         i += 2;
     } else if (i < args.len and args[i].len > 1 and args[i][0] == '-' and args[i][1] != '-') {
         sig = sys.signalNumber(args[i][1..]) orelse {
-            sh.diagCmd("kill", "invalid signal number or name: {s}", .{args[i][1..]});
+            sh.diagCmdK(.kill_error, null, "kill", "invalid signal number or name: {s}", .{args[i][1..]});
             return 2;
         };
         i += 1;
     }
     if (i < args.len and std.mem.eql(u8, args[i], "--")) i += 1;
     if (i >= args.len) {
-        sh.diagCmd("kill", "usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or kill -l [exitstatus]", .{});
+        sh.diagCmdK(.usage, null, "kill", "usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or kill -l [exitstatus]", .{});
         return 2;
     }
     var st: u8 = 0;
@@ -1671,12 +1821,12 @@ fn killCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             continue;
         }
         const pid = parseNum(p) orelse {
-            sh.diagCmd("kill", "invalid pid {s}", .{p});
+            sh.diagCmdK(.kill_error, null, "kill", "invalid pid {s}", .{p});
             st = 2;
             continue;
         };
         sys.kill(@intCast(pid), sig) catch {
-            sh.diagCmd("kill", "{s}", .{sys.strerror(sys.errno())});
+            sh.diagCmdK(.kill_error, null, "kill", "{s}", .{sys.strerror(sys.errno())});
             st = 1;
         };
     }
@@ -1702,12 +1852,23 @@ fn umaskCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         } else _ = sh.out(std.fmt.allocPrint(a, "{o:0>4}\n", .{m}) catch return 2);
         return 0;
     }
+    if (args[i].len > 0 and !std.ascii.isDigit(args[i][0])) {
+        // symbolic mode (POSIX umask): applied to the permissions the mask
+        // allows, i.e. its complement
+        const perm: u16 = @intCast(~sys.umaskGet() & 0o777);
+        const np = mode_mod.apply(args[i], perm, false, 0) orelse {
+            sh.diagCmdK(.illegal_number, args[i], "umask", "Illegal mode: {s}", .{args[i]});
+            return 2;
+        };
+        _ = sys.umaskSet(~@as(u32, np) & 0o777);
+        return 0;
+    }
     const m = std.fmt.parseInt(u32, args[i], 8) catch {
-        sh.diagCmd("umask", "Illegal number: {s}", .{args[i]});
+        sh.diagCmdK(.illegal_number, args[i], "umask", "Illegal number: {s}", .{args[i]});
         return 2;
     };
     if (m > 0o777) {
-        sh.diagCmd("umask", "Illegal number: {s}", .{args[i]});
+        sh.diagCmdK(.illegal_number, args[i], "umask", "Illegal number: {s}", .{args[i]});
         return 2;
     }
     _ = sys.umaskSet(m);
@@ -1757,14 +1918,14 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 scale = 1024;
             },
             else => {
-                sh.diagCmd("ulimit", "Illegal option -{c}", .{c});
+                sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), "ulimit", "Illegal option -{c}", .{c});
                 return 2;
             },
         };
     }
     var cur = sys.getrlimit(res) catch {
-        sh.diagCmd("ulimit", "bad limit: {s}", .{sys.strerror(sys.errno())});
-        return 1;
+        sh.diagCmdK(.bad_limit, null, "ulimit", "error getting limit ({s})", .{sys.strerror(sys.errno())});
+        return 2;
     };
     if (i >= args.len) {
         const v = if (hard) cur.hard else cur.soft;
@@ -1773,7 +1934,7 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     const v: u64 = if (std.mem.eql(u8, args[i], "unlimited")) sys.infinity else blk: {
         const n = std.fmt.parseInt(u64, args[i], 10) catch {
-            sh.diagCmd("ulimit", "Illegal number: {s}", .{args[i]});
+            sh.diagCmdK(.illegal_number, args[i], "ulimit", "bad number", .{});
             return 2;
         };
         break :blk n * scale;
@@ -1782,8 +1943,8 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     if (!hard or soft_set) cur.soft = v;
     if (hard and !soft_set) cur.soft = @min(cur.soft, v);
     sys.setrlimit(res, cur) catch {
-        sh.diagCmd("ulimit", "bad limit: {s}", .{sys.strerror(sys.errno())});
-        return 1;
+        sh.diagCmdK(.bad_limit, null, "ulimit", "error setting limit ({s})", .{sys.strerror(sys.errno())});
+        return 2;
     };
     return 0;
 }

@@ -1,6 +1,6 @@
-sh: -c:1:1: error[SH3005]: 'file' is not a file descriptor number
+sh: -c:1:11: error[SH3005]: 'file' is not a file descriptor number
   |
 1 | echo hi >&file
-  | ^^^^
+  |           ^^^^
 help: use a number, or `-` to close
 rc=2

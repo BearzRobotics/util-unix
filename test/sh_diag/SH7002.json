@@ -1,2 +1,2 @@
-{"code":"SH7002","kind":"lint_cd_unchecked","severity":"warning","file":"s.sh","line":1,"column":1,"end":3,"message":"`cd` may fail and the script carries on in the wrong directory","help":"write `cd dir || exit 1`","token":"","expected":"","posix":"`cd` result is not checked"}
+{"code":"SH7002","kind":"lint_cd_unchecked","severity":"warning","file":"s.sh","line":1,"column":1,"end":3,"message":"`cd` may fail and the script carries on in the wrong directory","help":"write `cd dir || exit 1`","token":"","expected":"","posix":"`cd` result is not checked","shellcheck":"SC2164"}
 rc=1

@@ -44,7 +44,7 @@ pub fn runSource(sh: *Shell, src: []const u8, o: RunOpts) error{OutOfMemory}!u8 
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     const a = arena.allocator();
     var d: parser.Diag = .{};
-    var p = parser.Parser.init(a, src, &d);
+    var p = try parser.Parser.initProgram(a, src, &d);
     p.aliases = .{ .ctx = sh, .get = aliasGet };
     const defined_before = sh.funcs_defined;
     const saved_src = sh.cur_src;
@@ -88,6 +88,103 @@ pub fn runSource(sh: *Shell, src: []const u8, o: RunOpts) error{OutOfMemory}!u8 
     return last;
 }
 
+/// Run a script read from descriptor `fd` incrementally, as dash does: a
+/// command is parsed and executed as soon as it is complete, so a command
+/// that reads standard input (`cat`, `read`) sees whatever the shell has not
+/// yet buffered. The shell reads 8192 bytes at a time, like dash.
+pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
+    const gpa = sh.gpa;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    var start: usize = 0;
+    var line: u32 = 1;
+    var eof = false;
+    var last: u8 = 0;
+    const saved_src = sh.cur_src;
+    defer sh.cur_src = saved_src;
+    var chunk: [8192]u8 = undefined;
+    while (true) {
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        const a = arena.allocator();
+        const defined_before = sh.funcs_defined;
+        const text = a.dupe(u8, buf.items[start..]) catch {
+            arena.deinit();
+            return error.OutOfMemory;
+        };
+        var d: parser.Diag = .{};
+        var p = parser.Parser.initProgram(a, text, &d) catch {
+            arena.deinit();
+            return error.OutOfMemory;
+        };
+        p.line = line;
+        p.aliases = .{ .ctx = sh, .get = aliasGet };
+        const maybe = p.nextCommand() catch |e| switch (e) {
+            error.Syntax => {
+                if (!eof and p.pos >= p.src.len) {
+                    arena.deinit();
+                    eof = readMore(gpa, &buf, fd, &chunk);
+                    continue;
+                }
+                sh.cur_src = buf.items;
+                sh.line = d.line;
+                reportSyntax(sh, &d, "", buf.items);
+                sh.status = 2;
+                sh.flow = .exit_shell;
+                arena.deinit();
+                return 2;
+            },
+            error.OutOfMemory => {
+                arena.deinit();
+                return error.OutOfMemory;
+            },
+        };
+        const tail = p.origTailLen();
+        const complete = eof or (p.pos < p.src.len) or (p.src.len > 0 and p.src[p.src.len - 1] == '\n');
+        if (!eof and (maybe == null or !complete or p.warn_heredoc != null)) {
+            arena.deinit();
+            eof = readMore(gpa, &buf, fd, &chunk);
+            continue;
+        }
+        if (p.warn_heredoc) |w| {
+            p.warn_heredoc = null;
+            sh.cur_src = buf.items;
+            var wd: diagmod.Diagnostic = .{ .code = 1003, .kind = .unterminated_heredoc, .severity = .warning, .label = sh.label, .line = w.line, .subject = w.delim, .posix = "here-document delimited by end-of-file", .source = buf.items };
+            sh.emit(&wd);
+        }
+        const node = maybe orelse {
+            arena.deinit();
+            break;
+        };
+        const consumed = text.len - @min(tail, text.len);
+        sh.cur_src = buf.items;
+        if (sh.flags.verbose and consumed > 0) sh.errRaw(std.mem.trimStart(u8, text[0..consumed], "\n"));
+        start += consumed;
+        line = p.line;
+        if (!sh.flags.noexec) {
+            last = execNode(sh, node);
+            checkTraps(sh);
+        }
+        if (sh.funcs_defined != defined_before) {
+            sh.pinned.append(gpa, arena) catch {};
+        } else arena.deinit();
+        if (sh.flow != .none) break;
+    }
+    return last;
+}
+
+/// Append the next chunk of `fd` to `buf`; true at end of input.
+fn readMore(gpa: Allocator, buf: *std.ArrayList(u8), fd: i32, chunk: *[8192]u8) bool {
+    while (true) {
+        const n = sys.read(fd, chunk) catch {
+            if (sys.errno() == sys.E_INTR) continue;
+            return true;
+        };
+        if (n == 0) return true;
+        buf.appendSlice(gpa, chunk[0..n]) catch return true;
+        return false;
+    }
+}
+
 fn reportSyntax(sh: *Shell, d: *const parser.Diag, prefix: []const u8, src: []const u8) void {
     var buf: [400]u8 = undefined;
     const text = if (prefix.len > 0) (std.fmt.bufPrint(&buf, "{s}: {s}", .{ prefix, d.message() }) catch d.message()) else d.message();
@@ -127,6 +224,9 @@ pub fn checkTraps(sh: *Shell) void {
         const saved = sh.status;
         const copy = sh.gpa.dupe(u8, cmd) catch continue;
         defer sh.gpa.free(copy);
+        const prev_ts = sh.trap_status;
+        sh.trap_status = saved;
+        defer sh.trap_status = prev_ts;
         sh.in_trap += 1;
         const saved_flow = sh.flow;
         sh.flow = .none;
@@ -147,6 +247,7 @@ pub fn runExitTrap(sh: *Shell) void {
     if (cmd.len == 0) return;
     const saved = sh.status;
     sh.flow = .none;
+    sh.trap_status = saved;
     _ = runSource(sh, cmd, .{}) catch {};
     if (sh.flow != .exit_shell) sh.status = saved;
 }
@@ -157,7 +258,7 @@ fn xerr(sh: *Shell, e: expand.Error) u8 {
     switch (e) {
         error.Fatal => return sh.status,
         error.OutOfMemory => {
-            sh.diag("out of memory", .{});
+            sh.diagK(.other, null, "out of memory", .{});
             sh.flow = .exit_shell;
             sh.status = 2;
             return 2;
@@ -202,6 +303,7 @@ pub fn waitFor(sh: *Shell, pid: i32, report: bool) u8 {
 
 fn childInit(sh: *Shell, bg: bool) void {
     sh.in_subshell = true;
+    sh.trap_set = @splat(false);
     jobs.clearAll(sh);
     sys.clearPendingAny();
     if (sh.flags.interactive) {
@@ -215,7 +317,8 @@ fn childInit(sh: *Shell, bg: bool) void {
     while (i < sys.nsig) : (i += 1) {
         if (sh.traps[i]) |t| {
             if (t.len > 0 or i == 0) {
-                sh.gpa.free(t);
+                if (sh.parent_traps[i]) |old| sh.gpa.free(old);
+                sh.parent_traps[i] = t;
                 sh.traps[i] = null;
                 if (i > 0) _ = sys.setSignal(i, .default);
             }
@@ -259,7 +362,7 @@ fn forkRun(sh: *Shell, node: *const Node, cio: ChildIo) ?i32 {
     const text = if (cio.job != null) nodeText(sh, node) else &[_]u8{};
     defer if (text.len > 0) sh.gpa.free(text);
     const pid = jobs.forkInto(sh, cio.job, text, !cio.bg) catch {
-        sh.diag("Cannot fork", .{});
+        sh.diagK(.cannot_fork, null, "Cannot fork", .{});
         return null;
     };
     if (pid != 0) return pid;
@@ -398,7 +501,8 @@ fn execPipeline(sh: *Shell, node: *const Node, negate: bool, cmds: []const *cons
     } else {
         st = runStages(sh, cmds);
     }
-    if (negate) return @intFromBool(st == 0);
+    // `! break` and `! return` leave the status alone: the jump happens first
+    if (negate) return if (sh.flow != .none) st else @intFromBool(st == 0);
     errexitCheck(sh, st, "pipeline");
     return st;
 }
@@ -425,7 +529,7 @@ fn runStagesImpl(sh: *Shell, cmds: []const *const Node, bg: bool) u8 {
         var next_pipe: ?[2]i32 = null;
         if (i + 1 < cmds.len) {
             next_pipe = sys.pipe() catch {
-                sh.diag("Cannot create pipe", .{});
+                sh.diagK(.cannot_fork, null, "Pipe call failed", .{});
                 break;
             };
         }
@@ -521,7 +625,14 @@ fn execLoop(sh: *Shell, until: bool, cond: *const Node, body: ?*const Node) u8 {
         sh.noerrexit += 1;
         const c = execNode(sh, cond);
         sh.noerrexit -= 1;
-        if (sh.flow != .none) return c;
+        if (sh.flow != .none) {
+            // `break` and `continue` in the condition act on this loop
+            if (sh.flow == .break_loop or sh.flow == .continue_loop) {
+                if (loopStop(sh)) break;
+                continue;
+            }
+            return c;
+        }
         if ((c == 0) == until) break;
         if (body) |b| st = execNode(sh, b) else st = 0;
         checkTraps(sh);
@@ -546,7 +657,7 @@ fn execFor(sh: *Shell, name: []const u8, words: ?[]const ast.Word, body: ?*const
     for (list.items) |item| {
         sh.setVar(name, item) catch |e| switch (e) {
             error.ReadOnly => {
-                sh.diag("{s}: is read only", .{name});
+                sh.diagK(.readonly_assignment, name, "{s}: is read only", .{name});
                 sh.status = 2;
                 sh.flow = .exit_shell;
                 return 2;
@@ -609,7 +720,7 @@ fn openError(sh: *Shell, path: []const u8, create: bool) void {
         (if (e == sys.E_NOENT or e == sys.E_NOTDIR) "Directory nonexistent" else sys.strerror(e))
     else
         (if (e == sys.E_NOENT) "No such file" else sys.strerror(e));
-    sh.diag("cannot {s} {s}: {s}", .{ if (create) "create" else "open", path, text });
+    sh.diagK(if (create) .cannot_create else .cannot_open, path, "cannot {s} {s}: {s}", .{ if (create) "create" else "open", path, text });
 }
 
 /// Apply `redirs` in the current process. When `save` is non-null the
@@ -639,7 +750,7 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
                         if (r.op == .out and sh.flags.noclobber) {
                             if (sys.stat(path, true)) |info| {
                                 if (info.kind == .file) {
-                                    sh.diag("cannot create {s}: File exists", .{path});
+                                    sh.diagK(.noclobber, path, "cannot create {s}: File exists", .{path});
                                     return false;
                                 }
                                 flags.trunc = false;
@@ -677,13 +788,19 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
                     return false;
                 };
                 if (!sys.fdIsOpen(m)) {
-                    sh.diag("{d}: Bad file descriptor", .{m});
+                    {
+                        var fb: [16]u8 = undefined;
+                        sh.diagK(.bad_fd, std.fmt.bufPrint(&fb, "{d}", .{m}) catch "", "{d}: Bad file descriptor", .{m});
+                    }
                     return false;
                 }
                 if (m == n) continue;
                 if (!saveFd(sh, n, save)) return false;
                 _ = sys.dup2(m, n) catch {
-                    sh.diag("{d}: Bad file descriptor", .{n});
+                    {
+            var fb: [16]u8 = undefined;
+            sh.diagK(.bad_fd, std.fmt.bufPrint(&fb, "{d}", .{n}) catch "", "{d}: Bad file descriptor", .{n});
+        }
                     return false;
                 };
             },
@@ -693,7 +810,7 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
                     return false;
                 };
                 const fd = sys.memfileWith(body) catch {
-                    sh.diag("cannot create temporary file", .{});
+                    sh.diagK(.cannot_create, "temporary file", "cannot create temporary file", .{});
                     return false;
                 };
                 if (!place(sh, fd, n, save)) return false;
@@ -721,7 +838,10 @@ fn place(sh: *Shell, fd: i32, n: i32, save: ?*Redirs) bool {
         return true;
     }
     _ = sys.dup2(fd, n) catch {
-        sh.diag("{d}: Bad file descriptor", .{n});
+        {
+            var fb: [16]u8 = undefined;
+            sh.diagK(.bad_fd, std.fmt.bufPrint(&fb, "{d}", .{n}) catch "", "{d}: Bad file descriptor", .{n});
+        }
         sys.close(fd);
         return false;
     };
@@ -746,13 +866,13 @@ fn execRedirected(sh: *Shell, body: *const Node, redirs: []const *ast.Redirect) 
 /// Run `node` with its standard output captured; trailing newlines removed.
 pub fn substitute(sh: *Shell, a: Allocator, node: *const Node) expand.Error![]const u8 {
     const p = sys.pipe() catch {
-        sh.diag("Cannot create pipe", .{});
-        return expand.fatal(sh, "Cannot create pipe", .{});
+        sh.diagK(.cannot_fork, null, "Pipe call failed", .{});
+        return expand.fatal(sh, .cannot_fork, null, "Pipe call failed", .{});
     };
     const pid = forkRun(sh, node, .{ .stdout = p[1], .close = &.{ p[0], p[1] } }) orelse {
         sys.close(p[0]);
         sys.close(p[1]);
-        return expand.fatal(sh, "Cannot fork", .{});
+        return expand.fatal(sh, .cannot_fork, null, "Cannot fork", .{});
     };
     sys.close(p[1]);
     var buf: std.ArrayList(u8) = .empty;
@@ -768,6 +888,15 @@ pub fn substitute(sh: *Shell, a: Allocator, node: *const Node) expand.Error![]co
     sys.close(p[0]);
     const st = waitFor(sh, pid, false);
     sh.last_subst_status = st;
+    // NUL bytes cannot be kept in a shell string; they are dropped (dash, FreeBSD sh)
+    if (std.mem.indexOfScalar(u8, buf.items, 0) != null) {
+        var w: usize = 0;
+        for (buf.items) |c| if (c != 0) {
+            buf.items[w] = c;
+            w += 1;
+        };
+        buf.items.len = w;
+    }
     var end = buf.items.len;
     while (end > 0 and buf.items[end - 1] == '\n') end -= 1;
     return buf.items[0..end];
@@ -777,7 +906,16 @@ pub fn substitute(sh: *Shell, a: Allocator, node: *const Node) expand.Error![]co
 
 fn xtrace(sh: *Shell, a: Allocator, s: ast.Simple, vals: []const []const u8, args: []const []const u8) void {
     var line: std.ArrayList(u8) = .empty;
-    const ps4 = sh.getVar("PS4") orelse "+ ";
+    var ps4: []const u8 = sh.getVar("PS4") orelse "+ ";
+    // PS4 is subject to parameter expansion, command substitution and arithmetic
+    if (std.mem.indexOfAny(u8, ps4, "$`") != null) {
+        if (parser.parseText(a, ps4)) |w| {
+            const saved_trace = sh.flags.xtrace;
+            sh.flags.xtrace = false;
+            defer sh.flags.xtrace = saved_trace;
+            if (expand.string(sh, a, w)) |v| ps4 = v else |_| {}
+        } else |_| {}
+    }
     line.appendSlice(a, ps4) catch return;
     var first = true;
     for (s.assigns, vals) |asg, v| {
@@ -835,7 +973,7 @@ pub fn findExecutable(sh: *Shell, a: Allocator, name: []const u8) ?[]const u8 {
 }
 
 fn assignError(sh: *Shell, name: []const u8) u8 {
-    sh.diag("{s}: is read only", .{name});
+    sh.diagK(.readonly_assignment, name, "{s}: is read only", .{name});
     sh.status = 2;
     sh.flow = .exit_shell;
     return 2;
@@ -852,7 +990,16 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     sh.last_subst_status = null;
 
     var args: std.ArrayList([]const u8) = .empty;
-    expand.fields(sh, a, s.words, &args) catch |e| return xerr(sh, e);
+    // Declaration utilities (`export`, `readonly`, also behind `command`):
+    // operands of the form name=word are expanded like assignments, with
+    // neither field splitting nor pathname expansion (POSIX 2.14 export).
+    const decl = declStart(s.words);
+    for (s.words, 0..) |w, i| {
+        if (decl != null and i >= decl.? and isAssignWord(w)) {
+            const v = expand.assignValue(sh, a, w) catch |e| return xerr(sh, e);
+            args.append(a, v) catch return 2;
+        } else expand.fields(sh, a, &.{w}, &args) catch |e| return xerr(sh, e);
+    }
     const vals = a.alloc([]const u8, s.assigns.len) catch return 2;
     // `export x=~` style operands expand tildes after `=` like assignments.
     for (vals) |*v| v.* = "";
@@ -879,7 +1026,10 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
         var saved: Redirs = .{};
         const ok = applyRedirs(sh, a, s.redirs, &saved);
         defer saved.restore(sh.gpa);
-        if (!ok) return 2;
+        if (!ok) {
+            errexitCheck(sh, 2, "redirection");
+            return 2;
+        }
         // POSIX 2.9.1 (Issue 8): each assignment is expanded and made in order,
         // so a later one sees an earlier one.
         for (s.assigns) |asg| {
@@ -909,22 +1059,30 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     };
     const r = resolve(sh, a, name);
     if (path_saved) |ps| restoreVar(sh, ps);
+    // A variable assignment error ends a non-interactive shell for every kind of
+    // command (POSIX 2.8.1); builtins check it themselves.
+    switch (r) {
+        .external, .not_found => for (s.assigns) |asg| {
+            if (sh.vars.get(asg.name)) |ov| if (ov.readonly) return assignError(sh, asg.name);
+        },
+        else => {},
+    }
     const st: u8 = switch (r) {
         .not_found => blk: {
             // Redirections still happen (to a forked child in real shells).
             if (replace) {
                 if (!applyRedirs(sh, a, s.redirs, null)) break :blk 2;
-                sh.diag("{s}: not found", .{name});
+                sh.diagK(.not_found, name, "{s}: not found", .{name});
                 break :blk 127;
             }
             const pid = sys.fork() catch {
-                sh.diag("Cannot fork", .{});
+                sh.diagK(.cannot_fork, null, "Cannot fork", .{});
                 break :blk 2;
             };
             if (pid == 0) {
                 childInit(sh, false);
                 if (!applyRedirs(sh, a, s.redirs, null)) sys.exit(2);
-                sh.diag("{s}: not found", .{name});
+                sh.diagK(.not_found, name, "{s}: not found", .{name});
                 sys.exit(127);
             }
             break :blk waitFor(sh, pid, true);
@@ -933,7 +1091,44 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
         else => runInShell(sh, a, r, args.items, s, vals),
     };
     errexitCheck(sh, st, name);
+    // a signal that arrived while the command ran: its trap runs now (POSIX 2.11)
+    if (sh.flow == .none) {
+        checkTraps(sh);
+        // a trap that exits or returns decides the status
+        if (sh.flow != .none) return sh.status;
+    }
     return st;
+}
+
+/// A word that reads `name=...` (the name literal and unquoted).
+fn isAssignWord(w: ast.Word) bool {
+    if (w.len == 0) return false;
+    const first = switch (w[0]) {
+        .text => |t| t,
+        else => return false,
+    };
+    const eq = std.mem.indexOfScalar(u8, first, '=') orelse return false;
+    return eq > 0 and lexer.isName(first[0..eq]);
+}
+
+fn literalWord(w: ast.Word) ?[]const u8 {
+    if (w.len != 1) return null;
+    return switch (w[0]) {
+        .text => |t| t,
+        else => null,
+    };
+}
+
+/// Index of the first operand of a declaration utility command, if it is one.
+fn declStart(words: []const ast.Word) ?usize {
+    var i: usize = 0;
+    while (i < words.len) : (i += 1) {
+        const t = literalWord(words[i]) orelse return null;
+        if (std.mem.eql(u8, t, "command")) continue;
+        if (std.mem.eql(u8, t, "export") or std.mem.eql(u8, t, "readonly")) return i + 1;
+        return null;
+    }
+    return null;
 }
 
 fn hasAssignTilde(w: ast.Word) bool {
@@ -945,7 +1140,7 @@ fn hasAssignTilde(w: ast.Word) bool {
 fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s: ast.Simple, vals: []const []const u8) u8 {
     const is_special = r == .special;
     var saved: Redirs = .{};
-    const is_exec = std.mem.eql(u8, args[0], "exec");
+    const is_exec = std.mem.eql(u8, args[0], "exec") or (args.len > 1 and std.mem.eql(u8, args[0], "command") and execBehindCommand(args));
     if (!applyRedirs(sh, a, s.redirs, &saved)) {
         saved.restore(sh.gpa);
         if (is_special) {
@@ -996,6 +1191,17 @@ fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s
     return st;
 }
 
+fn execBehindCommand(args: []const []const u8) bool {
+    var i: usize = 1;
+    while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--")) {
+            i += 1;
+            break;
+        }
+    }
+    return i < args.len and std.mem.eql(u8, args[i], "exec");
+}
+
 fn restoreVar(sh: *Shell, sv: shell.Saved) void {
     defer sh.gpa.free(sv.name);
     if (sv.old) |o| {
@@ -1010,8 +1216,7 @@ fn restoreVar(sh: *Shell, sv: shell.Saved) void {
         if (sh.vars.getPtr(sv.name)) |cur| {
             if (cur.value) |x| sh.gpa.free(x);
             cur.value = null;
-            cur.exported = false;
-            if (!cur.readonly) if (sh.vars.fetchRemove(sv.name)) |kv| sh.gpa.free(kv.key);
+            if (sh.vars.fetchRemove(sv.name)) |kv| sh.gpa.free(kv.key);
         }
     }
 }
@@ -1025,6 +1230,9 @@ pub fn callFunction(sh: *Shell, body: *const Node, args: []const []const u8) u8 
         return 2;
     };
     const mark = sh.locals.items.len;
+    const saved_base = sh.locals_base;
+    sh.locals_base = mark;
+    defer sh.locals_base = saved_base;
     sh.func_depth += 1;
     const saved_loops = sh.loop_depth;
     sh.loop_depth = 0;
@@ -1054,7 +1262,7 @@ fn runExternal(sh: *Shell, a: Allocator, path: []const u8, args: []const []const
         const text = if (job != null) nodeText(sh, &node) else &[_]u8{};
         defer if (text.len > 0) sh.gpa.free(text);
         const pid = jobs.forkInto(sh, job, text, true) catch {
-            sh.diag("Cannot fork", .{});
+            sh.diagK(.cannot_fork, null, "Cannot fork", .{});
             if (job) |j| jobs.remove(sh, j);
             return 2;
         };
@@ -1079,19 +1287,25 @@ fn runExternal(sh: *Shell, a: Allocator, path: []const u8, args: []const []const
     if (e == sys.E_NOEXEC) {
         // A text file without #!: interpret it with this shell.
         const text = readFile(a, path) orelse {
-            sh.diag("{s}: Permission denied", .{args[0]});
+            sh.diagK(.not_executable, args[0], "{s}: Permission denied", .{args[0]});
             sys.exit(126);
         };
+        // a file with NUL bytes in its first line is a binary, not a script
+        const head = text[0 .. std.mem.indexOfScalar(u8, text, '\n') orelse text.len];
+        if (std.mem.indexOfScalar(u8, head, 0) != null) {
+            sh.diagK(.not_executable, args[0], "{s}: Exec format error", .{args[0]});
+            sys.exit(126);
+        }
         sh.setParams(args[1..]) catch {};
         sh.name = sh.gpa.dupe(u8, args[0]) catch sh.name;
         const st = runSource(sh, text, .{}) catch 2;
         childExit(sh, if (sh.flow == .exit_shell) sh.status else st);
     }
     if (e == sys.E_NOENT or e == sys.E_NOTDIR) {
-        sh.diag("{s}: not found", .{args[0]});
+        sh.diagK(.not_found, args[0], "{s}: not found", .{args[0]});
         sys.exit(127);
     }
-    sh.diag("{s}: {s}", .{ args[0], sys.strerror(e) });
+    sh.diagK(if (e == sys.E_ACCES) .not_executable else .other, args[0], "{s}: {s}", .{ args[0], sys.strerror(e) });
     sys.exit(126);
 }
 
@@ -1105,7 +1319,7 @@ pub fn runArgs(sh: *Shell, a: Allocator, args: []const []const u8, no_func: bool
     const empty: ast.Simple = .{ .assigns = &.{}, .words = &.{}, .redirs = &.{} };
     switch (r) {
         .not_found => {
-            sh.diag("{s}: not found", .{args[0]});
+            sh.diagK(.not_found, args[0], "{s}: not found", .{args[0]});
             return 127;
         },
         .external => |p| return runExternal(sh, a, p, args, empty, &.{}, false),
