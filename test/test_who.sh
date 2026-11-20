@@ -12,6 +12,11 @@ if ! command -v python3 >/dev/null 2>&1; then
     echo "SKIP who (python3 needed to build utmp fixtures)"; exit 0
 fi
 D="$(mktemp -d)"; trap 'rm -rf "$D"' EXIT
+# Some distributions confine /usr/bin/who with an AppArmor profile that only lets
+# it read the system utmp files, so it cannot open the fixtures below. Run a copy
+# of the same binary, still named "who" so its messages are unchanged.
+mkdir "$D/bin" && cp "$(readlink -f /usr/bin/who)" "$D/bin/who" && GNU_WHO="$D/bin/who" || GNU_WHO=/usr/bin/who
+gnu() { "$GNU_WHO" "$@"; }
 python3 - "$D" <<'PY'
 import struct, sys, time
 d = sys.argv[1]
@@ -75,7 +80,7 @@ for f in empty short partial boot_only ids; do
 done
 run_cmp "missing file"       "$D/nonexistent"
 # GNU prints the path it was run by in its usage line; compare after normalising.
-g="$(gnu --help | sed '1s#/usr/bin/who#who#' | head -n 24)"; o="$(ours --help | grep -v '^ *--json ')"
+g="$(gnu --help | sed "1s#$GNU_WHO#who#" | head -n 24)"; o="$(ours --help | grep -v '^ *--json ')"
 if [ "$g" = "$o" ]; then PASS=$((PASS + 1)); echo "PASS --help"; else FAIL=$((FAIL + 1)); echo "FAIL --help"; fi
 run_cmp "-x"                 -x
 run_cmp "--bogus"            --bogus
@@ -86,7 +91,7 @@ run_cmp "-- file"            -- "$U"
 # run_cmp pins GNU to LC_ALL=C, so the locale-dependent time style is compared here.
 run_loc() { # description, "VAR=value ...", args...
     description="$1"; envs="$2"; shift 2
-    g="$(env -u LC_ALL $envs "/usr/bin/who" "$@" 2>&1)"; o="$(env -u LC_ALL $envs "$BIN_DIR/who" "$@" 2>&1)"
+    g="$(env -u LC_ALL $envs "$GNU_WHO" "$@" 2>&1)"; o="$(env -u LC_ALL $envs "$BIN_DIR/who" "$@" 2>&1)"
     if [ "$g" = "$o" ]; then PASS=$((PASS + 1)); echo "PASS $description"
     else FAIL=$((FAIL + 1)); echo "FAIL $description"; echo "     GNU : $g" | head -3; echo "     OURS: $o" | head -3; fi
 }
