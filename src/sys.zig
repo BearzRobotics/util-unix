@@ -678,7 +678,7 @@ pub fn waitpidFlags(pid: i32, flags: u32) Error!WaitResult {
 /// Stop signal of a wait status, or 0 when the child did not stop.
 pub fn statusStopSignal(status: u32) u8 {
     if (comptime !is_linux) return 0;
-    if (linux.W.IFSTOPPED(status)) return @intCast((status >> 8) & 0xff);
+    if (status != 0xffff and linux.W.IFSTOPPED(status)) return @intCast((status >> 8) & 0xff);
     return 0;
 }
 
