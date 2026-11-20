@@ -2265,3 +2265,207 @@ pub const Editor = struct {
         self.vi_insert = true;
     }
 };
+
+// --- tests: key sequences to buffer states, with a memory terminal --------------------
+
+const MemTerm = struct {
+    out: std.ArrayList(u8) = .empty,
+    input: []const u8 = "",
+    pos: usize = 0,
+    cols: u16 = 80,
+
+    fn term(self: *MemTerm) Terminal {
+        return .{ .ctx = self, .read = rd, .write = wr, .size = sz, .setRaw = raw };
+    }
+    fn rd(ctx: ?*anyopaque, buf: []u8, _: i32) ReadResult {
+        const t: *MemTerm = @ptrCast(@alignCast(ctx.?));
+        if (t.pos >= t.input.len) return .eof;
+        const n = @min(buf.len, t.input.len - t.pos);
+        @memcpy(buf[0..n], t.input[t.pos .. t.pos + n]);
+        t.pos += n;
+        return .{ .bytes = n };
+    }
+    fn wr(ctx: ?*anyopaque, bytes: []const u8) void {
+        const t: *MemTerm = @ptrCast(@alignCast(ctx.?));
+        t.out.appendSlice(std.testing.allocator, bytes) catch {};
+    }
+    fn sz(ctx: ?*anyopaque) Size {
+        const t: *MemTerm = @ptrCast(@alignCast(ctx.?));
+        return .{ .cols = t.cols };
+    }
+    fn raw(_: ?*anyopaque, _: bool) void {}
+};
+
+const hist3 = [_][]u8{ @constCast("echo one"), @constCast("echo two"), @constCast("echo three") };
+
+/// Run `keys` through an editor in `mode`; returns the buffer text and cursor.
+fn drive(mode: Mode, keys: []const u8, hist: []const []u8, out_text: *[256]u8, out_len: *usize, cur: *usize) !Status {
+    var mt: MemTerm = .{};
+    defer mt.out.deinit(std.testing.allocator);
+    var ed = Editor.init(std.testing.allocator, mt.term());
+    defer ed.deinit();
+    ed.mode = mode;
+    ed.begin("$ ", hist);
+    const st = ed.feed(keys);
+    out_len.* = ed.text().len;
+    @memcpy(out_text[0..ed.text().len], ed.text());
+    cur.* = ed.cursor();
+    return st;
+}
+
+fn expectBuf(mode: Mode, keys: []const u8, hist: []const []u8, want: []const u8, want_cur: usize) !void {
+    var t: [256]u8 = undefined;
+    var n: usize = 0;
+    var c: usize = 0;
+    _ = try drive(mode, keys, hist, &t, &n, &c);
+    try std.testing.expectEqualStrings(want, t[0..n]);
+    try std.testing.expectEqual(want_cur, c);
+}
+
+test "emacs: insertion and cursor movement" {
+    try expectBuf(.emacs, "abc", &.{}, "abc", 3);
+    try expectBuf(.emacs, "abc\x01", &.{}, "abc", 0);
+    try expectBuf(.emacs, "abc\x01\x05", &.{}, "abc", 3);
+    try expectBuf(.emacs, "abc\x02\x02", &.{}, "abc", 1);
+    try expectBuf(.emacs, "abc\x1b[D\x1b[D\x1b[C", &.{}, "abc", 2);
+    try expectBuf(.emacs, "ac\x02b", &.{}, "abc", 2);
+}
+
+test "emacs: deleting, killing and yanking" {
+    try expectBuf(.emacs, "abc\x7f", &.{}, "ab", 2);
+    try expectBuf(.emacs, "abc\x01\x04", &.{}, "bc", 0);
+    try expectBuf(.emacs, "abc def\x17", &.{}, "abc ", 4);
+    try expectBuf(.emacs, "abc def\x15", &.{}, "", 0);
+    try expectBuf(.emacs, "abc def\x02\x02\x02\x0b", &.{}, "abc ", 4);
+    try expectBuf(.emacs, "abc\x17\x19\x19", &.{}, "abcabc", 6);
+    try expectBuf(.emacs, "ab\x14", &.{}, "ba", 2);
+    try expectBuf(.emacs, "one two\x1bb\x1bd", &.{}, "one ", 4);
+}
+
+test "emacs: words and case" {
+    try expectBuf(.emacs, "one two\x1bb", &.{}, "one two", 4);
+    try expectBuf(.emacs, "one two\x1bb\x1bb\x1bf", &.{}, "one two", 3);
+    try expectBuf(.emacs, "abc\x1bb\x1bu", &.{}, "ABC", 3);
+    try expectBuf(.emacs, "one two\x1bt", &.{}, "two one", 7);
+}
+
+test "emacs: numeric argument and undo" {
+    try expectBuf(.emacs, "\x1b3x", &.{}, "xxx", 3);
+    try expectBuf(.emacs, "abc\x17\x1f", &.{}, "abc", 3);
+}
+
+test "emacs: utf-8 cursor and erase work on characters" {
+    try expectBuf(.emacs, "h\xc3\xa9", &.{}, "h\xc3\xa9", 3);
+    try expectBuf(.emacs, "h\xc3\xa9\x7f", &.{}, "h", 1);
+    try expectBuf(.emacs, "h\xc3\xa9\x02", &.{}, "h\xc3\xa9", 1);
+}
+
+test "emacs: history" {
+    try expectBuf(.emacs, "\x1b[A", &hist3, "echo three", 10);
+    try expectBuf(.emacs, "\x1b[A\x1b[A", &hist3, "echo two", 8);
+    try expectBuf(.emacs, "\x1b[A\x1b[A\x1b[B", &hist3, "echo three", 10);
+    try expectBuf(.emacs, "x\x1b[A\x1b[B", &hist3, "x", 1);
+    try expectBuf(.emacs, "\x1b<", &hist3, "echo one", 8);
+    try expectBuf(.emacs, "\x1b<\x1b>", &hist3, "", 0);
+}
+
+test "emacs: incremental search" {
+    try expectBuf(.emacs, "\x12two", &hist3, "echo two", 5);
+    try expectBuf(.emacs, "\x12echo\x12", &hist3, "echo two", 0);
+    try expectBuf(.emacs, "ab\x12one\x07", &hist3, "ab", 2);
+}
+
+test "emacs: accept, interrupt and end of file" {
+    var t: [256]u8 = undefined;
+    var n: usize = 0;
+    var c: usize = 0;
+    try std.testing.expectEqual(Status.accepted, try drive(.emacs, "ab\r", &.{}, &t, &n, &c));
+    try std.testing.expectEqual(Status.interrupted, try drive(.emacs, "ab\x03", &.{}, &t, &n, &c));
+    try std.testing.expectEqual(Status.eof, try drive(.emacs, "\x04", &.{}, &t, &n, &c));
+    try std.testing.expectEqual(Status.more, try drive(.emacs, "ab\x04", &.{}, &t, &n, &c));
+}
+
+test "bracketed paste inserts newlines and tabs literally" {
+    try expectBuf(.emacs, "\x1b[200~a\nb\tc\x1b[201~", &.{}, "a\nb\tc", 5);
+}
+
+test "vi: modes and basic edits" {
+    try expectBuf(.vi, "abc\x1b", &.{}, "abc", 2);
+    try expectBuf(.vi, "abc\x1bx", &.{}, "ab", 1);
+    try expectBuf(.vi, "abc\x1b0x", &.{}, "bc", 0);
+    try expectBuf(.vi, "abc\x1b0ix", &.{}, "xabc", 1);
+    try expectBuf(.vi, "abc\x1b0ax", &.{}, "axbc", 2);
+    try expectBuf(.vi, "abc\x1bAd", &.{}, "abcd", 4);
+    try expectBuf(.vi, "abc\x1bIx", &.{}, "xabc", 1);
+    try expectBuf(.vi, "abc\x1b0rx", &.{}, "xbc", 0);
+    try expectBuf(.vi, "abc\x1b0~", &.{}, "Abc", 1);
+    try expectBuf(.vi, "abc\x1b0Rxy", &.{}, "xyc", 2);
+}
+
+test "vi: motions and operators" {
+    try expectBuf(.vi, "one two\x1b0w", &.{}, "one two", 4);
+    try expectBuf(.vi, "one two\x1bb", &.{}, "one two", 4);
+    try expectBuf(.vi, "one two\x1b0e", &.{}, "one two", 2);
+    try expectBuf(.vi, "one two\x1b0dw", &.{}, "two", 0);
+    try expectBuf(.vi, "one two\x1b0cwX", &.{}, "X two", 1);
+    try expectBuf(.vi, "one two\x1bdd", &.{}, "", 0);
+    try expectBuf(.vi, "abc def\x1b04lD", &.{}, "abc", 2);
+    try expectBuf(.vi, "abcdef\x1b0fdx", &.{}, "abcef", 3);
+    try expectBuf(.vi, "abcdef\x1b0tdx", &.{}, "abdef", 2);
+    try expectBuf(.vi, "abcdef\x1b3|x", &.{}, "abdef", 2);
+    try expectBuf(.vi, "abcdef\x1b03x", &.{}, "def", 0);
+    try expectBuf(.vi, "abc\x1b0yl$p", &.{}, "abca", 3);
+    try expectBuf(.vi, "abc\x1bxu", &.{}, "abc", 2);
+    try expectBuf(.vi, "abcd\x1bx.", &.{}, "ab", 1);
+}
+
+test "vi: history" {
+    try expectBuf(.vi, "\x1bk", &hist3, "echo three", 0);
+    try expectBuf(.vi, "\x1bkk", &hist3, "echo two", 0);
+    try expectBuf(.vi, "\x1bkkj", &hist3, "echo three", 0);
+    try expectBuf(.vi, "\x1b2k", &hist3, "echo two", 0);
+    try expectBuf(.vi, "\x1bG", &hist3, "echo one", 0);
+    try expectBuf(.vi, "\x1b/two\r", &hist3, "echo two", 0);
+    try expectBuf(.vi, "\x1b/^echo o\r", &hist3, "echo one", 0);
+    try expectBuf(.vi, "echo\x1b_", &hist3, "echo three", 10);
+}
+
+test "render: redraws the prompt and the line, wraps at the width" {
+    var mt: MemTerm = .{ .cols = 10 };
+    defer mt.out.deinit(std.testing.allocator);
+    var ed = Editor.init(std.testing.allocator, mt.term());
+    defer ed.deinit();
+    ed.begin("$ ", &.{});
+    try std.testing.expect(std.mem.indexOf(u8, mt.out.items, "$ ") != null);
+    _ = ed.feed("abcdefghij");
+    // the line is 12 columns wide at a width of 10: two rows
+    ed.redraw();
+    try std.testing.expect(std.mem.indexOf(u8, mt.out.items, "\r\n") != null);
+    try std.testing.expectEqual(@as(usize, 1), ed.cur_row);
+}
+
+test "width of text" {
+    try std.testing.expectEqual(@as(usize, 3), textWidth("abc"));
+    try std.testing.expectEqual(@as(usize, 4), textWidth("\xe4\xb8\xad\xe6\x96\x87"));
+    try std.testing.expectEqual(@as(usize, 2), textWidth("\x1b[1m>\x1b[0m "));
+    try std.testing.expectEqual(@as(usize, 1), textWidth("e\xcc\x81"));
+}
+
+test "tab completion through the callback" {
+    const cb = struct {
+        fn f(_: ?*anyopaque, a: Allocator, line: []const u8, cursor: usize) Allocator.Error!Completion {
+            _ = line;
+            const c = try a.alloc([]const u8, 1);
+            c[0] = "alpha";
+            return .{ .start = cursor - 2, .candidates = c };
+        }
+    }.f;
+    var mt: MemTerm = .{};
+    defer mt.out.deinit(std.testing.allocator);
+    var ed = Editor.init(std.testing.allocator, mt.term());
+    defer ed.deinit();
+    ed.complete_fn = cb;
+    ed.begin("$ ", &.{});
+    _ = ed.feed("echo al\t");
+    try std.testing.expectEqualStrings("echo alpha ", ed.text());
+}

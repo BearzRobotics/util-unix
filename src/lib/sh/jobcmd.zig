@@ -128,7 +128,10 @@ pub fn waitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
         var k: usize = 0;
         while (k < sh.jobs.items.len) {
             const j = sh.jobs.items[k];
-            if (j.state() == .done) jobs.remove(sh, j) else k += 1;
+            if (j.state() == .done) {
+                announce(sh, j);
+                jobs.remove(sh, j);
+            } else k += 1;
         }
         return 0;
     }
@@ -164,9 +167,23 @@ pub fn waitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
         for (j.procs.items) |p| if (p.pid == pid_found) {
             st = sys.statusCode(p.status);
         };
-        if (j.state() == .done) jobs.remove(sh, j);
+        if (j.state() == .done) {
+            announce(sh, j);
+            jobs.remove(sh, j);
+        }
     }
     return st;
+}
+
+/// An interactive shell reports a job that finished while it was waited for,
+/// as dash and FreeBSD sh do.
+fn announce(sh: *Shell, j: *jobs.Job) void {
+    if (!sh.flags.interactive or j.notified) return;
+    var arena = std.heap.ArenaAllocator.init(sh.gpa);
+    defer arena.deinit();
+    var out: std.ArrayList(u8) = .empty;
+    jobs.format(sh, arena.allocator(), &out, j, .short) catch return;
+    sh.errRaw(out.items);
 }
 
 fn interrupted(sh: *Shell) u8 {
