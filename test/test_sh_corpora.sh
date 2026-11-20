@@ -63,7 +63,14 @@ corpus_yash() {
     if [ ! -d "$d" ]; then echo "SKIP yash: not downloaded (tools/fetch-sh-corpora.sh)"; return; fi
     if [ -z "$RUNNER_SH" ]; then echo "SKIP yash: needs bash, yash or busybox to run the runner"; return; fi
     mkdir -p "$TMP/yash/ours" "$TMP/yash/dash"
-    for f in "$d"/*-p.tst; do echo "$f"; done > "$TMP/yash/list"
+    # Skipped: the signal-disposition files (sig*-p) start the shell through yash's
+    # compiled `resetsig` helper and the %REQUIRETTY% files need a controlling
+    # terminal (ptwrap/checkfg); neither helper is built here.
+    for f in "$d"/*-p.tst; do
+        case "$(basename "$f")" in sig*) continue;; esac
+        grep -q '%REQUIRETTY%' "$f" && continue
+        echo "$f"
+    done > "$TMP/yash/list"
     cat > "$TMP/run1.sh" <<RUN1
 #!/bin/sh
 # run1.sh TESTEE OUTDIR FILE

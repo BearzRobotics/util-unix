@@ -67,6 +67,16 @@ $1";;
     esac
 }
 
+# helpers the test files call
+macos_kill_workaround() { :; }
+exec_testee() {
+    if [ "${posix:+set}" = set ]; then exe="$testee_sh"; else exe="$testee"; fi
+    exec timeout 20 "$exe" "$@"
+}
+testee() ( exec_testee "$@" )
+# a few tests source ../signal.sh (a helper of the corpus, read from its tests directory)
+ln -s "$(dirname "$test_file")/signal.sh" "$work/signal.sh" 2> /dev/null || :
+
 record() { printf '%s %s:%s: %s\n' "$1" "$name_base" "$test_lineno" "$test_case_name" >> "$result_file"; }
 
 testcase() {
