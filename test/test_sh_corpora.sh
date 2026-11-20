@@ -165,8 +165,8 @@ want_corpus oils && corpus_oils
 # ---- verdict ---------------------------------------------------------------
 grep -c '^BUG	' "$REPORT" | sed 's/^/open bugs: /'
 if [ -f "$KNOWN" ]; then
-    grep '^BUG	' "$REPORT" | cut -f1-4 | sort > "$TMP/bugs.now"
-    sort "$KNOWN" > "$TMP/bugs.known"
+    grep '^BUG	' "$REPORT" | awk -F'\t' '{ if ($2 == "freebsd") print $1 FS $2 FS $3; else print $1 FS $2 FS $3 FS $4 }' | sort -u > "$TMP/bugs.now"
+    sort -u "$KNOWN" > "$TMP/bugs.known"
     new="$(comm -23 "$TMP/bugs.now" "$TMP/bugs.known")"
     if [ -n "$new" ]; then
         FAIL=1
