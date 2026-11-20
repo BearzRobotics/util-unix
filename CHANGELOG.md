@@ -10,6 +10,17 @@
   Differential suite `test/test_sh.sh` (dash, bash --posix, busybox ash, yash, FreeBSD sh),
   `test/test_sh_diag.sh`, `test/test_sh_lint.sh`; `docs/std-io-gaps.md` rows 17-24; `sys.zig` is now
   part of the library module.
+- `sh`: the recorded milestone 1 gaps are closed: `printf %e %f %g %a` (exact, `src/lib/sh/fmtfloat.zig`),
+  `umask` symbolic modes, `trap -l` and the parent's traps in a subshell (POSIX.1-2024), an alias ending in a
+  blank, a here-document ended by end of input, scripts on standard input run command by command, a
+  `sh: file:line:col` rich header, carets on the offending span, explicit diagnostic kinds at every site.
+  Diagnostics: `--color=auto|always|never`, a `shellcheck` field and `ShellCheck:` line, machine-readable
+  catalog (`--list-diagnostics --diagnostics=json`, `--explain CODE --diagnostics=json`), tests that the
+  style never changes status or stdout.
+- `sh`: third-party corpora: `tools/fetch-sh-corpora.sh` (pinned yash, FreeBSD and Oils tests, never committed),
+  `test/test_sh_corpora.sh` with adapters for each, every case in its own PID namespace; the bugs they exposed
+  (aliases at every command position, line continuations anywhere, empty quoted fields, `${a#*x}` in double
+  quotes, declaration utility operands, a crash on `${}`, and about forty more) are fixed.
 - `--json` for `uname`, `id` and `who` (not GNU; decision 0007) and `util_unix.json`.
 
 ## 0.3.0

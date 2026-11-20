@@ -4,7 +4,7 @@ posix-shell-differences - where POSIX shells disagree, and how to write scripts 
 
 # DESCRIPTION
 
-Generated from `sh test/test_sh.sh` with `SH_DOC_OUT` set (the table) plus the chapters below. The table lists every case of the differential suite on which the shells that were run disagree: dash 0.5.12, bash 5.3 in POSIX mode (`bash --posix`) and run through a link named `sh`, busybox ash, yash 2.61 (`--posix` and plain), FreeBSD sh (Chimera sysroot, only for cases marked B) and our `sh`. 115 cases differ.
+Generated from `sh test/test_sh.sh` with `SH_DOC_OUT` set (the table) plus the chapters below. The table lists every case of the differential suite on which the shells that were run disagree: dash 0.5.12, bash 5.3 in POSIX mode (`bash --posix`) and run through a link named `sh`, busybox ash, yash 2.61 (`--posix` and plain), FreeBSD sh (Chimera sysroot, only for cases marked B) and our `sh`. 129 cases differ.
 
 The rule for `sh`: when the other shells agree, we agree. When they differ we match dash or FreeBSD sh, or, for cases marked P in the suite, POSIX (checked against `bash --posix` and `yash --posix`); the choice is recorded here. Only stdout and the exit status are compared across shells; stderr is compared with dash alone because POSIX leaves diagnostic wording free (XCU 2.8.1 requires only that diagnostics go to standard error).
 
@@ -192,6 +192,24 @@ The status of a pipeline is that of its last command; the others are lost (`fals
 | `cat <(echo hi)` | dash, yash-posix: `rc=2`; bash-posix, bash-as-sh, busybox-ash, yash: `hi~rc=0` | POSIX-undefined | not in POSIX. Ours (`rc=2`): syntax error, as dash |
 | `cat <<< hi` | dash, busybox-ash, yash-posix: `rc=2`; bash-posix, bash-as-sh, yash: `hi~rc=0` | POSIX-undefined | not in POSIX. Ours (`rc=2`): syntax error, as dash |
 | `echo ${RANDOM:+set}` | dash, yash-posix: `~rc=0`; bash-posix, bash-as-sh, busybox-ash, yash: `set~rc=0` | POSIX-undefined | not in POSIX. Ours (`~rc=0`): unset, as dash |
+
+# DEVIATIONS FROM THE GOLD STANDARD
+
+Decision 0009: when dash and FreeBSD sh agree, so do we, unless there is a written reason. The reasons so far, with the POSIX.1-2024 citation:
+
+| Behaviour | dash | FreeBSD sh | Ours | Why |
+|---|---|---|---|---|
+| `trap` with no operands in a subshell | prints nothing | prints nothing | the parent's traps (until the subshell sets that condition) | XCU trap: "when `trap` is invoked in a subshell ... shall report the traps of the parent shell"; bash and yash do this. Category: bug in the other shells (POSIX-defined, Issue 8) |
+| `trap -l` | `Illegal option -l` | lists the signals | lists the signals, one per line | XCU trap (Issue 8) adds `-l`; dash has not caught up |
+| `$'...'` | literal | literal | C-style escapes | XCU 2.2.4 (Issue 8) |
+| `set -o pipefail` | no effect | accepted | works | XCU set (Issue 8) |
+| an assignment error before an external command (`readonly a=; a=x cat`) | exits (status 2) | continues | exits (status 2) | XCU 2.8.1: a variable assignment error shall exit a non-interactive shell; dash and POSIX agree, FreeBSD sh is the odd one out |
+| an arithmetic constant outside 64 bits | saturates | error | saturates | POSIX leaves it undefined; dash followed |
+| `OPTARG` after an option that takes no argument | set to empty | unset | unset | XCU getopts: OPTARG is unset; POSIX decides (dash and FreeBSD sh disagree) |
+| `umask a b` | ignores `b` | ignores `b` | error | XCU umask takes one operand; usage error is the safe reading |
+| `printf '%#g' 999999.5` | `1.e+06` | `1.00000e+06` | `1.00000e+06` | C says the exponent form keeps the precision; glibc deviates (our output is exact for every other value) |
+
+The cases marked P or recorded as varying in `test/test_sh.sh` (129 in all) carry the same classification in the table above.
 
 # REPRODUCING
 
