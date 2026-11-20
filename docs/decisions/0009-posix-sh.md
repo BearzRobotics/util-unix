@@ -30,16 +30,24 @@ to register extra builtins and read/write variables.
 
 ## Milestones
 
-1. **Non-interactive core:** lexer, parser (all of the POSIX grammar), all
-   expansions including `$(( ))`, redirections incl. here-docs, pipelines,
-   `&&`/`||`, `if`/`while`/`until`/`for`/`case`, functions, subshells, `set -e/-u/-x/-f/-n`,
-   special builtins and the regular builtins POSIX requires, `trap`, `exit`
-   statuses 126/127, `sh -c`, scripts, stdin. Differential suite against dash.
-2. **Interactive:** prompts (`PS1`/`PS2`/`PS4`, `ENV`), line editing and history
-   (`fc`, `history`), tab completion of files and commands, job control (`&`,
-   `jobs`, `fg`, `bg`, `wait`, `kill %n`, `SIGTSTP`/`SIGCONT`, `set -m`).
-3. **Polish:** `getopts`, `ulimit`, `umask`, `times`, `command -v/-V`, `type`,
-   `hash`, locale-free C behaviour documented; man page; compatibility record.
+Revised 2026-11-19 by the maintainer: milestone 1 is a complete, usable POSIX shell,
+interactive included.
+
+1. **A complete POSIX shell.** Done first: lexer, parser (the whole POSIX grammar),
+   all expansions including `$(( ))`, redirections incl. here-docs, pipelines, `&&`/`||`,
+   `if`/`while`/`until`/`for`/`case`, functions, subshells, `set` options, `trap`,
+   special and regular builtins, exit statuses 126/127/2, `sh -c`, scripts, stdin, the
+   structured diagnostics (SHxxxx) and lint mode, differential suites against dash,
+   bash --posix, busybox ash, yash and FreeBSD sh. Then: interactive mode (`PS1`/`PS2`/
+   `PS4`, `ENV`), vi and emacs line editing and history (`fc`), tab completion, job
+   control (`&`, `jobs`, `fg`, `bg`, `wait`, `kill %n`, `set -m`), `printf` floating
+   formats, symbolic `umask`, and the `trap` details.
+2. **Hardening, speed and embedding** (proposed; to be confirmed): conformance with the
+   third-party corpora (yash `-p.tst`, FreeBSD, Oils) driven to near 100%, long fuzz
+   campaigns on the parser and expander, benchmarks against dash/FreeBSD sh/bash --posix
+   with `crap`, a stable embedding API for DKDE and dksh (host builtins, variables,
+   captured output, completion callbacks), and login-shell use (`-l`, `/etc/profile`,
+   full `ulimit`, `times`).
 
 ## Process model
 
