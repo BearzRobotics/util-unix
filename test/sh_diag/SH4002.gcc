@@ -1,0 +1,2 @@
+-c:1:46: error: cannot execute './notexec': permission denied or not an executable file [SH4002]
+rc=126

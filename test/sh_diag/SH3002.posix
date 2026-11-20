@@ -1,0 +1,2 @@
+sh: 1: cannot create /nonexistent/f: Directory nonexistent
+rc=2

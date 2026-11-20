@@ -12,6 +12,7 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const lexer = @import("lexer.zig");
+const diagmod = @import("diag.zig");
 const Allocator = std.mem.Allocator;
 const Token = lexer.Token;
 const Op = lexer.Op;
@@ -24,6 +25,15 @@ pub const Error = error{ Syntax, OutOfMemory };
 /// `Syntax error: ")" unexpected`.
 pub const Diag = struct {
     line: u32 = 0,
+    /// 1-based column, 0 when unknown (inside a sub-parse).
+    col: u32 = 0,
+    end_col: u32 = 0,
+    kind: diagmod.Kind = .unexpected_token,
+    /// Offending token text (borrowed from the source) and the token that
+    /// would have been valid (static text).
+    token: []const u8 = "",
+    expected: []const u8 = "",
+    opener: ?diagmod.Opener = null,
     buf: [256]u8 = undefined,
     len: usize = 0,
 
@@ -43,6 +53,7 @@ const PendingHere = struct {
     delim: []const u8,
     strip: bool,
     quoted: bool,
+    line: u32,
 };
 
 const ScanCtx = enum { normal, dquote, brace, text };
@@ -96,6 +107,12 @@ pub const Parser = struct {
     pos: usize = 0,
     line: u32 = 1,
     peeked: ?Token = null,
+    tok_start: usize = 0,
+    dq_start: usize = 0,
+    dq_line: u32 = 1,
+    openers: std.ArrayList(diagmod.Opener) = .empty,
+    /// Set when a here-document ran to the end of the input.
+    warn_heredoc: ?struct { line: u32, delim: []const u8 } = null,
     here: std.ArrayList(PendingHere) = .empty,
     diag: *Diag,
     aliases: ?AliasLookup = null,
@@ -111,11 +128,44 @@ pub const Parser = struct {
 
     // --- diagnostics -------------------------------------------------------
 
-    fn fail(self: *Parser, comptime fmt: []const u8, args: anytype) Error {
+    fn colOf(self: *const Parser, off: usize) u32 {
+        if (self.depth > 0) return 0;
+        var ls = @min(off, self.src.len);
+        while (ls > 0 and self.src[ls - 1] != '\n') ls -= 1;
+        return @intCast(off - ls + 1);
+    }
+
+    fn pushOpener(self: *Parser, name: []const u8, t: Token) Allocator.Error!void {
+        try self.openers.append(self.a, .{ .name = name, .line = t.line, .column = self.colOf(t.start) });
+    }
+
+    fn popOpener(self: *Parser) void {
+        _ = self.openers.pop();
+    }
+
+    fn failK(self: *Parser, kind: diagmod.Kind, comptime fmt: []const u8, args: anytype) Error {
         const msg = std.fmt.bufPrint(&self.diag.buf, fmt, args) catch self.diag.buf[0..0];
         self.diag.len = msg.len;
         self.diag.line = self.line;
+        self.diag.kind = kind;
+        self.diag.col = self.colOf(self.pos);
+        self.diag.end_col = self.diag.col + 1;
+        self.diag.token = "";
+        self.diag.expected = "";
+        self.diag.opener = null;
         return error.Syntax;
+    }
+
+    fn fail(self: *Parser, comptime fmt: []const u8, args: anytype) Error {
+        return self.failK(.unexpected_token, fmt, args);
+    }
+
+    /// An unterminated quote or substitution opened at `off`.
+    fn failOpen(self: *Parser, kind: diagmod.Kind, name: []const u8, off: usize, line: u32, comptime fmt: []const u8, args: anytype) Error {
+        const e = self.failK(kind, fmt, args);
+        self.diag.opener = .{ .name = name, .line = line, .column = self.colOf(off) };
+        self.diag.col = self.colOf(self.src.len);
+        return e;
     }
 
     fn tokenName(t: Token.Tag, buf: []u8) []const u8 {
@@ -132,8 +182,27 @@ pub const Parser = struct {
         var nb: [32]u8 = undefined;
         const nm = tokenName(t.tag, &nb);
         self.line = t.line;
-        if (expecting) |e| return self.fail("Syntax error: {s} unexpected (expecting \"{s}\")", .{ nm, e });
-        return self.fail("Syntax error: {s} unexpected", .{nm});
+        var err: Error = undefined;
+        if (expecting) |e| {
+            err = self.fail("Syntax error: {s} unexpected (expecting \"{s}\")", .{ nm, e });
+        } else err = self.fail("Syntax error: {s} unexpected", .{nm});
+        self.diag.line = t.line;
+        self.diag.col = self.colOf(t.start);
+        self.diag.end_col = self.colOf(t.end);
+        if (self.diag.end_col <= self.diag.col) self.diag.end_col = self.diag.col + 1;
+        self.diag.token = switch (t.tag) {
+            .eof => "",
+            .newline => "newline",
+            else => self.src[@min(t.start, self.src.len)..@min(t.end, self.src.len)],
+        };
+        if (expecting) |e| {
+            self.diag.expected = e;
+            if (self.openers.items.len > 0) {
+                self.diag.opener = self.openers.items[self.openers.items.len - 1];
+                self.diag.kind = .mismatched_closer;
+            }
+        }
+        return err;
     }
 
     // --- character level ---------------------------------------------------
@@ -167,7 +236,15 @@ pub const Parser = struct {
     }
 
     fn lex(self: *Parser) Error!Token {
+        var t = try self.lexRaw();
+        t.start = self.tok_start;
+        t.end = self.pos;
+        return t;
+    }
+
+    fn lexRaw(self: *Parser) Error!Token {
         while (true) {
+            self.tok_start = self.pos;
             const c = self.cur() orelse return .{ .tag = .eof, .line = self.line };
             if (lexer.isBlank(c)) {
                 self.pos += 1;
@@ -196,7 +273,7 @@ pub const Parser = struct {
                 var i: usize = 0;
                 while (self.at(i)) |d| : (i += 1) if (!std.ascii.isDigit(d)) break;
                 if (self.at(i)) |d| if (d == '<' or d == '>') {
-                    const n = std.fmt.parseInt(i32, self.src[self.pos .. self.pos + i], 10) catch return self.fail("Syntax error: Bad file descriptor number", .{});
+                    const n = std.fmt.parseInt(i32, self.src[self.pos .. self.pos + i], 10) catch return self.failK(.bad_fd_number, "Syntax error: Bad file descriptor number", .{});
                     self.pos += i;
                     return .{ .tag = .{ .io_number = n }, .line = line };
                 };
@@ -232,8 +309,8 @@ pub const Parser = struct {
         while (true) {
             const c = self.cur() orelse switch (ctx) {
                 .normal, .text => return,
-                .dquote => return self.fail("Syntax error: Unterminated quoted string", .{}),
-                .brace => return self.fail("Syntax error: Missing '}}'", .{}),
+                .dquote => return self.failOpen(.unterminated_quote, "\"", self.dq_start, self.dq_line, "Syntax error: Unterminated quoted string", .{}),
+                .brace => return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{}),
             };
             switch (ctx) {
                 .normal => if (lexer.isMeta(c)) return,
@@ -275,12 +352,14 @@ pub const Parser = struct {
                         try b.lit(a, c, in_dq);
                         self.pos += 1;
                     } else {
+                        const qoff = self.pos;
+                        const qline = self.line;
                         self.pos += 1;
                         const start = self.pos;
                         while (self.cur()) |d| {
                             if (d == '\'') break;
                             self.adv();
-                        } else return self.fail("Syntax error: Unterminated quoted string", .{});
+                        } else return self.failOpen(.unterminated_quote, "'", qoff, qline, "Syntax error: Unterminated quoted string", .{});
                         try b.push(a, .{ .quoted = try a.dupe(u8, self.src[start..self.pos]) });
                         self.pos += 1;
                     }
@@ -290,6 +369,8 @@ pub const Parser = struct {
                         try b.lit(a, c, true);
                         self.pos += 1;
                     } else {
+                        self.dq_start = self.pos;
+                        self.dq_line = self.line;
                         self.pos += 1;
                         var inner: Builder = .{};
                         try self.scanParts(&inner, .dquote, true);
@@ -397,7 +478,7 @@ pub const Parser = struct {
         const a = self.a;
         const p = try a.create(ast.Param);
         p.* = .{ .name = "", .quoted = in_dq };
-        var c = self.cur() orelse return self.fail("Syntax error: Missing '}}'", .{});
+        var c = self.cur() orelse return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
         var length = false;
         if (c == '#') {
             const n = self.at(1);
@@ -424,11 +505,11 @@ pub const Parser = struct {
         } else if (lexer.isSpecialParam(c)) {
             p.name = try a.dupe(u8, self.src[self.pos .. self.pos + 1]);
             self.pos += 1;
-        } else return self.fail("Bad substitution", .{});
+        } else return self.failK(.bad_substitution, "Bad substitution", .{});
 
-        const d = self.cur() orelse return self.fail("Syntax error: Missing '}}'", .{});
+        const d = self.cur() orelse return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
         if (length) {
-            if (d != '}') return self.fail("Bad substitution", .{});
+            if (d != '}') return self.failK(.bad_substitution, "Bad substitution", .{});
             p.op = .length;
             self.pos += 1;
             try b.push(a, .{ .param = p });
@@ -442,13 +523,13 @@ pub const Parser = struct {
         var op: ast.ParamOp = undefined;
         switch (d) {
             ':' => {
-                const e = self.at(1) orelse return self.fail("Syntax error: Missing '}}'", .{});
+                const e = self.at(1) orelse return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
                 op = switch (e) {
                     '-' => .use_default,
                     '=' => .assign_default,
                     '?' => .error_if_unset,
                     '+' => .use_alternate,
-                    else => return self.fail("Bad substitution", .{}),
+                    else => return self.failK(.bad_substitution, "Bad substitution", .{}),
                 };
                 p.colon = true;
                 self.pos += 2;
@@ -487,7 +568,7 @@ pub const Parser = struct {
                     self.pos += 1;
                 }
             },
-            else => return self.fail("Bad substitution", .{}),
+            else => return self.failK(.bad_substitution, "Bad substitution", .{}),
         }
         p.op = op;
         var inner: Builder = .{};
@@ -509,11 +590,11 @@ pub const Parser = struct {
             } else if (c == ')') {
                 if (depth == 0) {
                     if (i + 1 < self.src.len and self.src[i + 1] == ')') break;
-                    return false;
+                    return self.failOpen(.unterminated_arithmetic, "$((", self.pos, self.line, "Syntax error: Missing '))'", .{});
                 }
                 depth -= 1;
             }
-        } else return false;
+        } else return self.failOpen(.unterminated_arithmetic, "$((", self.pos, self.line, "Syntax error: Missing '))'", .{});
         const text = self.src[start..i];
         var sub = Parser.init(self.a, text, self.diag);
         sub.line = self.line;
@@ -531,6 +612,8 @@ pub const Parser = struct {
 
     /// After `$(`: parse commands up to the closing `)`.
     fn parseSubstBody(self: *Parser) Error!?*const Node {
+        const cs_off = self.pos - 2;
+        const cs_line = self.line;
         const saved = self.peeked;
         self.peeked = null;
         const body = try self.parseList(.compound);
@@ -542,18 +625,26 @@ pub const Parser = struct {
             },
             else => {},
         }
-        return self.unexpected(t, ")");
+        const e = self.unexpected(t, ")");
+        if (t.tag == .eof) {
+            self.diag.kind = .unterminated_command_substitution;
+            self.diag.opener = .{ .name = "$(", .line = cs_line, .column = self.colOf(cs_off) };
+            self.diag.expected = "";
+        }
+        return e;
     }
 
     fn scanBackquote(self: *Parser, b: *Builder, in_dq: bool) Error!void {
         const a = self.a;
+        const boff = self.pos;
+        const bline = self.line;
         self.pos += 1;
         var text: std.ArrayList(u8) = .empty;
         while (true) {
-            const c = self.cur() orelse return self.fail("Syntax error: Unterminated quoted string", .{});
+            const c = self.cur() orelse return self.failOpen(.unterminated_quote, "`", boff, bline, "Syntax error: Unterminated quoted string", .{});
             if (c == '`') break;
             if (c == '\\') {
-                const n = self.at(1) orelse return self.fail("Syntax error: Unterminated quoted string", .{});
+                const n = self.at(1) orelse return self.failOpen(.unterminated_quote, "`", boff, bline, "Syntax error: Unterminated quoted string", .{});
                 if (n == '$' or n == '`' or n == '\\' or (in_dq and n == '"')) {
                     try text.append(a, n);
                     self.pos += 2;
@@ -584,16 +675,21 @@ pub const Parser = struct {
         const a = self.a;
         for (self.here.items) |h| {
             var body: std.ArrayList(u8) = .empty;
+            var found = false;
             while (self.pos < self.src.len) {
                 const end = std.mem.indexOfScalarPos(u8, self.src, self.pos, '\n') orelse self.src.len;
                 var ln = self.src[self.pos..end];
                 self.pos = @min(end + 1, self.src.len);
                 self.line += 1;
                 if (h.strip) ln = std.mem.trimStart(u8, ln, "\t");
-                if (std.mem.eql(u8, ln, h.delim)) break;
+                if (std.mem.eql(u8, ln, h.delim)) {
+                    found = true;
+                    break;
+                }
                 try body.appendSlice(a, ln);
                 try body.append(a, '\n');
             }
+            if (!found) self.warn_heredoc = .{ .line = h.line, .delim = h.delim };
             if (h.quoted) {
                 const parts = try a.alloc(ast.Part, 1);
                 parts[0] = .{ .quoted = body.items };
@@ -651,6 +747,12 @@ pub const Parser = struct {
 
     fn skipNewlines(self: *Parser) Error!void {
         while ((try self.peek()).tag == .newline) _ = try self.next();
+    }
+
+    fn mkSimple(self: *Parser, line: u32, s: usize, e: usize, kind: ast.Kind) Error!*const Node {
+        const n = try self.a.create(Node);
+        n.* = .{ .line = line, .kind = kind, .col = if (e > s) self.colOf(s) else 0, .end_col = if (e > s) self.colOf(e) else 0 };
+        return n;
     }
 
     fn mk(self: *Parser, line: u32, kind: ast.Kind) Error!*const Node {
@@ -797,7 +899,9 @@ pub const Parser = struct {
             .op => |o| switch (o) {
                 .lparen => {
                     _ = try self.next();
-                    const body = try self.parseList(.compound);
+                    try self.pushOpener("(", t);
+                    defer self.popOpener();
+                    const body = (try self.parseList(.compound)) orelse return self.emptyBody(")");
                     const c = try self.next();
                     if (!(c.tag == .op and c.tag.op == .rparen)) return self.unexpected(c, ")");
                     return self.parseTrailingRedirs(try self.mk(t.line, .{ .subshell = body }), t.line);
@@ -818,6 +922,13 @@ pub const Parser = struct {
         return self.mk(line, .{ .redirected = .{ .body = node, .redirs = try redirs.toOwnedSlice(self.a) } });
     }
 
+    /// An empty compound-list where one is required: at the end of the input
+    /// the missing closer is named, otherwise the offending token is.
+    fn emptyBody(self: *Parser, closer: []const u8) Error {
+        const t = self.peek() catch |e| return e;
+        return self.unexpected(t, if (t.tag == .eof) closer else null);
+    }
+
     fn expectReserved(self: *Parser, want: Reserved) Error!void {
         const t = try self.next();
         switch (t.tag) {
@@ -836,17 +947,23 @@ pub const Parser = struct {
     }
 
     fn parseGroup(self: *Parser) Error!*const Node {
-        const line = (try self.next()).line;
-        const body = try self.parseList(.compound);
+        const ot = try self.next();
+        const line = ot.line;
+        try self.pushOpener("{", ot);
+        defer self.popOpener();
+        const body = (try self.parseList(.compound)) orelse return self.emptyBody("}");
         try self.expectReserved(.rbrace);
         return self.mk(line, .{ .group = body });
     }
 
     fn parseIf(self: *Parser) Error!*const Node {
-        const line = (try self.next()).line; // `if` or `elif`
-        const cond = (try self.parseList(.compound)) orelse return self.unexpected(try self.peek(), null);
+        const ot = try self.next(); // `if` or `elif`
+        const line = ot.line;
+        try self.pushOpener(if (self.openers.items.len > 0 and false) "elif" else "if", ot);
+        defer self.popOpener();
+        const cond = (try self.parseList(.compound)) orelse return self.unexpected(try self.peek(), "then");
         try self.expectReserved(.kw_then);
-        const then = try self.parseList(.compound);
+        const then = (try self.parseList(.compound)) orelse return self.emptyBody("fi");
         var otherwise: ?*const Node = null;
         if (try self.peekIs(.kw_elif)) {
             otherwise = try self.parseIf();
@@ -854,28 +971,39 @@ pub const Parser = struct {
         }
         if (try self.peekIs(.kw_else)) {
             _ = try self.next();
-            otherwise = try self.parseList(.compound);
+            otherwise = (try self.parseList(.compound)) orelse return self.emptyBody("fi");
         }
         try self.expectReserved(.kw_fi);
         return self.mk(line, .{ .if_clause = .{ .cond = cond, .then = then, .otherwise = otherwise } });
     }
 
     fn parseLoop(self: *Parser, until: bool) Error!*const Node {
-        const line = (try self.next()).line;
-        const cond = (try self.parseList(.compound)) orelse return self.unexpected(try self.peek(), null);
+        const ot = try self.next();
+        const line = ot.line;
+        try self.pushOpener(if (until) "until" else "while", ot);
+        defer self.popOpener();
+        const cond = (try self.parseList(.compound)) orelse return self.unexpected(try self.peek(), "do");
         try self.expectReserved(.kw_do);
-        const body = try self.parseList(.compound);
+        const body = (try self.parseList(.compound)) orelse return self.emptyBody("done");
         try self.expectReserved(.kw_done);
         return self.mk(line, .{ .loop = .{ .until = until, .cond = cond, .body = body } });
     }
 
     fn parseFor(self: *Parser) Error!*const Node {
-        const line = (try self.next()).line;
+        const ot = try self.next();
+        const line = ot.line;
+        try self.pushOpener("for", ot);
+        defer self.popOpener();
         const nt = try self.next();
         const name = switch (nt.tag) {
             .word => |w| blk: {
                 if (w.len == 1 and w[0] == .text and lexer.isName(w[0].text)) break :blk w[0].text;
-                return self.fail("Syntax error: Bad for loop variable", .{});
+                const e = self.failK(.bad_for_variable, "Syntax error: Bad for loop variable", .{});
+                self.diag.token = self.src[nt.start..nt.end];
+                self.diag.line = nt.line;
+                self.diag.col = self.colOf(nt.start);
+                self.diag.end_col = self.colOf(nt.end);
+                return e;
             },
             else => return self.unexpected(nt, null),
         };
@@ -909,13 +1037,16 @@ pub const Parser = struct {
         }
         try self.skipNewlines();
         try self.expectReserved(.kw_do);
-        const body = try self.parseList(.compound);
+        const body = (try self.parseList(.compound)) orelse return self.emptyBody("done");
         try self.expectReserved(.kw_done);
         return self.mk(line, .{ .for_clause = .{ .name = name, .words = words, .body = body } });
     }
 
     fn parseCase(self: *Parser) Error!*const Node {
-        const line = (try self.next()).line;
+        const ot = try self.next();
+        const line = ot.line;
+        try self.pushOpener("case", ot);
+        defer self.popOpener();
         const wt = try self.next();
         const word = switch (wt.tag) {
             .word => |w| w,
@@ -951,6 +1082,7 @@ pub const Parser = struct {
                 try self.skipNewlines();
                 continue;
             }
+            if (!(try self.peekIs(.kw_esac))) return self.unexpected(e, ";;");
             break;
         }
         try self.expectReserved(.kw_esac);
@@ -987,7 +1119,12 @@ pub const Parser = struct {
         const wt = try self.next();
         const target = switch (wt.tag) {
             .word => |w| w,
-            else => return self.unexpected(wt, null),
+            else => {
+                const e = self.unexpected(wt, null);
+                self.diag.kind = .missing_redirect_target;
+                self.diag.expected = op.text();
+                return e;
+            },
         };
         const r = try self.a.create(ast.Redirect);
         r.* = .{ .fd = fd, .op = switch (op) {
@@ -1012,7 +1149,7 @@ pub const Parser = struct {
                 else => quoted = quoted,
             };
             r.target = &.{};
-            try self.here.append(self.a, .{ .redir = r, .delim = delim.items, .strip = op == .dlessdash, .quoted = quoted });
+            try self.here.append(self.a, .{ .redir = r, .delim = delim.items, .strip = op == .dlessdash, .quoted = quoted, .line = t.line });
         }
         return r;
     }
@@ -1023,6 +1160,8 @@ pub const Parser = struct {
         var assigns: std.ArrayList(ast.Assign) = .empty;
         var words: std.ArrayList(ast.Word) = .empty;
         var redirs: std.ArrayList(*ast.Redirect) = .empty;
+        var cmd_start: usize = 0;
+        var cmd_end: usize = 0;
         while (true) {
             if (try self.tryRedirect()) |r| {
                 try redirs.append(a, r);
@@ -1036,17 +1175,33 @@ pub const Parser = struct {
             if (words.items.len == 0) {
                 if (try self.assignSplit(w)) |asg| {
                     _ = try self.next();
+                    if (assigns.items.len == 0) {
+                        cmd_start = t.start;
+                        cmd_end = t.end;
+                    }
                     try assigns.append(a, asg);
                     continue;
                 }
             }
             _ = try self.next();
+            if (words.items.len == 0) {
+                cmd_start = t.start;
+                cmd_end = t.end;
+            }
             try words.append(a, w);
             // function definition: name ( ) body
             if (words.items.len == 1 and assigns.items.len == 0 and redirs.items.len == 0) {
                 const p = try self.peek();
                 if (p.tag == .op and p.tag.op == .lparen) {
                     const fname = if (w.len == 1 and w[0] == .text and lexer.isName(w[0].text)) w[0].text else return self.unexpected(p, null);
+                    if (lexer.isSpecialBuiltin(fname)) {
+                        const e = self.failK(.bad_function_name, "Syntax error: Bad function name", .{});
+                        self.diag.token = fname;
+                        self.diag.line = t.line;
+                        self.diag.col = self.colOf(t.start);
+                        self.diag.end_col = self.colOf(t.end);
+                        return e;
+                    }
                     _ = try self.next();
                     const c = try self.next();
                     if (!(c.tag == .op and c.tag.op == .rparen)) return self.unexpected(c, ")");
@@ -1063,7 +1218,7 @@ pub const Parser = struct {
             try self.maybeAliasNext(words.items.len);
         }
         if (assigns.items.len == 0 and words.items.len == 0 and redirs.items.len == 0) return self.unexpected(try self.peek(), null);
-        return self.mk(line, .{ .simple = .{
+        return self.mkSimple(line, cmd_start, cmd_end, .{ .simple = .{
             .assigns = try assigns.toOwnedSlice(a),
             .words = try words.toOwnedSlice(a),
             .redirs = try redirs.toOwnedSlice(a),
@@ -1162,4 +1317,57 @@ test "tilde prefixes" {
     const w = p.commands[0].kind.simple.words;
     try std.testing.expect(w[1][0] == .tilde);
     try std.testing.expectEqualStrings("root", w[2][0].tilde);
+}
+
+const fuzz_corpus = [_][]const u8{
+    "echo 'a' \"b $(c)\" `d` $((1+2)) ${x:-y}\n",
+    "cat <<EOF\n$x $(echo hi) `date`\nEOF\ncat <<-'E'\n\tbody\n\tE\n",
+    "if a; then b; elif c; then d; else e; fi\nwhile :; do break; done\nuntil false; do :; done\n",
+    "case $x in a|b) echo;; (c) :;; *) ;; esac\nfor i in 1 2 3; do echo $i; done\n",
+    "f() { echo \"$@\"; } >&2\n(cd /; ls) | sort -r && echo ok || echo bad &\n",
+    "x=$((1 + (2 * 3) % 4 << 1 ? 5 : 6)); y=${x#*/}${x%%.*}${#x}\n",
+    "echo $(echo $(echo \"nested `deep`\"))\necho \"a\\\"b\" 'c' d\\ e # comment\n",
+    "! true; 2>&1 echo a; exec 3<>f; echo >|g; echo ~root/x a=~:~/y\n",
+};
+
+fn parseOnce(bytes: []const u8) void {
+    var d: Diag = .{};
+    var prog = parseProgram(std.testing.allocator, bytes, &d) catch return;
+    prog.deinit();
+}
+
+fn fuzzOne(_: void, smith: *std.testing.Smith) anyerror!void {
+    var buf: [1024]u8 = undefined;
+    const n = smith.slice(&buf);
+    parseOnce(buf[0..n]);
+}
+
+test "fuzz: the parser never crashes, hangs or leaks" {
+    try std.testing.fuzz({}, fuzzOne, .{ .corpus = &fuzz_corpus });
+}
+
+test "mutation: corpus scripts with random byte damage parse or fail cleanly" {
+    var prng = std.Random.DefaultPrng.init(0x5eed);
+    const rnd = prng.random();
+    var buf: [256]u8 = undefined;
+    const specials = "'\"`$(){};|&<>\n\\#~ =";
+    for (fuzz_corpus) |seed| {
+        parseOnce(seed);
+        var iter: usize = 0;
+        while (iter < 600) : (iter += 1) {
+            const len = @min(seed.len, buf.len);
+            @memcpy(buf[0..len], seed[0..len]);
+            var cur = len;
+            const edits = 1 + rnd.uintLessThan(usize, 4);
+            var k: usize = 0;
+            while (k < edits) : (k += 1) {
+                switch (rnd.uintLessThan(u8, 3)) {
+                    0 => buf[rnd.uintLessThan(usize, cur)] = specials[rnd.uintLessThan(usize, specials.len)],
+                    1 => cur = rnd.uintLessThan(usize, cur) + 1,
+                    else => buf[rnd.uintLessThan(usize, cur)] = rnd.int(u8),
+                }
+            }
+            parseOnce(buf[0..cur]);
+        }
+    }
 }

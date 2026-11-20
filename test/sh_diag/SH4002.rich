@@ -1,0 +1,6 @@
+sh: -c:1:46: error[SH4002]: cannot execute './notexec': permission denied or not an executable file
+  |
+1 | echo 'echo hi' > notexec; chmod 644 notexec; ./notexec
+  |                                              ^^^^^^^^^
+help: make it executable with `chmod +x`, or run it through its interpreter
+rc=126

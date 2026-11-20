@@ -13,6 +13,7 @@ const std = @import("std");
 const sys = @import("../../sys.zig");
 const ast = @import("ast.zig");
 const parser = @import("parser.zig");
+const diagmod = @import("diag.zig");
 const exec = @import("exec.zig");
 const Allocator = std.mem.Allocator;
 
@@ -57,11 +58,8 @@ pub const HostBuiltin = struct {
     run: *const fn (ctx: ?*anyopaque, sh: *Shell, args: []const []const u8) u8,
 };
 
-pub const Diagnostic = struct {
-    line: u32,
-    /// Complete text without the `name: line: ` prefix.
-    message: []const u8,
-};
+pub const Diagnostic = diagmod.Diagnostic;
+pub const DiagStyle = diagmod.Style;
 
 pub const Options = struct {
     /// `$0` and the diagnostic prefix.
@@ -69,8 +67,14 @@ pub const Options = struct {
     /// Initial variables (the process environment). Not retained.
     environ: ?*const std.process.Environ.Map = null,
     flags: Flags = .{},
+    /// How diagnostics are written when no `reporter` is installed.
+    diag_style: DiagStyle = .posix,
+    /// ANSI colour in the rich style (the host decides: terminal, NO_COLOR).
+    diag_color: bool = false,
+    /// Label for script name in diagnostics (`-c`, a path, `stdin`).
+    label: []const u8 = "",
     /// Called instead of writing diagnostics to descriptor 2.
-    reporter: ?*const fn (ctx: ?*anyopaque, d: Diagnostic) void = null,
+    reporter: ?*const fn (ctx: ?*anyopaque, d: *const Diagnostic) void = null,
     reporter_ctx: ?*anyopaque = null,
 };
 
@@ -114,7 +118,7 @@ pub const Shell = struct {
     /// Arenas of programs that defined functions; kept for the shell's life.
     pinned: std.ArrayList(std.heap.ArenaAllocator) = .empty,
     funcs_defined: u32 = 0,
-    reporter: ?*const fn (ctx: ?*anyopaque, d: Diagnostic) void = null,
+    reporter: ?*const fn (ctx: ?*anyopaque, d: *const Diagnostic) void = null,
     reporter_ctx: ?*anyopaque = null,
     /// getopts: position inside a grouped option argument.
     getopts_sub: usize = 0,
@@ -124,6 +128,17 @@ pub const Shell = struct {
     /// Set while the shell is executing a trap handler.
     in_trap: u32 = 0,
     last_subst_status: ?u8 = null,
+    /// Non-zero while a special builtin runs under `command` (errors do not
+    /// end the shell).
+    no_die: u32 = 0,
+    diag_style: DiagStyle = .posix,
+    diag_color: bool = false,
+    label: []u8 = &.{},
+    /// Source text being run and the command-word columns of the current
+    /// simple command (for excerpts).
+    cur_src: []const u8 = "",
+    cur_col: u32 = 0,
+    cur_end_col: u32 = 0,
 
     pub fn init(env: Env, options: Options) Allocator.Error!*Shell {
         const gpa = env.gpa;
@@ -134,6 +149,9 @@ pub const Shell = struct {
             .name = try gpa.dupe(u8, options.name),
             .flags = options.flags,
             .pid = sys.getpid(),
+            .diag_style = options.diag_style,
+            .diag_color = options.diag_color,
+            .label = try gpa.dupe(u8, options.label),
             .reporter = options.reporter,
             .reporter_ctx = options.reporter_ctx,
         };
@@ -216,6 +234,7 @@ pub const Shell = struct {
         for (self.pinned.items) |*p| p.deinit();
         self.pinned.deinit(gpa);
         gpa.free(self.name);
+        gpa.free(self.label);
         gpa.destroy(self);
     }
 
@@ -320,7 +339,7 @@ pub const Shell = struct {
         sys.writeAll(2, bytes) catch {};
     }
 
-    /// A diagnostic in dash's format: `name: line: message`.
+    /// A diagnostic in dash's wording; classified into the catalog.
     pub fn diag(self: *Shell, comptime fmt: []const u8, args: anytype) void {
         var buf: [2048]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, fmt, args) catch buf[0..0];
@@ -328,16 +347,51 @@ pub const Shell = struct {
     }
 
     pub fn diagText(self: *Shell, msg: []const u8) void {
+        self.diagWith(msg, false);
+    }
+
+    /// Like `diagText` for messages dash prints without any prefix.
+    pub fn diagBare(self: *Shell, msg: []const u8) void {
+        self.diagWith(msg, true);
+    }
+
+    /// Report with an explicit kind (when the text alone cannot say).
+    pub fn diagKind(self: *Shell, kind: diagmod.Kind, subject: []const u8, msg: []const u8) void {
+        self.diagWith2(msg, false, .{ .kind = kind, .subject = subject });
+    }
+
+    fn diagWith(self: *Shell, msg: []const u8, bare: bool) void {
+        self.diagWith2(msg, bare, diagmod.classify(msg));
+    }
+
+    fn diagWith2(self: *Shell, msg: []const u8, bare: bool, c: diagmod.Classified) void {
+        const e = diagmod.entryOf(c.kind);
+        var d: Diagnostic = .{
+            .code = e.code,
+            .kind = c.kind,
+            .label = self.label,
+            .line = self.line,
+            .column = self.cur_col,
+            .end_column = self.cur_end_col,
+            .subject = c.subject,
+            .posix = msg,
+            .bare = bare,
+            .source = self.cur_src,
+        };
+        self.emit(&d);
+    }
+
+    /// Hand a diagnostic to the host's reporter or render it to descriptor 2.
+    pub fn emit(self: *Shell, d: *const Diagnostic) void {
         if (self.reporter) |r| {
-            r(self.reporter_ctx, .{ .line = self.line, .message = msg });
+            r(self.reporter_ctx, d);
             return;
         }
-        var buf: [2300]u8 = undefined;
-        const text = if (self.flags.interactive)
-            std.fmt.bufPrint(&buf, "{s}: {s}\n", .{ self.name, msg })
-        else
-            std.fmt.bufPrint(&buf, "{s}: {d}: {s}\n", .{ self.name, self.line, msg });
-        self.errRaw(text catch return);
+        if (d.severity == .warning and self.diag_style == .posix) return;
+        var arena = std.heap.ArenaAllocator.init(self.gpa);
+        defer arena.deinit();
+        const text = diagmod.render(arena.allocator(), d, self.name, self.diag_style, self.diag_color, self.flags.interactive) catch return;
+        self.errRaw(text);
     }
 
     /// `name: line: cmd: message` for builtins.

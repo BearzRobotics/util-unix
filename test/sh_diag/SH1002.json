@@ -1,0 +1,2 @@
+{"code":"SH1002","kind":"unterminated_quote","severity":"error","file":"-c","line":1,"column":6,"end":7,"message":"unterminated ' quote (opened at line 1, column 6)","help":"add the closing quote, or escape the quote character with a backslash","token":"","expected":"","posix":"Syntax error: Unterminated quoted string"}
+rc=2

@@ -1,0 +1,6 @@
+sh: -c:1:5: error[SH1008]: '1x' is not a valid variable name for `for`
+  |
+1 | for 1x in a; do :; done
+  |     ^^
+help: use letters, digits and underscores, not starting with a digit
+rc=2

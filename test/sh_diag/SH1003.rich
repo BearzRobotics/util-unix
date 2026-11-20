@@ -1,0 +1,5 @@
+sh: -c:1: warning[SH1003]: here-document delimited by end of file (wanted 'EOF') (started at line 1)
+  |
+1 | cat <<EOF
+help: put the delimiter alone on a line after the body
+rc=0

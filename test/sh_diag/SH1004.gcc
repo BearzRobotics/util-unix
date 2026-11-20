@@ -1,0 +1,2 @@
+-c:1:6: error: unterminated command substitution (opened at line 1, column 6) [SH1004]
+rc=2

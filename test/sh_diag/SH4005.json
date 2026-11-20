@@ -1,0 +1,2 @@
+{"code":"SH4005","kind":"errexit_exit","severity":"warning","file":"-c","line":2,"column":1,"end":6,"message":"`set -e` is on and 'false' failed, so the shell exits","help":"test the command (`cmd || handle`) if the failure is expected","token":"","expected":"","posix":""}
+rc=1

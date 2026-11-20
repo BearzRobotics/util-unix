@@ -17,6 +17,8 @@ pub const expand = @import("sh/expand.zig");
 pub const exec = @import("sh/exec.zig");
 pub const builtins = @import("sh/builtins.zig");
 pub const shell = @import("sh/shell.zig");
+pub const diag = @import("sh/diag.zig");
+pub const lint = @import("sh/lint.zig");
 
 pub const Shell = shell.Shell;
 pub const Env = shell.Env;
@@ -35,4 +37,6 @@ test {
     _ = exec;
     _ = builtins;
     _ = shell;
+    _ = diag;
+    _ = lint;
 }

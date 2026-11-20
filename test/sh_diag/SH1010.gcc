@@ -1,0 +1,2 @@
+-c:1:7: error: redirection '>' needs a file name or descriptor [SH1010]
+rc=2

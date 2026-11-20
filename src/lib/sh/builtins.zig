@@ -69,6 +69,14 @@ pub fn find(name: []const u8) ?Builtin {
 
 /// A special-builtin error: the non-interactive shell exits.
 fn die(sh: *Shell, st: u8) u8 {
+    if (sh.no_die > 0) return st;
+    sh.status = st;
+    sh.flow = .exit_shell;
+    return st;
+}
+
+/// `exit` itself: always leaves the shell.
+fn leave(sh: *Shell, st: u8) u8 {
     sh.status = st;
     sh.flow = .exit_shell;
     return st;
@@ -155,6 +163,10 @@ fn returnCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             sh.diagCmd("return", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         };
+        if (n < 0) {
+            sh.diagCmd("return", "Illegal number: {s}", .{args[1]});
+            return die(sh, 2);
+        }
         st = @truncate(@as(u64, @bitCast(n)));
     }
     sh.status = st;
@@ -169,9 +181,13 @@ fn exitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             sh.diagCmd("exit", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         };
+        if (n < 0) {
+            sh.diagCmd("exit", "Illegal number: {s}", .{args[1]});
+            return die(sh, 2);
+        }
         st = @truncate(@as(u64, @bitCast(n)));
     }
-    return die(sh, st);
+    return leave(sh, st);
 }
 
 fn eval(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
@@ -570,7 +586,7 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var st: u8 = 0;
     for (args[i..]) |s| {
         const n = sys.signalNumber(s) orelse {
-            sh.errRaw(std.fmt.allocPrint(a, "trap: {s}: bad trap\n", .{s}) catch "");
+            sh.diagBare(std.fmt.allocPrint(a, "trap: {s}: bad trap", .{s}) catch "");
             st = 1;
             continue;
         };
@@ -1293,17 +1309,42 @@ const T = struct {
     }
 };
 
+fn evalCounted(t: *T, args: []const []const u8) TestErr!bool {
+    const eq = std.mem.eql;
+    t.args = args;
+    t.i = 0;
+    switch (args.len) {
+        0 => return false,
+        1 => return args[0].len > 0,
+        2 => {
+            if (eq(u8, args[0], "!")) return args[1].len == 0;
+            if (T.isUnary(args[0])) return t.evalUnary(args[0][1], args[1]);
+            return t.fail("{s}: unexpected operator", .{args[0]});
+        },
+        3 => {
+            if (T.binop(args[1])) |op| return t.evalBin(op, args[0], args[2]);
+            if (eq(u8, args[0], "!")) return !(try evalCounted(t, args[1..]));
+            if (eq(u8, args[0], "(") and eq(u8, args[2], ")")) return args[1].len > 0;
+        },
+        4 => {
+            if (eq(u8, args[0], "!")) return !(try evalCounted(t, args[1..]));
+            if (eq(u8, args[0], "(") and eq(u8, args[3], ")")) return evalCounted(t, args[1..3]);
+        },
+        else => {},
+    }
+    t.args = args;
+    t.i = 0;
+    const r = try t.oexpr();
+    if (t.i < args.len) return t.fail("{s}: unexpected operator", .{args[t.i]});
+    return r;
+}
+
 fn runTest(sh: *Shell, name: []const u8, args: []const []const u8) u8 {
-    if (args.len == 0) return 1;
     var t: T = .{ .sh = sh, .args = args, .name = name };
-    const r = t.oexpr() catch {
+    const r = evalCounted(&t, args) catch {
         sh.diagCmd(name, "{s}", .{t.err[0..t.err_len]});
         return 2;
     };
-    if (t.i < args.len) {
-        sh.diagCmd(name, "{s}: unexpected operator", .{args[t.i]});
-        return 2;
-    }
     return if (r) 0 else 1;
 }
 
@@ -1389,7 +1430,7 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             out.print(a, "{s}: not found\n", .{args[i]}) catch {};
         }
         _ = sh.out(out.items);
-        return if (ok) 0 else 127 - @as(u8, if (mode == 'v') 126 else 0);
+        return if (ok) 0 else 127;
     }
     var saved_path: ?[]u8 = null;
     if (use_default_path) {
@@ -1400,6 +1441,8 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         sh.setVarRaw("PATH", p) catch {};
         sh.gpa.free(p);
     };
+    sh.no_die += 1;
+    defer sh.no_die -= 1;
     return exec.runArgs(sh, a, args[i..], true);
 }
 
@@ -1495,64 +1538,64 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     const list: []const []const u8 = if (args.len > 3) args[3..] else @as([]const []const u8, @ptrCast(sh.params.items));
     const silent = optstr.len > 0 and optstr[0] == ':';
     const os = if (silent) optstr[1..] else optstr;
-    var optind: usize = if (sh.getVar("OPTIND")) |v| @as(usize, @intCast(@max(1, parseNum(v) orelse 1))) else 1;
-    if (optind < 1) optind = 1;
+    const optind: usize = if (sh.getVar("OPTIND")) |v| @as(usize, @intCast(@max(1, parseNum(v) orelse 1))) else 1;
+    // Mid-group: dash has already advanced OPTIND past the argument.
     if (optind != sh.getopts_last_optind) sh.getopts_sub = 0;
     var sub = sh.getopts_sub;
+    var idx = if (sub > 0) optind - 1 else optind;
     const finish = struct {
-        fn f(s: *Shell, al: Allocator, n: []const u8, val: []const u8, oi: usize, sub_: usize, st: u8) u8 {
+        fn f(s: *Shell, n: []const u8, val: []const u8, oi: usize, sub_: usize, st: u8) u8 {
             s.setVar(n, val) catch {};
             var buf: [24]u8 = undefined;
             const t = std.fmt.bufPrint(&buf, "{d}", .{oi}) catch "1";
             s.setVarRaw("OPTIND", t) catch {};
             s.getopts_last_optind = oi;
             s.getopts_sub = sub_;
-            _ = al;
             return st;
         }
     }.f;
-    if (optind > list.len) return finish(sh, a, name, "?", optind, 0, 1);
-    const arg = list[optind - 1];
+    if (idx > list.len) return finish(sh, name, "?", idx, 0, 1);
+    const arg = list[idx - 1];
     if (sub == 0) {
-        if (std.mem.eql(u8, arg, "--")) return finish(sh, a, name, "?", optind + 1, 0, 1);
-        if (arg.len < 2 or arg[0] != '-') return finish(sh, a, name, "?", optind, 0, 1);
+        if (std.mem.eql(u8, arg, "--")) return finish(sh, name, "?", idx + 1, 0, 1);
+        if (arg.len < 2 or arg[0] != '-') return finish(sh, name, "?", idx, 0, 1);
         sub = 1;
     }
     const c = arg[sub];
     sub += 1;
     const pos = if (c == ':') null else std.mem.indexOfScalar(u8, os, c);
     var cbuf: [1]u8 = .{c};
+    const more = sub < arg.len;
     if (pos == null) {
         if (silent) {
             sh.setVar("OPTARG", &cbuf) catch {};
         } else {
             sh.unsetVar("OPTARG") catch {};
-            sh.errRaw(std.fmt.allocPrint(a, "Illegal option -{c}\n", .{c}) catch "");
+            sh.diagBare(std.fmt.allocPrint(a, "Illegal option -{c}", .{c}) catch "");
         }
-        const done = sub >= arg.len;
-        return finish(sh, a, name, "?", if (done) optind + 1 else optind, if (done) 0 else sub, 0);
+        return finish(sh, name, "?", idx + 1, if (more) sub else 0, 0);
     }
     const takes = pos.? + 1 < os.len and os[pos.? + 1] == ':';
     if (takes) {
-        if (sub < arg.len) {
+        if (more) {
             sh.setVar("OPTARG", arg[sub..]) catch {};
-            return finish(sh, a, name, &cbuf, optind + 1, 0, 0);
+            return finish(sh, name, &cbuf, idx + 1, 0, 0);
         }
-        if (optind + 1 > list.len) {
+        if (idx + 1 > list.len) {
             if (silent) {
                 sh.setVar("OPTARG", &cbuf) catch {};
-                return finish(sh, a, name, ":", optind + 1, 0, 0);
+                return finish(sh, name, ":", idx + 1, 0, 0);
             }
             sh.unsetVar("OPTARG") catch {};
-            sh.errRaw(std.fmt.allocPrint(a, "No arg for -{c} option\n", .{c}) catch "");
-            return finish(sh, a, name, "?", optind + 1, 0, 0);
+            sh.diagBare(std.fmt.allocPrint(a, "No arg for -{c} option", .{c}) catch "");
+            return finish(sh, name, "?", idx + 1, 0, 0);
         }
-        sh.setVar("OPTARG", list[optind]) catch {};
-        return finish(sh, a, name, &cbuf, optind + 2, 0, 0);
+        sh.setVar("OPTARG", list[idx]) catch {};
+        return finish(sh, name, &cbuf, idx + 2, 0, 0);
     }
     sh.unsetVar("OPTARG") catch {};
-    const done = sub >= arg.len;
-    return finish(sh, a, name, &cbuf, if (done) optind + 1 else optind, if (done) 0 else sub, 0);
+    idx += 0;
+    return finish(sh, name, &cbuf, idx + 1, if (more) sub else 0, 0);
 }
 
 // --- wait, kill, umask, ulimit -------------------------------------------------------------------

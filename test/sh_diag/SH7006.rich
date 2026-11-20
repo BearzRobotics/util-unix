@@ -1,0 +1,6 @@
+sh: s.sh:1:1: warning[SH7006]: `source` is a bash extension; the POSIX spelling is `.`
+  |
+1 | source ./lib.sh
+  | ^^^^^^
+help: use `. ./file`
+rc=1

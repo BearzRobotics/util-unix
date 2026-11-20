@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5011]: no alias named 'nosuch'
+  |
+1 | unalias nosuch
+  | ^^^^^^^
+help: `alias` with no arguments lists the defined aliases
+rc=1

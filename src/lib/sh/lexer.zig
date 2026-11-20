@@ -61,6 +61,9 @@ pub const Op = enum {
 pub const Token = struct {
     tag: Tag,
     line: u32,
+    /// Byte offsets of the token in the source.
+    start: usize = 0,
+    end: usize = 0,
 
     pub const Tag = union(enum) {
         eof,
@@ -135,6 +138,14 @@ pub fn isName(s: []const u8) bool {
     if (s.len == 0 or !isNameStart(s[0])) return false;
     for (s[1..]) |c| if (!isNameChar(c)) return false;
     return true;
+}
+
+/// POSIX special built-in utilities (XCU 2.15); dash refuses them as
+/// function names.
+pub fn isSpecialBuiltin(name: []const u8) bool {
+    const names = [_][]const u8{ ":", ".", "break", "continue", "eval", "exec", "exit", "export", "readonly", "return", "set", "shift", "times", "trap", "unset" };
+    for (names) |n| if (std.mem.eql(u8, n, name)) return true;
+    return false;
 }
 
 pub fn isSpecialParam(c: u8) bool {

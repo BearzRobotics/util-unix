@@ -1,0 +1,2 @@
+trap: NOSUCH: bad trap
+rc=1

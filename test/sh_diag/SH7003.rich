@@ -1,0 +1,6 @@
+sh: s.sh:1:1: warning[SH7003]: `rm -r` of a path starting with a variable: if it is empty the path becomes `/...`
+  |
+1 | rm -rf "$dir/"
+  | ^^
+help: use `${var:?}` so an empty value stops the script
+rc=1

@@ -1,0 +1,6 @@
+sh: -c:1:6: error[SH1002]: unterminated ' quote (opened at line 1, column 6)
+  |
+1 | echo 'abc
+  |      ^
+help: add the closing quote, or escape the quote character with a backslash
+rc=2

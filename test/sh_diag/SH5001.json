@@ -1,0 +1,2 @@
+{"code":"SH5001","kind":"illegal_option","severity":"error","file":"-c","line":1,"column":1,"end":4,"message":"unknown option '-Z'","help":"see the builtin's description in the manual","token":"","expected":"","posix":"set: Illegal option -Z"}
+rc=2

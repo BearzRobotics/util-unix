@@ -1,0 +1,2 @@
+sh: 1: arithmetic expression: expecting primary: "1+"
+rc=2

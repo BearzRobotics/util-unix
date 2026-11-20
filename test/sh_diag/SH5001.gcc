@@ -1,0 +1,2 @@
+-c:1:1: error: unknown option '-Z' [SH5001]
+rc=2

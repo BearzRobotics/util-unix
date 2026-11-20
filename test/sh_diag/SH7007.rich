@@ -1,0 +1,6 @@
+sh: s.sh:1:7: warning[SH7007]: `local` is not defined by POSIX; common shells accept it but behave differently
+  |
+1 | f() { local x=1; }
+  |       ^^^^^
+help: use a subshell `f() ( ... )` or unique variable names
+rc=1

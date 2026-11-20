@@ -1,0 +1,2 @@
+{"code":"SH1001","kind":"unexpected_token","severity":"error","file":"s.sh","line":1,"column":17,"end":18,"message":"unexpected '}'","help":"check for a missing separator (`;` or newline) or a stray operator before it","token":"}","expected":"","posix":"Syntax error: \"}\" unexpected"}
+rc=2

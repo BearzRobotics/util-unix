@@ -1,0 +1,2 @@
+{"code":"SH5007","kind":"printf_number","severity":"error","file":"-c","line":1,"column":1,"end":7,"message":"'abc' is not a complete number","help":"pass an integer, or use `%s` for text","token":"","expected":"","posix":"printf: abc: expected numeric value"}
+rc=1

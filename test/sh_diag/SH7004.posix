@@ -1,0 +1,3 @@
+s.sh:1:1: warning: '[[' is a bash/ksh extension; in a POSIX shell it is a command called `[[` [SH7004]
+s.sh:1:1: warning: unquoted expansion of 'a' is split on whitespace and expanded as a glob [SH7001]
+rc=1

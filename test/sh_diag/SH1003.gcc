@@ -1,0 +1,2 @@
+-c:1:1: warning: here-document delimited by end of file (wanted 'EOF') (started at line 1) [SH1003]
+rc=0

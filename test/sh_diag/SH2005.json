@@ -1,0 +1,2 @@
+{"code":"SH2005","kind":"parameter_error","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"x: need x","help":"set the variable or catch the error with `${name-default}`","token":"","expected":"","posix":"x: need x"}
+rc=2

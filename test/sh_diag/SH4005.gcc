@@ -1,0 +1,2 @@
+-c:2:1: warning: `set -e` is on and 'false' failed, so the shell exits [SH4005]
+rc=1

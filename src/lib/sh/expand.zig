@@ -383,7 +383,12 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
                     if (p.colon) return fatal(sh, "{s}: parameter null or not set", .{p.name});
                     return fatal(sh, "{s}: parameter not set", .{p.name});
                 }
-                return fatal(sh, "{s}: {s}", .{ p.name, msg });
+                var kb: [512]u8 = undefined;
+                const text = std.fmt.bufPrint(&kb, "{s}: {s}", .{ p.name, msg }) catch p.name;
+                sh.diagKind(.parameter_error, text, text);
+                sh.status = 2;
+                sh.flow = .exit_shell;
+                return error.Fatal;
             }
             try emit(x, pv, p.name, p.quoted);
         },

@@ -1,0 +1,2 @@
+{"code":"SH1001","kind":"unexpected_token","severity":"error","file":"-c","line":1,"column":6,"end":7,"message":"unexpected ')'","help":"check for a missing separator (`;` or newline) or a stray operator before it","token":")","expected":"","posix":"Syntax error: \")\" unexpected"}
+rc=2

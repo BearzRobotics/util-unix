@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5008]: kill: invalid signal number or name: NOSUCH
+  |
+1 | kill -s NOSUCH 1
+  | ^^^^
+help: `kill -l` lists signal names
+rc=2

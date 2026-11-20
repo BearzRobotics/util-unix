@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5009]: getopts: usage: getopts optstring var [arg]
+  |
+1 | getopts a
+  | ^^^^^^^
+help: see the usage line in the message
+rc=2

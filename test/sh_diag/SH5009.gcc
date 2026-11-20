@@ -1,0 +1,2 @@
+-c:1:1: error: getopts: usage: getopts optstring var [arg] [SH5009]
+rc=2

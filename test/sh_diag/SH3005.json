@@ -1,0 +1,2 @@
+{"code":"SH3005","kind":"bad_fd_number","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"'file' is not a file descriptor number","help":"use a number, or `-` to close","token":"","expected":"","posix":"Syntax error: Bad fd number"}
+rc=2

@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH4001]: command not found: 'nosuchcommand'
+  |
+1 | nosuchcommand
+  | ^^^^^^^^^^^^^
+help: check the spelling and that its directory is in PATH
+rc=127

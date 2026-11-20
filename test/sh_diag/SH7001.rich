@@ -1,0 +1,6 @@
+sh: s.sh:1:1: warning[SH7001]: unquoted expansion of 'file' is split on whitespace and expanded as a glob
+  |
+1 | rm $file
+  | ^^
+help: quote it as "${name}" unless you want word splitting
+rc=1

@@ -1,0 +1,2 @@
+-c:1:6: error: unterminated ' quote (opened at line 1, column 6) [SH1002]
+rc=2

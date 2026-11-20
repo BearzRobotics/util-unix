@@ -1,0 +1,6 @@
+sh: -c:1:15: error[SH2007]: 'r' is read-only
+  |
+1 | readonly r=1; r=2
+  |               ^^^
+help: do not modify it, or start a new shell where it is not read-only
+rc=2

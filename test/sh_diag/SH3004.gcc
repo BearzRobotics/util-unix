@@ -1,0 +1,2 @@
+-c:1:21: error: 'f' exists and `set -C` (noclobber) is on [SH3004]
+rc=2

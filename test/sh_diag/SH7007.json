@@ -1,0 +1,2 @@
+{"code":"SH7007","kind":"lint_local","severity":"warning","file":"s.sh","line":1,"column":7,"end":12,"message":"`local` is not defined by POSIX; common shells accept it but behave differently","help":"use a subshell `f() ( ... )` or unique variable names","token":"","expected":"","posix":"`local` is not POSIX"}
+rc=1

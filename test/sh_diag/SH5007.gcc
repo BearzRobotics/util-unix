@@ -1,0 +1,2 @@
+-c:1:1: error: 'abc' is not a complete number [SH5007]
+rc=1

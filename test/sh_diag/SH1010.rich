@@ -1,0 +1,6 @@
+sh: -c:1:7: error[SH1010]: redirection '>' needs a file name or descriptor
+  |
+1 | echo >
+  |       ^
+help: write the target after the operator, e.g. `> file` or `>&2`
+rc=2

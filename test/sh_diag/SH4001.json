@@ -1,0 +1,2 @@
+{"code":"SH4001","kind":"not_found","severity":"error","file":"-c","line":1,"column":1,"end":14,"message":"command not found: 'nosuchcommand'","help":"check the spelling and that its directory is in PATH","token":"","expected":"","posix":"nosuchcommand: not found"}
+rc=127

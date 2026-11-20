@@ -1,0 +1,46 @@
+SH1001	echo )
+SH1002	echo 'abc
+SH1003	cat <<EOF\nbody
+SH1004	echo $(date
+SH1005	echo $((1+2)
+SH1006	echo ${x!}
+SH1007	while true; do\n  echo x\nfi
+SH1008	for 1x in a; do :; done
+SH1009	eval() { :; }
+SH1010	echo >
+SH2001	echo $((1/0))
+SH2002	echo $((1+))
+SH2003	x=abc; echo $((x+1))
+SH2004	set -u; echo $x
+SH2005	echo ${x?need x}
+SH2006	echo ${1=x}
+SH2007	readonly r=1; r=2
+SH3001	cat < missing.txt
+SH3002	echo x > /nonexistent/f
+SH3003	echo hi >&9
+SH3004	set -C; echo a > f; echo b > f
+SH3005	echo hi >&file
+SH4001	nosuchcommand
+SH4002	echo 'echo hi' > notexec; chmod 644 notexec; ./notexec
+SH4005	set -e\nfalse\necho unreachable
+SH5001	set -Z
+SH5002	set -- a; shift 2
+SH5003	cd /nonexistent
+SH5004	trap : NOSUCH
+SH5005	export 1x=3
+SH5006	[ a b ]
+SH5007	printf %d abc
+SH5008	kill -s NOSUCH 1
+SH5009	getopts a
+SH5010	echo hi >&-
+SH5011	unalias nosuch
+SH5013	local x=1
+SH7001	rm $file
+SH7002	cd /build\nrm -rf ./*
+SH7003	rm -rf "$dir/"
+SH7004	[[ $a = b ]]
+SH7005	function f { :; }
+SH7006	source ./lib.sh
+SH7007	f() { local x=1; }
+SH7008	echo -e "a\\tb"
+SH7009	[ "$a" == b ]

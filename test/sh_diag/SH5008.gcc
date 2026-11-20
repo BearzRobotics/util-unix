@@ -1,0 +1,2 @@
+-c:1:1: error: kill: invalid signal number or name: NOSUCH [SH5008]
+rc=2

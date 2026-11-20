@@ -75,14 +75,14 @@ c() {
     shcmp_exec "$OURS" "$snippet" "$base.ours"
     ours_sig="$(cat "$base.ours.out"; echo "rc=$(cat "$base.ours.rc")")"
     ours_err="$(shcmp_norm < "$base.ours.err")"
-    n=0; agree=0; matrix=""; dash_sig=""; dash_err=""; same_as_dash=0; same_as_any_main=0
+    n=0; agree=0; matrix=""; dash_sig=""; dash_err=""; same_as_dash=0; posix_same=0
     for spec in $REF_SHELLS; do
         name="${spec%%|*}"; rest="${spec#*|}"
         cmd="${rest%%|*}"; arg=""; case "$rest" in *\|*) arg="${rest#*|}";; esac
         shcmp_exec "$cmd $arg" "$snippet" "$base.$name"
         sig="$(cat "$base.$name.out"; echo "rc=$(cat "$base.$name.rc")")"
         n=$((n + 1))
-        if [ "$sig" = "$ours_sig" ]; then agree=$((agree + 1)); mark="="; else mark="!"; fi
+        if [ "$sig" = "$ours_sig" ]; then agree=$((agree + 1)); mark="="; case "$name" in bash-posix|yash-posix) posix_same=1;; esac; else mark="!"; fi
         matrix="$matrix $name$mark"
         if [ "$name" = dash ]; then
             dash_sig="$sig"; dash_err="$(shcmp_norm < "$base.dash.err")"
@@ -104,7 +104,7 @@ c() {
         kind=VARIES
     fi
     if [ "$kind" = VARIES ]; then
-        if [ $same_as_dash = 1 ] || [ $bsd_same = 1 ] || [ -z "$dash_sig" ]; then VARIES=$((VARIES + 1)); else verdict=FAIL; fi
+        if [ $same_as_dash = 1 ] || [ $bsd_same = 1 ] || [ -z "$dash_sig" ] || { [ $posix_same = 1 ] && case "$flags" in *P*) true;; *) false;; esac; }; then VARIES=$((VARIES + 1)); else verdict=FAIL; fi
     elif [ $err_ok = 0 ]; then
         verdict=FAIL
     fi

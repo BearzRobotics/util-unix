@@ -1,0 +1,2 @@
+sh: 1: kill: invalid signal number or name: NOSUCH
+rc=2

@@ -1,0 +1,2 @@
+-c:1:1: error: `local` can only be used inside a function [SH5013]
+rc=2

@@ -1,0 +1,2 @@
+{"code":"SH1006","kind":"bad_substitution","severity":"error","file":"-c","line":1,"column":9,"end":10,"message":"bad substitution","help":"POSIX has `-` `=` `?` `+` (with or without `:`) and `#` `##` `%` `%%`; `${x/a/b}` and `${x:1:2}` are not POSIX","token":"","expected":"","posix":"Bad substitution"}
+rc=2

@@ -1,0 +1,2 @@
+s.sh:1:1: warning: `source` is a bash extension; the POSIX spelling is `.` [SH7006]
+rc=1

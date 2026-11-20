@@ -129,6 +129,9 @@ pub const Node = struct {
     /// Line of the first token, for diagnostics.
     line: u32,
     kind: Kind,
+    /// 1-based columns of the command word of a simple command (0 = unknown).
+    col: u32 = 0,
+    end_col: u32 = 0,
 };
 
 /// Result of parsing a whole source text.

@@ -1,0 +1,2 @@
+-c:1:1: error: command not found: 'nosuchcommand' [SH4001]
+rc=127

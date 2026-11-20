@@ -1,0 +1,2 @@
+{"code":"SH2002","kind":"arithmetic_syntax","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"arithmetic expression: expecting primary: \"1+\"","help":"check operators and parentheses; only C integer operators are available (no `,` `**` `++`)","token":"","expected":"","posix":"arithmetic expression: expecting primary: \"1+\""}
+rc=2

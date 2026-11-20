@@ -1,0 +1,6 @@
+sh: -c:1:11: error[SH5002]: cannot shift: fewer than the requested parameters
+  |
+1 | set -- a; shift 2
+  |           ^^^^^
+help: compare `$#` with the count first
+rc=2

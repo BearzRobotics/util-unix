@@ -20,6 +20,7 @@ const expand = @import("expand.zig");
 const pattern = @import("pattern.zig");
 const builtins = @import("builtins.zig");
 const lexer = @import("lexer.zig");
+const diagmod = @import("diag.zig");
 const shell = @import("shell.zig");
 const Shell = shell.Shell;
 const Node = ast.Node;
@@ -45,13 +46,16 @@ pub fn runSource(sh: *Shell, src: []const u8, o: RunOpts) error{OutOfMemory}!u8 
     var p = parser.Parser.init(a, src, &d);
     p.aliases = .{ .ctx = sh, .get = aliasGet };
     const defined_before = sh.funcs_defined;
+    const saved_src = sh.cur_src;
+    sh.cur_src = src;
+    defer sh.cur_src = saved_src;
     var last: u8 = 0;
     while (true) {
         const start = p.pos;
         const maybe = p.nextCommand() catch |e| switch (e) {
             error.Syntax => {
                 sh.line = d.line;
-                if (o.prefix.len > 0) sh.diag("{s}: {s}", .{ o.prefix, d.message() }) else sh.diagText(d.message());
+                reportSyntax(sh, &d, o.prefix, src);
                 sh.status = 2;
                 sh.flow = .exit_shell;
                 last = 2;
@@ -62,6 +66,11 @@ pub fn runSource(sh: *Shell, src: []const u8, o: RunOpts) error{OutOfMemory}!u8 
                 return error.OutOfMemory;
             },
         };
+        if (p.warn_heredoc) |w| {
+            p.warn_heredoc = null;
+            var wd: diagmod.Diagnostic = .{ .code = 1003, .kind = .unterminated_heredoc, .severity = .warning, .label = sh.label, .line = w.line, .subject = w.delim, .posix = "here-document delimited by end-of-file", .source = src };
+            sh.emit(&wd);
+        }
         const node = maybe orelse break;
         if (sh.flags.verbose) {
             const end = @min(p.pos, src.len);
@@ -76,6 +85,31 @@ pub fn runSource(sh: *Shell, src: []const u8, o: RunOpts) error{OutOfMemory}!u8 
         sh.pinned.append(sh.gpa, arena) catch {};
     } else arena.deinit();
     return last;
+}
+
+fn reportSyntax(sh: *Shell, d: *const parser.Diag, prefix: []const u8, src: []const u8) void {
+    var buf: [400]u8 = undefined;
+    const text = if (prefix.len > 0) (std.fmt.bufPrint(&buf, "{s}: {s}", .{ prefix, d.message() }) catch d.message()) else d.message();
+    const e = diagmod.entryOf(d.kind);
+    var dd: diagmod.Diagnostic = .{
+        .code = e.code,
+        .kind = d.kind,
+        .label = sh.label,
+        .line = d.line,
+        .column = d.col,
+        .end_column = d.end_col,
+        .token = d.token,
+        .expected = d.expected,
+        .opener = d.opener,
+        .subject = d.token,
+        .posix = text,
+        .source = src,
+    };
+    if (d.kind == .unterminated_quote or d.kind == .unterminated_arithmetic) dd.subject = if (d.opener) |o| o.name else "";
+    if (d.kind == .missing_redirect_target) dd.subject = d.expected;
+    if (d.kind == .bad_function_name) dd.subject = d.token;
+    if (d.kind == .bad_for_variable) dd.subject = d.token;
+    sh.emit(&dd);
 }
 
 // --- traps ------------------------------------------------------------------
@@ -130,10 +164,14 @@ fn xerr(sh: *Shell, e: expand.Error) u8 {
     }
 }
 
-fn errexitCheck(sh: *Shell, st: u8) void {
+fn errexitCheck(sh: *Shell, st: u8, what: []const u8) void {
     if (st != 0 and sh.flags.errexit and sh.noerrexit == 0 and sh.flow == .none) {
         sh.flow = .exit_shell;
         sh.status = st;
+        // Rich and JSON styles say which command ended the shell; the posix
+        // style stays silent (POSIX prints nothing here).
+        var d: diagmod.Diagnostic = .{ .code = 4005, .kind = .errexit_exit, .severity = .warning, .label = sh.label, .line = sh.line, .column = sh.cur_col, .end_column = sh.cur_end_col, .subject = what, .posix = "", .source = sh.cur_src };
+        sh.emit(&d);
     }
 }
 
@@ -164,7 +202,6 @@ pub fn waitFor(sh: *Shell, pid: i32, report: bool) u8 {
 fn childInit(sh: *Shell, bg: bool) void {
     sh.in_subshell = true;
     sh.jobs.clearRetainingCapacity();
-    sh.pid = sys.getpid();
     sys.clearPendingAny();
     var i: u8 = 0;
     while (i < sys.nsig) : (i += 1) {
@@ -280,7 +317,7 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
             const b = body orelse return 0;
             const pid = forkRun(sh, b, .{}) orelse return 1;
             const st = waitFor(sh, pid, true);
-            errexitCheck(sh, st);
+            errexitCheck(sh, st, "subshell");
             return st;
         },
         .group => |body| return if (body) |b| execNode(sh, b) else 0,
@@ -327,7 +364,7 @@ fn execPipeline(sh: *Shell, node: *const Node, negate: bool, cmds: []const *cons
         st = runStages(sh, cmds);
     }
     if (negate) return @intFromBool(st == 0);
-    errexitCheck(sh, st);
+    errexitCheck(sh, st, "pipeline");
     return st;
 }
 
@@ -569,7 +606,7 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
                     continue;
                 }
                 const m = std.fmt.parseInt(i32, word, 10) catch {
-                    sh.diag("Syntax error: Bad fd number", .{});
+                    sh.diagKind(.bad_fd_number, word, "Syntax error: Bad fd number");
                     return false;
                 };
                 if (!sys.fdIsOpen(m)) {
@@ -738,7 +775,8 @@ fn assignError(sh: *Shell, name: []const u8) u8 {
 }
 
 fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
-    _ = node;
+    sh.cur_col = node.col;
+    sh.cur_end_col = node.end_col;
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     defer arena.deinit();
     const a = arena.allocator();
@@ -776,11 +814,21 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
                 error.OutOfMemory => return 2,
             };
         }
-        return sh.last_subst_status orelse 0;
+        const ast_st = sh.last_subst_status orelse 0;
+        errexitCheck(sh, ast_st, "assignment");
+        return ast_st;
     }
 
     const name = args.items[0];
+    // A PATH assignment in the command's own prefix applies to its lookup.
+    var path_saved: ?shell.Saved = null;
+    for (s.assigns, vals) |asg, v| if (std.mem.eql(u8, asg.name, "PATH")) {
+        const old: ?shell.Var = if (sh.vars.get("PATH")) |ov| .{ .value = if (ov.value) |x| sh.gpa.dupe(u8, x) catch null else null, .exported = ov.exported, .readonly = ov.readonly } else null;
+        path_saved = .{ .name = sh.gpa.dupe(u8, "PATH") catch break, .old = old };
+        sh.setVarRaw("PATH", v) catch {};
+    };
     const r = resolve(sh, a, name);
+    if (path_saved) |ps| restoreVar(sh, ps);
     const st: u8 = switch (r) {
         .not_found => blk: {
             // Redirections still happen (to a forked child in real shells).
@@ -804,7 +852,7 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
         .external => |path| runExternal(sh, a, path, args.items, s, vals, replace),
         else => runInShell(sh, a, r, args.items, s, vals),
     };
-    errexitCheck(sh, st);
+    errexitCheck(sh, st, name);
     return st;
 }
 
@@ -853,7 +901,7 @@ fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s
             },
             error.OutOfMemory => return 2,
         };
-        if (!is_special) sh.vars.getPtr(asg.name).?.exported = true;
+        if (!is_special or is_exec) sh.vars.getPtr(asg.name).?.exported = true;
     }
     var st: u8 = 0;
     switch (r) {

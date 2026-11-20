@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH2002]: arithmetic expression: expecting primary: "1+"
+  |
+1 | echo $((1+))
+  | ^^^^
+help: check operators and parentheses; only C integer operators are available (no `,` `**` `++`)
+rc=2
