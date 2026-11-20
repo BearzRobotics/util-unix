@@ -21,9 +21,7 @@ const cli = @import("../cli.zig");
 const sh = uu.sh;
 const diag = sh.diag;
 
-const usage_text = "Usage: sh [-abCefhimnuvx] [-o option] [+o option] [-c command [name [arg ...]] | -s | file [arg ...]]\n" ++
-    "       sh --check file | --explain CODE | --diagnostics-catalog | --list-diagnostics\n" ++
-    "Options: --diagnostics=posix|rich|json|gcc|auto\n";
+const usage_text = @embedFile("sh_help.txt");
 
 fn readAll(gpa: std.mem.Allocator, fd: i32) ?[]u8 {
     var data: std.ArrayList(u8) = .empty;
@@ -108,9 +106,7 @@ pub fn main(ctx: cli.Context) u8 {
                 writeOut(usage_text);
                 return 0;
             } else if (std.mem.eql(u8, a, "--version")) {
-                var buf: [96]u8 = undefined;
-                writeOut(std.fmt.bufPrint(&buf, "sh (util-unix) {s}\n", .{cli.version}) catch "");
-                return 0;
+                return if (cli.printVersion(ctx)) 0 else 1;
             } else if (std.mem.eql(u8, a, "--diagnostics-catalog")) {
                 var arena = std.heap.ArenaAllocator.init(gpa);
                 defer arena.deinit();
