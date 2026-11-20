@@ -916,7 +916,7 @@ c "command eval syntax error does not exit" 'command eval "( )" 2>/dev/null; ech
 c "errexit applies inside command substitution in a condition" 'set -e; if echo $(echo 1; false; echo 2); then echo A; fi; echo end' B "XCU 2.14 set -e: the -e setting applies to each subshell environment separately."
 
 c "empty quoted field survives an adjacent split expansion" 'set -- a ""; s=" "; set -- "$@"$s; echo $#' B "POSIX 2.6.5: a quoted empty string is a field; dash alone loses it for an empty \$e."
-c "length of dollar-at is the joined length" 'set -- abc de; echo ${#@} ${#*}' B "POSIX leaves \${#@} unspecified (XCU 2.6.2); dash and FreeBSD sh give the length of the joined parameters."
+cx "length of dollar-at is the joined length" 'set -- abc de; echo ${#@} ${#*}' B "POSIX leaves \${#@} unspecified (XCU 2.6.2); dash and FreeBSD sh give the length of the joined parameters."
 c "null test of two empty parameters" 'set -- "" ""; echo "[${@:-m}]"; set -- ""; echo "[${@:-m}]"' B
 c "ulimit -a with an operand" 'ulimit -a 42 >/dev/null 2>&1; echo $?' Be
 c "scripts: NUL bytes are ignored" 'printf "echo a\0b\n" > s; . ./s' B "POSIX leaves a script with NUL bytes undefined; dash and FreeBSD sh ignore them."
