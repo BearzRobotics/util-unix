@@ -49,18 +49,25 @@ interactive included.
    captured output, completion callbacks), and login-shell use (`-l`, `/etc/profile`,
    full `ulimit`, `times`).
 
-## Strict POSIX (decision, 2026-11-19)
+## Strict POSIX, one mode (decision, 2026-11-19)
 
-`sh` implements POSIX and nothing else by default; there is no `[[ ... ]]`, `=~`, arrays
-or `local` outside what POSIX.1-2024 specifies. Checked on 2026-11-19 against the other
-shells with `[[ abc =~ ^a.c$ ]]`: dash and FreeBSD sh answer `[[: not found`; yash
-refuses it in `--posix` mode with an explicit "syntax is not supported in the
-POSIXly-correct mode" error (and accepts it otherwise); busybox ash and bash --posix
-accept it. We follow dash and FreeBSD sh, and where an unsupported construct is
-recognisable (`[[`, `function`, `source`, `local`) the diagnostic says it is not POSIX
-and what to use instead (decision 0008; `sh --check` flags the same constructs). If an
-extension is ever added it follows yash's model: off in strict mode with an explicit
-error naming the reason, on only behind an explicit option.
+`sh` implements POSIX and nothing else. There are no modes: it is POSIX or it is not,
+and there is no `--posix` switch, no extension flag, no `[[ ... ]]`, `=~`, arrays or
+`local` beyond what POSIX.1-2024 specifies. A construct that POSIX does not define is an
+error, and where it is recognisable (`[[`, `function`, `source`, `local`) the diagnostic
+says it is not POSIX and what to use instead (decision 0008; `sh --check` flags the
+same constructs).
+
+**Gold standard rule.** When dash and FreeBSD sh agree on a behaviour, that behaviour is
+our gold standard even if bash, yash or busybox ash differ, and we deviate only for a
+good reason that is written down (in `docs/posix-shell-differences.md`, category
+`implementation-defined` or `bug` in the other shell, with the POSIX citation). When
+dash and FreeBSD disagree, POSIX decides; if POSIX is silent we match dash and record
+the choice. bash --posix, busybox ash and yash are comparison points, never targets.
+
+Survey on 2026-11-19 with `[[ abc =~ ^a.c$ ]]`: dash and FreeBSD sh say `[[: not found`
+(our answer too); yash accepts it outside `--posix` and refuses it inside; busybox ash
+and bash --posix accept it.
 
 ## Process model
 
