@@ -99,7 +99,7 @@ testcase() {
     if [ -n "${skip-}" ]; then record SKIP; return 0; fi
     if [ "${posix:+set}" = set ]; then exe="$testee_sh"; else exe="$testee"; fi
     set +e
-    (cd "$work/run" && exec timeout 20 "$exe" "$@" < "$in" > "$out" 2> "$err") 2> /dev/null
+    (cd "$work/run" && exec ${YASH_RUNNER_TIMEOUT-timeout 20} "$exe" "$@" < "$in" > "$out" 2> "$err") 2> /dev/null
     status=$?
     set -e
     failed=false; reason=""

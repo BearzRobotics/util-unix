@@ -203,9 +203,10 @@ pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
     sh.history = &s.hist;
     // POSIX: an interactive shell ignores SIGTERM, catches SIGINT (so that
     // `wait` and `read` are interrupted) and ignores SIGQUIT.
-    _ = sys.setSignal(2, .catch_flag);
-    _ = sys.setSignal(3, .ignore);
-    _ = sys.setSignal(15, .ignore);
+    // A signal that was ignored on entry stays ignored (and is what commands inherit).
+    if (!sh.inherited_ignore[2]) _ = sys.setSignal(2, .catch_flag);
+    if (!sh.inherited_ignore[3]) _ = sys.setSignal(3, .ignore);
+    if (!sh.inherited_ignore[15]) _ = sys.setSignal(15, .ignore);
     _ = sys.setSignal(sys.SIGWINCH, .catch_flag);
     sh.ignoreJobSignals();
     sh.flags.monitor = true;
