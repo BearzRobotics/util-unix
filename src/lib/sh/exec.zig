@@ -43,18 +43,12 @@ fn aliasGet(ctx: *anyopaque, name: []const u8) ?[]const u8 {
 pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!u8 {
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     const a = arena.allocator();
-    // NUL bytes in a script are ignored (dash, FreeBSD sh; POSIX leaves
-    // the input of a shell with NUL bytes undefined)
-    var src = src_in;
-    if (std.mem.indexOfScalar(u8, src_in, 0) != null) {
-        var buf = try a.alloc(u8, src_in.len);
-        var n: usize = 0;
-        for (src_in) |c| if (c != 0) {
-            buf[n] = c;
-            n += 1;
-        };
-        src = buf[0..n];
-    }
+    // NUL bytes in a script are ignored (dash, FreeBSD sh)
+    const src = if (std.mem.indexOfScalar(u8, src_in, 0) != null) blk: {
+        var clean: std.ArrayList(u8) = .empty;
+        for (src_in) |c| if (c != 0) try clean.append(a, c);
+        break :blk clean.items;
+    } else src_in;
     var d: parser.Diag = .{};
     var p = try parser.Parser.initProgram(a, src, &d);
     p.aliases = .{ .ctx = sh, .get = aliasGet };
@@ -70,9 +64,8 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
                 sh.line = d.line;
                 reportSyntax(sh, &d, o.prefix, src);
                 sh.status = 2;
-                // `command eval` loses the special-builtin treatment: the
-                // error does not end the shell (POSIX 2.14)
-                if (!(std.mem.eql(u8, o.prefix, "eval") and (sh.no_die > 0 or sh.flags.interactive))) sh.flow = .exit_shell;
+                // `command eval 'bad'` is a regular builtin call: it fails, the shell goes on
+                if (!(sh.no_die > 0 and o.prefix.len > 0)) sh.flow = .exit_shell;
                 last = 2;
                 break;
             },
@@ -194,7 +187,7 @@ fn readMore(gpa: Allocator, buf: *std.ArrayList(u8), fd: i32, chunk: *[8192]u8) 
             return true;
         };
         if (n == 0) return true;
-        // NUL bytes in the script are ignored (see runSource)
+        // NUL bytes in a script are ignored (dash, FreeBSD sh; POSIX leaves them undefined)
         for (chunk[0..n]) |c| if (c != 0) buf.append(gpa, c) catch return true;
         return false;
     }
@@ -410,6 +403,13 @@ fn execReplace(sh: *Shell, node: *const Node) u8 {
             const st = execSimple(sh, node, s, true);
             sh.status = st;
             return st;
+        },
+        // already in a child that exits afterwards (`(cmd) &`, a pipeline stage):
+        // the subshell needs no second process, only its trap reset
+        .subshell => |body| {
+            const b = body orelse return 0;
+            childInit(sh, false);
+            return execReplace(sh, b);
         },
         else => return execNode(sh, node),
     }
@@ -787,9 +787,17 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
                     },
                     else => unreachable,
                 }
-                const fd = sys.open(path, flags, mode) catch {
-                    openError(sh, path, flags.create);
-                    return false;
+                const fd = while (true) {
+                    break sys.open(path, flags, mode) catch {
+                        // a trapped signal interrupted a blocked open (a FIFO): run the trap, retry
+                        if (sys.errno() == sys.E_INTR) {
+                            checkTraps(sh);
+                            if (sh.flow != .none) return false;
+                            continue;
+                        }
+                        openError(sh, path, flags.create);
+                        return false;
+                    };
                 };
                 if (!place(sh, fd, n, save)) return false;
             },
@@ -803,10 +811,19 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
                     sys.close(n);
                     continue;
                 }
-                const m = std.fmt.parseInt(i32, word, 10) catch {
+                const m0 = std.fmt.parseInt(i32, word, 10) catch -1;
+                // a duplicated descriptor is one digit (POSIX leaves more unspecified; dash and FreeBSD sh refuse)
+                const m = if (m0 > 9 or word.len > 1 and word[0] == '0') -1 else m0;
+                if (m < 0) {
                     sh.diagKind(.bad_fd_number, word, "Syntax error: Bad fd number");
+                    // a non-number operand of >& or <& ends a non-interactive shell (dash, FreeBSD sh)
+                    if (!sh.flags.interactive and sh.no_die == 0) {
+                        sh.status = 2;
+                        sh.flow = .exit_shell;
+                    }
                     return false;
-                };
+                }
+                if (m == n) continue; // `3>&3` is a no-op even when 3 is closed (dash, FreeBSD sh)
                 if (!sys.fdIsOpen(m)) {
                     {
                         var fb: [16]u8 = undefined;
@@ -849,6 +866,15 @@ fn saveFd(sh: *Shell, n: i32, save: ?*Redirs) bool {
 
 /// Put the open descriptor `fd` at number `n` (closing `fd`).
 fn place(sh: *Shell, fd: i32, n: i32, save: ?*Redirs) bool {
+    if (fd == n) {
+        // open() returned the very number: it was closed before, so restoring means closing
+        if (save) |sv| sv.saved.append(sh.gpa, .{ .fd = n, .saved = -1 }) catch {
+            sys.close(fd);
+            return false;
+        };
+        sys.setCloexec(n, false);
+        return true;
+    }
     if (!saveFd(sh, n, save)) {
         sys.close(fd);
         return false;
@@ -1022,7 +1048,8 @@ fn assignError(sh: *Shell, name: []const u8) u8 {
     return 2;
 }
 
-fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
+fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8 {
+    var s = s_in;
     sh.cur_col = node.col;
     sh.cur_end_col = node.end_col;
     // `set -n` in the middle of a script: nothing more runs (dash, bash).
@@ -1046,6 +1073,19 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     const vals = a.alloc([]const u8, s.assigns.len) catch return 2;
     // `export x=~` style operands expand tildes after `=` like assignments.
     for (vals) |*v| v.* = "";
+    // POSIX 2.9.1: the redirections are performed before the assignments of a
+    // command with a name are expanded (so `a=$(cat f) >f true` sees f). They are
+    // applied here, in the shell, around the command; special builtins and `exec`
+    // keep their own order (their redirections may be permanent).
+    var early: Redirs = .{};
+    defer early.restore(sh.gpa);
+    if (args.items.len > 0 and s.assigns.len > 0 and s.redirs.len > 0 and !lexer.isSpecialBuiltin(args.items[0]) and !std.mem.eql(u8, args.items[0], "command")) {
+        if (!applyRedirs(sh, a, s.redirs, &early)) {
+            errexitCheck(sh, 2, "redirection");
+            return 2;
+        }
+        s.redirs = &.{};
+    }
     if (args.items.len > 0) {
         for (s.assigns, vals) |asg, *v| v.* = expand.assignValue(sh, a, asg.value) catch |e| return xerr(sh, e);
     }
@@ -1136,6 +1176,7 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     errexitCheck(sh, st, name);
     // a signal that arrived while the command ran: its trap runs now (POSIX 2.11)
     if (sh.flow == .none) {
+        sh.status = st; // $? and a bare `exit` in the trap see this command's status
         checkTraps(sh);
         // a trap that exits or returns decides the status
         if (sh.flow != .none) return sh.status;
@@ -1229,8 +1270,19 @@ fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s
         if (!is_special or is_exec) sh.vars.getPtr(asg.name).?.exported = true;
     }
     var st: u8 = 0;
+    sh.out_failed = false;
+    defer if (r == .special or r == .builtin) {
+        sh.out_failed = false;
+    };
     switch (r) {
-        .special, .builtin => |b| st = b.run(sh, a, args),
+        .special, .builtin => |b| {
+            st = b.run(sh, a, args);
+            // output that could not be written fails the builtin (dash: status 1)
+            if (sh.out_failed and st == 0) {
+                sh.diagCmdK(.io_error, "I/O error", args[0], "I/O error", .{});
+                st = 1;
+            }
+        },
         .host => |h| st = h.run(h.ctx, sh, args),
         .function => |f| st = callFunction(sh, f, args[1..]),
         else => unreachable,
@@ -1358,7 +1410,7 @@ pub fn execScript(sh: *Shell, a: Allocator, path: []const u8, args: []const []co
     };
     // a file with NUL bytes in its first line is a binary, not a script
     const head = text[0 .. std.mem.indexOfScalar(u8, text, '\n') orelse text.len];
-    if (std.mem.indexOfScalar(u8, head, 0) != null) {
+    if (std.mem.indexOfScalar(u8, head, 0) != null or std.mem.startsWith(u8, text, "\x7fELF")) {
         sh.diagK(.not_executable, args[0], "{s}: Exec format error", .{args[0]});
         sys.exit(126);
     }

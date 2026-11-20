@@ -166,6 +166,8 @@ pub const Shell = struct {
     /// Non-zero while a special builtin runs under `command` (errors do not
     /// end the shell).
     no_die: u32 = 0,
+    /// A write to standard output failed (the builtin that ran reports status 1).
+    out_failed: bool = false,
     diag_style: DiagStyle = .posix,
     diag_color: bool = false,
     label: []u8 = &.{},
@@ -318,7 +320,7 @@ pub const Shell = struct {
         }
     }
 
-    /// Forget the remembered command locations (`hash -r`, a new PATH).
+    /// Forget the remembered command locations (a new PATH, `hash -r`).
     pub fn clearHash(self: *Shell) void {
         var it = self.hash.iterator();
         while (it.next()) |e| {
@@ -328,9 +330,8 @@ pub const Shell = struct {
         self.hash.clearRetainingCapacity();
     }
 
-    /// After `cd`: forget remembered locations that came from a relative
-    /// PATH entry.
-    pub fn forgetRelativeHash(self: *Shell) void {
+    /// `cd` invalidates the remembered locations that are relative to the old directory.
+    pub fn clearRelativeHash(self: *Shell) void {
         var drop: std.ArrayList([]const u8) = .empty;
         defer drop.deinit(self.gpa);
         var it = self.hash.iterator();
@@ -344,9 +345,9 @@ pub const Shell = struct {
     }
 
     pub fn unsetVar(self: *Shell, name: []const u8) SetError!void {
-        if (std.mem.eql(u8, name, "PATH")) self.clearHash();
         const v = self.vars.getPtr(name) orelse return;
         if (v.readonly) return error.ReadOnly;
+        if (std.mem.eql(u8, name, "PATH")) self.clearHash();
         if (v.value) |old| self.gpa.free(old);
         v.value = null;
         // unset also drops the export attribute (dash, FreeBSD sh): a later
@@ -403,8 +404,10 @@ pub const Shell = struct {
 
     /// Write to standard output (descriptor 1). False on failure.
     pub fn out(self: *Shell, bytes: []const u8) bool {
-        _ = self;
-        sys.writeAll(1, bytes) catch return false;
+        sys.writeAll(1, bytes) catch {
+            self.out_failed = true;
+            return false;
+        };
         return true;
     }
 

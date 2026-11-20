@@ -183,7 +183,8 @@ pub fn main(ctx: cli.Context) u8 {
         while (j < a.len) : (j += 1) {
             switch (a[j]) {
                 'l' => login = on,
-                'c' => if (on) {
+                // `+c` is read like `-c` (dash and FreeBSD sh agree; POSIX does not define it)
+                'c' => {
                     command = "";
                     from_stdin = false;
                 },

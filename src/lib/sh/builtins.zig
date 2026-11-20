@@ -658,7 +658,11 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         return die(sh, 2);
     }
     var action: ?[]const u8 = null;
-    if (sys.signalNumber(args[i]) == null or args[i].len == 0) {
+    // Only an unsigned decimal integer (or `-`) as the first operand makes every
+    // operand a condition (POSIX trap); a name such as `term` is an action.
+    // A lone operand that names a condition resets it (dash).
+    const first_is_cond = args[i].len > 0 and (std.mem.indexOfNone(u8, args[i], "0123456789") == null or (i + 1 == args.len and sys.signalNumber(args[i]) != null));
+    if (!first_is_cond and !std.mem.eql(u8, args[i], "-")) {
         action = args[i];
         i += 1;
         if (i >= args.len) {
@@ -764,10 +768,8 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     if (i < args.len) {
         dir = args[i];
         if (std.mem.eql(u8, dir, "-")) {
-            dir = sh.getVar("OLDPWD") orelse {
-                sh.diagCmdK(.other, null, "cd", "OLDPWD not set", .{});
-                return 2;
-            };
+            // POSIX leaves an unset OLDPWD unspecified; dash stays in the current directory (FreeBSD sh fails)
+            dir = sh.getVar("OLDPWD") orelse (sh.getVar("PWD") orelse (physicalCwd(a) orelse "."));
             print = true;
         }
     } else {
@@ -813,9 +815,10 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         _ = e;
         return 2;
     };
-    sh.forgetRelativeHash();
+    sh.clearRelativeHash();
     const new_pwd: []const u8 = if (physical) (physicalCwd(a) orelse target) else curpath;
     sh.setVarRaw("OLDPWD", old_pwd) catch {};
+    if (sh.vars.getPtr("OLDPWD")) |v| v.exported = true; // dash, bash and FreeBSD sh export it
     sh.setVarRaw("PWD", new_pwd) catch {};
     if (print) _ = sh.out(std.fmt.allocPrint(a, "{s}\n", .{new_pwd}) catch return 2);
     return 0;
@@ -833,13 +836,12 @@ fn pwdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 const x = sys.stat(p, true) catch null;
                 const y = sys.stat(".", true) catch null;
                 if (x != null and y != null and x.?.ino == y.?.ino and x.?.dev == y.?.dev) path = p;
-                // the directory was removed under us: dash and FreeBSD sh
-                // still print the logical name
-                if (x == null and y != null and std.mem.indexOf(u8, p, "/./") == null and std.mem.indexOf(u8, p, "/../") == null) path = p;
             }
         }
     }
-    if (path.len == 0) path = physicalCwd(a) orelse {
+    if (path.len == 0) path = physicalCwd(a) orelse blk: {
+        // the directory was removed under us: the logical name is all there is (dash, FreeBSD sh)
+        if (!physical and sys.errno() == sys.E_NOENT) if (sh.getVar("PWD")) |p| if (p.len > 0 and p[0] == '/') break :blk p;
         sh.diagCmdK(.other, null, "pwd", "getcwd() failed: {s}", .{sys.strerror(sys.errno())});
         return 1;
     };
@@ -921,9 +923,65 @@ fn echoCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     return 0;
 }
 
+/// A complete integer operand with its range checked like strtoimax / strtoumax: out of
+/// range clamps (INT64_MAX/MIN, UINT64_MAX) and the status becomes 1; a negative number
+/// converted as unsigned wraps (dash, bash, FreeBSD sh).
+fn printfRanged(sh: *Shell, s: []const u8, st: *u8, unsigned: bool) ?i64 {
+    var t = std.mem.trimStart(u8, s, " \t\n\x0b\x0c\r");
+    var neg = false;
+    if (t.len > 0 and (t[0] == '-' or t[0] == '+')) {
+        neg = t[0] == '-';
+        t = t[1..];
+    }
+    var base: u8 = 10;
+    if (t.len > 2 and t[0] == '0' and (t[1] == 'x' or t[1] == 'X')) {
+        base = 16;
+        t = t[2..];
+    } else if (t.len > 1 and t[0] == '0') {
+        base = 8;
+        t = t[1..];
+    }
+    if (t.len == 0) return null;
+    var mag: u128 = 0;
+    for (t) |c| {
+        const d = std.fmt.charToDigit(c, base) catch return null;
+        mag = mag * base + d;
+        if (mag > (1 << 70)) mag = 1 << 70; // saturate: far beyond any limit
+    }
+    var range = false;
+    var out: i64 = 0;
+    if (unsigned) {
+        if (mag > std.math.maxInt(u64)) {
+            range = true;
+            out = -1; // UINT64_MAX
+        } else {
+            const m: u64 = @intCast(mag);
+            out = @bitCast(if (neg) 0 -% m else m);
+        }
+    } else if (neg) {
+        if (mag > (1 << 63)) {
+            range = true;
+            out = std.math.minInt(i64);
+        } else out = @intCast(-@as(i128, @intCast(mag)));
+    } else if (mag > std.math.maxInt(i64)) {
+        range = true;
+        out = std.math.maxInt(i64);
+    } else out = @intCast(mag);
+    if (range) {
+        sh.diagCmdK(.printf_number, s, "printf", "{s}: Result too large", .{s});
+        st.* = 1;
+    }
+    return out;
+}
+
 fn printfNumber(sh: *Shell, s: []const u8, st: *u8) i64 {
+    return printfNumberK(sh, s, st, false);
+}
+
+fn printfNumberK(sh: *Shell, s: []const u8, st: *u8, unsigned: bool) i64 {
     if (s.len == 0) return 0;
     if (s[0] == '\'' or s[0] == '"') return if (s.len > 1) s[1] else 0;
+    if (printfRanged(sh, s, st, unsigned)) |v| return v;
     if (arith.parseNumber(s)) |v| return v;
     // partial conversion: the longest numeric prefix (leading blanks allowed)
     var end: usize = 0;
@@ -1103,7 +1161,7 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 },
                 'u', 'o', 'x', 'X' => {
                     ai += 1;
-                    const v: u64 = @bitCast(if (arg) |s| printfNumber(sh, s, &st) else 0);
+                    const v: u64 = @bitCast(if (arg) |s| printfNumberK(sh, s, &st, true) else 0);
                     var digits: std.ArrayList(u8) = .empty;
                     switch (conv) {
                         'u' => digits.print(a, "{d}", .{v}) catch return 2,
@@ -1136,7 +1194,7 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 else => {
                     sh.diagCmdK(.usage, null, "printf", "%{c}: invalid directive", .{conv});
                     _ = sh.out(out.items);
-                    return 1;
+                    return 2; // dash; FreeBSD sh and bash say 1, POSIX only wants non-zero
                 },
             }
             // pad strings
@@ -1216,6 +1274,7 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         const n = sys.read(0, &ch) catch {
             if (sys.errno() == sys.E_INTR) {
                 exec.checkTraps(sh);
+                if (sh.flow != .none) return sh.status; // the trap left the shell (exit, return)
                 continue;
             }
             return 1;
@@ -1562,7 +1621,7 @@ fn describe(sh: *Shell, a: Allocator, name: []const u8, verbose: bool, out: *std
         return true;
     }
     if (sh.aliases.get(name)) |v| {
-        if (verbose) out.print(a, "{s} is an alias for {s}\n", .{ name, v }) catch {} else out.print(a, "alias {s}='{s}'\n", .{ name, v }) catch {};
+        if (verbose) out.print(a, "{s} is an alias for {s}\n", .{ name, v }) catch {} else out.print(a, "alias {s}={s}\n", .{ name, quoteSingle(a, v) catch v }) catch {};
         return true;
     }
     if (sh.funcs.get(name) != null) {
@@ -1914,12 +1973,12 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var scale: u64 = 1024;
     var hard = false;
     var soft_set = false;
-    var list_all = false;
+    var all = false;
     while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
         for (args[i][1..]) |c| switch (c) {
-            'a' => list_all = true,
             'H' => hard = true,
             'S' => soft_set = true,
+            'a' => all = true,
             'f' => {
                 res = 1;
                 scale = 1024;
@@ -1958,26 +2017,29 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             },
         };
     }
-    if (list_all) {
+    if (all) {
         if (i < args.len) {
             sh.diagCmdK(.usage, null, "ulimit", "too many arguments", .{});
             return 2;
         }
-        const all = [_]struct { c: u8, r: u32, scale: u64, what: []const u8 }{
-            .{ .c = 't', .r = 0, .scale = 1, .what = "time(seconds)" },
-            .{ .c = 'f', .r = 1, .scale = 1024, .what = "file(blocks)" },
-            .{ .c = 'd', .r = 2, .scale = 1024, .what = "data(kbytes)" },
-            .{ .c = 's', .r = 3, .scale = 1024, .what = "stack(kbytes)" },
-            .{ .c = 'c', .r = 4, .scale = 1024, .what = "coredump(blocks)" },
-            .{ .c = 'm', .r = 5, .scale = 1024, .what = "memory(kbytes)" },
-            .{ .c = 'n', .r = 7, .scale = 1, .what = "nofiles(descriptors)" },
-            .{ .c = 'v', .r = 9, .scale = 1024, .what = "vmemory(kbytes)" },
+        // POSIX.1-2024 `ulimit -a`: every limit this shell knows, one per line
+        const Row = struct { label: []const u8, opt: u8, res: u32, scale: u64 };
+        const rows = [_]Row{
+            .{ .label = "time(seconds)", .opt = 't', .res = 0, .scale = 1 },
+            .{ .label = "file(blocks)", .opt = 'f', .res = 1, .scale = 1024 },
+            .{ .label = "data(kbytes)", .opt = 'd', .res = 2, .scale = 1024 },
+            .{ .label = "stack(kbytes)", .opt = 's', .res = 3, .scale = 1024 },
+            .{ .label = "coredump(blocks)", .opt = 'c', .res = 4, .scale = 1024 },
+            .{ .label = "memory(kbytes)", .opt = 'm', .res = 5, .scale = 1024 },
+            .{ .label = "nofiles(descriptors)", .opt = 'n', .res = 7, .scale = 1 },
+            .{ .label = "vmemory(kbytes)", .opt = 'v', .res = 9, .scale = 1024 },
         };
         var out: std.ArrayList(u8) = .empty;
-        for (all) |e| {
-            const l = sys.getrlimit(e.r) catch continue;
-            const v = if (hard) l.hard else l.soft;
-            if (v == sys.infinity) out.print(a, "-{c}: {s: <24}unlimited\n", .{ e.c, e.what }) catch return 2 else out.print(a, "-{c}: {s: <24}{d}\n", .{ e.c, e.what, v / e.scale }) catch return 2;
+        for (rows) |row| {
+            const lim = sys.getrlimit(row.res) catch continue;
+            const v = if (hard) lim.hard else lim.soft;
+            out.print(a, "-{c}: {s:<22}", .{ row.opt, row.label }) catch return 2;
+            if (v == sys.infinity) out.appendSlice(a, "unlimited\n") catch return 2 else out.print(a, "{d}\n", .{v / row.scale}) catch return 2;
         }
         _ = sh.out(out.items);
         return 0;
@@ -1996,11 +2058,11 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             sh.diagCmdK(.illegal_number, args[i], "ulimit", "bad number", .{});
             return 2;
         };
-        const prod = std.math.mul(u64, n, scale) catch {
+        // a value that does not fit once scaled is a bad number (FreeBSD sh; dash wraps silently)
+        break :blk std.math.mul(u64, n, scale) catch {
             sh.diagCmdK(.illegal_number, args[i], "ulimit", "bad number", .{});
             return 2;
         };
-        break :blk prod;
     };
     if (i + 1 < args.len) {
         sh.diagCmdK(.usage, null, "ulimit", "too many arguments", .{});

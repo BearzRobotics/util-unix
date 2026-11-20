@@ -384,7 +384,8 @@ pub const ListMode = enum { short, long, pids };
 /// Append the report of one job in the format of `jobs`.
 pub fn format(sh: *const Shell, a: Allocator, out: *std.ArrayList(u8), j: *const Job, mode: ListMode) Allocator.Error!void {
     if (mode == .pids) {
-        for (j.procs.items) |p| try out.print(a, "{d}\n", .{p.pid});
+        // the process group leader of each job: its first process (POSIX jobs -p)
+        if (j.procs.items.len > 0) try out.print(a, "{d}\n", .{j.procs.items[0].pid});
         return;
     }
     const mk = marker(sh, j);

@@ -123,8 +123,10 @@ fn lowestPending() u8 {
     return 0;
 }
 
-pub fn waitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
+pub fn waitCmd(sh: *Shell, _: Allocator, args_in: []const []const u8) u8 {
     jobs.update(sh);
+    // `wait --` ends the options (POSIX 12.2 guideline 10; dash and FreeBSD sh)
+    const args = if (args_in.len > 1 and std.mem.eql(u8, args_in[1], "--")) args_in[1..] else args_in;
     if (args.len == 1) {
         for (sh.jobs.items) |j| {
             if (!jobs.waitJob(sh, j)) return interrupted(sh);
@@ -170,6 +172,8 @@ pub fn waitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
         for (j.procs.items) |p| if (p.pid == pid_found) {
             st = sys.statusCode(p.status);
         };
+        // a pipeline's status (with pipefail, its rightmost failure) when its last process is meant
+        if (pid_found == j.lastPid()) st = j.status(sh.flags.pipefail);
         if (j.state() == .done) {
             announce(sh, j);
             jobs.remove(sh, j);
