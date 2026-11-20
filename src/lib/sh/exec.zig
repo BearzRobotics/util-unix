@@ -353,6 +353,10 @@ fn childExit(sh: *Shell, st: u8) noreturn {
 }
 
 const ChildIo = struct {
+    /// A command substitution is a subshell environment of its own for `set -e`
+    /// (POSIX 2.14 set: the -e setting applies to each subshell environment
+    /// separately), so a surrounding `if` condition does not suspend it.
+    fresh_errexit: bool = false,
     stdin: ?i32 = null,
     stdout: ?i32 = null,
     close: []const i32 = &.{},
@@ -378,6 +382,7 @@ fn forkRun(sh: *Shell, node: *const Node, cio: ChildIo) ?i32 {
     };
     if (pid != 0) return pid;
     childInit(sh, cio.bg);
+    if (cio.fresh_errexit) sh.noerrexit = 0;
     if (cio.stdin) |fd| _ = sys.dup2(fd, 0) catch sys.exit(2);
     if (cio.stdout) |fd| _ = sys.dup2(fd, 1) catch sys.exit(2);
     for (cio.close) |fd| sys.close(fd);
@@ -913,7 +918,7 @@ pub fn substitute(sh: *Shell, a: Allocator, node: *const Node) expand.Error![]co
         sh.diagK(.cannot_fork, null, "Pipe call failed", .{});
         return expand.fatal(sh, .cannot_fork, null, "Pipe call failed", .{});
     };
-    const pid = forkRun(sh, node, .{ .stdout = p[1], .close = &.{ p[0], p[1] } }) orelse {
+    const pid = forkRun(sh, node, .{ .stdout = p[1], .close = &.{ p[0], p[1] }, .fresh_errexit = true }) orelse {
         sys.close(p[0]);
         sys.close(p[1]);
         return expand.fatal(sh, .cannot_fork, null, "Cannot fork", .{});
@@ -957,7 +962,13 @@ fn xtrace(sh: *Shell, a: Allocator, s: ast.Simple, vals: []const []const u8, arg
             const saved_trace = sh.flags.xtrace;
             sh.flags.xtrace = false;
             defer sh.flags.xtrace = saved_trace;
-            if (expand.string(sh, a, w)) |v| ps4 = v else |_| {}
+            // an error in PS4 is ignored: the trace line keeps the raw text
+            const saved_flow = sh.flow;
+            const saved_status = sh.status;
+            if (expand.string(sh, a, w)) |v| ps4 = v else |_| {
+                sh.flow = saved_flow;
+                sh.status = saved_status;
+            }
         } else |_| {}
     }
     line.appendSlice(a, ps4) catch return;
@@ -1007,16 +1018,12 @@ pub fn resolve(sh: *Shell, a: Allocator, name: []const u8) Resolved {
     if (sh.funcs.get(name)) |f| return .{ .function = f };
     if (builtins.find(name)) |b| return .{ .builtin = b };
     if (sh.host_builtins.get(name)) |h| return .{ .host = h };
-    if (sh.hash.get(name)) |p| {
-        if (sys.access(p, 1)) return .{ .external = p };
-        // the remembered file is gone: forget it and search again (FreeBSD sh, bash)
-        if (sh.hash.fetchRemove(name)) |kv| {
-            sh.gpa.free(kv.key);
-            sh.gpa.free(kv.value);
-        }
-    }
+    // a remembered location is used as it is, even if the file went away
+    // (dash, FreeBSD sh: the command is then not found until `hash -r`)
+    if (sh.hash.get(name)) |p| return .{ .external = p };
     if (pathFind(sh, a, name, true)) |p| {
-        // remember the location (`hash` lists it); `cd` forgets the relative ones
+        // remember the location, as dash and FreeBSD sh do (POSIX `hash`);
+        // entries from a relative PATH entry are dropped again by `cd`
         {
             const key = sh.gpa.dupe(u8, name) catch return .{ .external = p };
             const val = sh.gpa.dupe(u8, p) catch {
@@ -1191,21 +1198,28 @@ fn isAssignWord(w: ast.Word) bool {
     return eq > 0 and lexer.isName(first[0..eq]);
 }
 
-fn literalWord(w: ast.Word) ?[]const u8 {
-    if (w.len != 1) return null;
-    return switch (w[0]) {
-        .text => |t| t,
-        else => null,
-    };
+/// True when the word is made only of literal (quoted or not) text equal to `name`.
+fn wordIs(w: ast.Word, name: []const u8) bool {
+    var rest = name;
+    for (w) |p| {
+        const t = switch (p) {
+            .text => |t| t,
+            .quoted => |t| t,
+            else => return false,
+        };
+        if (!std.mem.startsWith(u8, rest, t)) return false;
+        rest = rest[t.len..];
+    }
+    return rest.len == 0;
 }
 
 /// Index of the first operand of a declaration utility command, if it is one.
+/// `command` (also quoted, as in `\command`) may precede it.
 fn declStart(words: []const ast.Word) ?usize {
     var i: usize = 0;
     while (i < words.len) : (i += 1) {
-        const t = literalWord(words[i]) orelse return null;
-        if (std.mem.eql(u8, t, "command")) continue;
-        if (std.mem.eql(u8, t, "export") or std.mem.eql(u8, t, "readonly")) return i + 1;
+        if (wordIs(words[i], "command")) continue;
+        if (wordIs(words[i], "export") or wordIs(words[i], "readonly") or wordIs(words[i], "local")) return i + 1;
         return null;
     }
     return null;
@@ -1295,6 +1309,10 @@ fn execBehindCommand(args: []const []const u8) bool {
 
 fn restoreVar(sh: *Shell, sv: shell.Saved) void {
     defer sh.gpa.free(sv.name);
+    if (sv.flags) |f| {
+        sh.flags = f;
+        return;
+    }
     if (sv.old) |o| {
         if (sh.vars.getPtr(sv.name)) |cur| {
             if (cur.value) |x| sh.gpa.free(x);
@@ -1375,29 +1393,60 @@ fn runExternal(sh: *Shell, a: Allocator, path: []const u8, args: []const []const
     for (s.assigns, vals) |asg, v| env.append(a, std.fmt.allocPrint(a, "{s}={s}", .{ asg.name, v }) catch sys.exit(2)) catch sys.exit(2);
     sys.execve(a, path, args, env.items) catch {};
     const e = sys.errno();
-    if (e == sys.E_NOEXEC) {
-        // A text file without #!: interpret it with this shell.
-        const text = readFile(a, path) orelse {
-            sh.diagK(.not_executable, args[0], "{s}: Permission denied", .{args[0]});
-            sys.exit(126);
-        };
-        // a file with NUL bytes in its first line is a binary, not a script
-        const head = text[0 .. std.mem.indexOfScalar(u8, text, '\n') orelse text.len];
-        if (std.mem.indexOfScalar(u8, head, 0) != null or std.mem.startsWith(u8, text, "\x7fELF")) {
-            sh.diagK(.not_executable, args[0], "{s}: Exec format error", .{args[0]});
-            sys.exit(126);
-        }
-        sh.setParams(args[1..]) catch {};
-        sh.name = sh.gpa.dupe(u8, args[0]) catch sh.name;
-        const st = runSource(sh, text, .{}) catch 2;
-        childExit(sh, if (sh.flow == .exit_shell) sh.status else st);
-    }
+    if (e == sys.E_NOEXEC) execScript(sh, a, path, args, s.assigns, vals);
     if (e == sys.E_NOENT or e == sys.E_NOTDIR) {
         sh.diagK(.not_found, args[0], "{s}: not found", .{args[0]});
         sys.exit(127);
     }
     sh.diagK(if (e == sys.E_ACCES) .not_executable else .other, args[0], "{s}: {s}", .{ args[0], sys.strerror(e) });
     sys.exit(126);
+}
+
+/// execve failed with ENOEXEC: POSIX 2.9.1.1 says the shell then runs the file
+/// as if a new shell had been invoked with it as the operand. The current
+/// process becomes that shell: variables that are not exported, functions,
+/// aliases, traps and options are dropped. Does not return.
+pub fn execScript(sh: *Shell, a: Allocator, path: []const u8, args: []const []const u8, assigns: []const ast.Assign, vals: []const []const u8) noreturn {
+    const text = readFile(a, path) orelse {
+        sh.diagK(.not_executable, args[0], "{s}: Permission denied", .{args[0]});
+        sys.exit(126);
+    };
+    // a file with NUL bytes in its first line is a binary, not a script
+    const head = text[0 .. std.mem.indexOfScalar(u8, text, '\n') orelse text.len];
+    if (std.mem.indexOfScalar(u8, head, 0) != null or std.mem.startsWith(u8, text, "\x7fELF")) {
+        sh.diagK(.not_executable, args[0], "{s}: Exec format error", .{args[0]});
+        sys.exit(126);
+    }
+    // a new shell sees only the environment
+    var drop: std.ArrayList([]const u8) = .empty;
+    var it = sh.vars.iterator();
+    while (it.next()) |e| if (!e.value_ptr.exported) drop.append(a, e.key_ptr.*) catch {};
+    for (drop.items) |k| if (sh.vars.getPtr(k)) |v| {
+        v.readonly = false;
+        sh.unsetVar(k) catch {};
+    };
+    var vit = sh.vars.valueIterator();
+    while (vit.next()) |v| v.readonly = false;
+    for (assigns, vals) |asg, v| {
+        sh.setVarRaw(asg.name, v) catch {};
+        sh.setExported(asg.name, true) catch {};
+    }
+    sh.funcs.clearRetainingCapacity();
+    sh.aliases.clearRetainingCapacity();
+    sh.clearHash();
+    var i: u8 = 1;
+    while (i < sys.nsig) : (i += 1) {
+        if (sh.traps[i]) |t| if (t.len > 0) {
+            _ = sys.setSignal(i, .default);
+        };
+        sh.traps[i] = null;
+        sh.trap_set[i] = false;
+    }
+    sh.flags = .{};
+    sh.setParams(args[1..]) catch {};
+    sh.name = sh.gpa.dupe(u8, args[0]) catch sh.name;
+    const st = runSource(sh, text, .{}) catch 2;
+    childExit(sh, if (sh.flow == .exit_shell) sh.status else st);
 }
 
 /// Run an already-expanded command (used by `command`); with `no_func` shell

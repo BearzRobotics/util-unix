@@ -1,0 +1,946 @@
+# parameter: default and assign forms with colon
+unset a; echo "${a:-x}" "${a-x}" "${a:=y}" "$a"
+#---
+# parameter: empty with and without colon
+a=; echo "[${a:-x}][${a-x}][${a:+y}][${a+y}]"
+#---
+# parameter: alternative with word expansion
+a=1; echo "${a:+$a$a}" "${b:+$a}x"
+#---
+# parameter: nested defaults
+echo "${a:-${b:-${c:-deep}}}"
+#---
+# parameter: default word with quotes
+echo ${a:-"x y"} ${a:-'p q'} ${a:-\ z}
+#---
+# parameter: default with a glob in the word
+: > f1 f2; echo ${a:-*}; echo "${a:-*}"
+#---
+# parameter: error word with spaces
+(echo ${a:?bad thing}) 2>&1; echo $?
+#---
+# parameter: assign to a positional is an error
+(echo ${1:=x}) 2>&1; echo $?
+#---
+# parameter: assign to a special parameter is an error
+(echo ${?:=x}) 2>&1; echo $?
+#---
+# parameter: length of empty and unset
+a=; echo ${#a} ${#b}
+#---
+# parameter: length of positional
+set -- abc de; echo ${#1} ${#2} ${#3} ${#@} ${#*}
+#---
+# parameter: length with multibyte under C
+a=é; echo ${#a}
+#---
+# parameter: trim prefix shortest and longest
+a=foo.bar.baz; echo ${a#*.} ${a##*.} ${a%.*} ${a%%.*}
+#---
+# parameter: trim with a bracket pattern
+a=abc123; echo ${a#[a-c]} ${a##[a-c]*[a-c]} ${a%[0-9]} ${a%%[0-9]*}
+#---
+# parameter: trim with a quoted pattern
+a='a*b'; echo ${a#a\*} ${a#"a*"} ${a#a*}
+#---
+# parameter: trim with a variable pattern
+p='*.'; a=x.y.z; echo ${a#$p} ${a##$p} "${a#$p}" "${a#"$p"}"
+#---
+# parameter: trim with empty pattern
+a=abc; echo ${a#} ${a%} ${a##} ${a%%}
+#---
+# parameter: trim of an unset variable
+echo "[${u#x}][${u%x}]"
+#---
+# parameter: trim pattern with a slash
+a=/usr/local/bin; echo ${a##*/} ${a%/*}
+#---
+# parameter: trim with ? and *
+a=abcdef; echo ${a#??} ${a%??} ${a#*c} ${a%c*}
+#---
+# parameter: braces required for digits
+set -- a b c d e f g h i j k; echo $10 ${10} ${11}
+#---
+# parameter: $0 and $$ forms
+echo "${0##*/}" | head -c 0; echo ok
+#---
+# parameter: special parameters in braces
+set -- a b; echo ${#} ${?} ${-%%[!a-z]*} | head -c 0; echo ${#} ${?}
+#---
+# parameter: ${} bad forms
+echo ${}
+#---
+# parameter: dollar followed by non-name
+echo $ $+ $% $, $. $/ $: $= $^ $~
+#---
+# parameter: $ at end in double quotes
+echo "$" "a$" "$ "
+#---
+# parameter: variable names with digits and underscore
+_a1=x; echo $_a1 ${_a1}
+#---
+# parameter: variable name followed by text
+a=1; echo ${a}b $ab "$a"b
+#---
+# parameter: assignment visible in same command via expansion
+a=1 b=$a; echo "[$b]"
+#---
+# parameter: assignment with command prefix does not persist
+a=1 true; echo "[$a]"
+#---
+# parameter: assignment prefix to function persists in dash?
+f() { :; }; a=1 f; echo "[$a]"
+#---
+# parameter: assignment prefix to special builtin persists
+a=1 :; echo "[$a]"
+#---
+# parameter: assignment prefix to eval
+a=1 eval 'echo $a'; echo "[$a]"
+#---
+# parameter: export through prefix reaches child
+a=1 sh -c 'echo $a'; echo "[$a]"
+#---
+# parameter: multiple assignments left to right
+a=1 b=$a c=$b; echo "$a$b$c"
+#---
+# parameter: IFS prefix assignment for read
+echo 'a:b:c' | { IFS=: read x y z; echo "$x $y $z"; }
+#---
+# parameter: unset IFS behaves as default
+IFS=:; unset IFS; set -- $(echo 'a b  c'); echo $#
+#---
+# parameter: IFS empty means no splitting
+IFS=; a='x y z'; set -- $a; echo $#
+#---
+# parameter: IFS set to non-whitespace
+IFS=:; a='x::y:'; set -- $a; echo $# "[$1][$2][$3]"
+#---
+# parameter: IFS mixed whitespace and delimiter
+IFS=' :'; a=' x : y :: z '; set -- $a; echo $# "[$1][$2][$3][$4]"
+#---
+# parameter: IFS leading and trailing delimiter
+IFS=:; a=':x:'; set -- $a; echo $# "[$1][$2][$3]"
+#---
+# parameter: IFS is not applied to literal text
+IFS=:; set -- a:b; echo $#
+#---
+# parameter: IFS with glob characters
+IFS='*'; a='x*y'; set -- $a; echo $# $1 $2
+#---
+# parameter: field splitting of quoted and unquoted mix
+a='1 2'; set -- "$a"$a"$a"; echo $# "[$1][$2][$3]"
+#---
+# parameter: empty fields from empty unquoted vars vanish
+e=; set -- $e $e a $e; echo $#
+#---
+# parameter: quoted empty stays
+e=; set -- "$e" a "$e"; echo $#
+#---
+# parameter: splitting of command substitution
+set -- $(printf 'a  b\n c'); echo $#
+#---
+# parameter: splitting of arithmetic
+IFS=2; set -- $((123)); echo $# "[$1][$2]"
+#---
+# parameter: no splitting in assignment and case word
+a='x  y'; b=$a; echo "[$b]"; case $a in 'x  y') echo m;; esac
+#---
+# parameter: no splitting of redirection target
+a='o  p'; echo hi > $a 2>/dev/null; ls | head -3
+#---
+# parameter: positional at and star quoted
+set -- 'a b' c; for x in "$@"; do echo "[$x]"; done; for x in "$*"; do echo "[$x]"; done
+#---
+# parameter: positional star unquoted
+set -- 'a b' c; for x in $*; do echo "[$x]"; done; for x in $@; do echo "[$x]"; done
+#---
+# parameter: star with IFS first char
+IFS=-; set -- a b c; echo "$*" $*; echo "$@"
+#---
+# parameter: star with empty IFS
+IFS=; set -- a b c; echo "$*"; echo $*
+#---
+# parameter: at with no positionals
+set --; echo "x$@" "[$@]" ${@:-none}; set -- ""; echo "[$@]"
+#---
+# parameter: at inside a word
+set -- a b; echo "<$@>" "<$@$@>"
+#---
+# parameter: at with prefix and suffix and empty param
+set -- a '' b; echo "x$@y" | od -c | head -2
+#---
+# parameter: count of fields from quoted at
+set -- a '' b; set -- "$@"; echo $#
+#---
+# parameter: set -- with no arguments clears
+set -- a b; set --; echo $#
+#---
+# parameter: shift by count and error
+set -- a b c; shift 2; echo $@; shift 2 2>/dev/null; echo $? $#
+#---
+# parameter: shift zero
+set -- a; shift 0; echo $#
+#---
+# parameter: shift of a non-number
+set -- a; shift x 2>/dev/null; echo $?
+#---
+# parameter: positional beyond count unset
+set -u; set -- a; (echo $2) 2>/dev/null; echo $?
+#---
+# parameter: setting options with set -- -x
+set -- -x a; echo "$1"; set -x; set +x; echo $-
+#---
+# parameter: set with + option and operands
+set +e -- a b; echo $#
+#---
+# parameter: set -o listing shape
+set -o | head -3
+#---
+# parameter: set +o listing shape
+set +o | head -3
+#---
+# parameter: $- reflects options
+set -f; case $- in *f*) echo f;; esac; set +f; case $- in *f*) echo still;; esac
+#---
+# parameter: $# after set
+set -- 1 2 3; echo $#; set -- ; echo $#
+#---
+# parameter: $? after assignment-only
+false; a=1; echo $?
+#---
+# parameter: $! empty when none
+echo "[$!]"
+#---
+# parameter: $0 in a function
+f() { echo "$0"; }; f
+#---
+# parameter: OPTIND initial
+echo $OPTIND
+#---
+# parameter: PWD set
+[ -n "$PWD" ] && echo set
+#---
+# parameter: PPID set
+[ -n "$PPID" ] && echo set
+#---
+# parameter: IFS default value
+printf '%s' "$IFS" | od -c | head -1
+#---
+# parameter: variable named by eval
+n=x; eval "$n=5"; echo $x
+#---
+# parameter: indirect via eval
+a=b; b=7; eval "echo \$$a"
+#---
+# parameter: unset a function and variable with the same name
+f=1; f() { echo fn; }; unset f; echo "[$f]"; f
+#---
+# parameter: unset -v and -f
+f=1; f() { echo fn; }; unset -v f; f; unset -f f; f 2>/dev/null; echo $?
+#---
+# parameter: export listing
+export A=1; export -p | grep -c '^export A='
+#---
+# parameter: readonly listing
+readonly R=1; readonly -p | grep -c 'R=1'
+#---
+# parameter: export without value
+export Z; env | grep -c '^Z='; Z=1; env | grep -c '^Z='
+#---
+# parameter: export with value containing spaces
+export A='x y'; env | grep '^A='
+#---
+# parameter: readonly assignment in the same command
+readonly R=1 S=2; echo $R$S
+#---
+# parameter: assignment to an invalid name is a command
+1a=b 2>/dev/null; echo $?
+#---
+# parameter: assignment after a command word is an argument
+echo a=b c=d
+#---
+# parameter: quoted assignment is a command word
+"a=b" 2>/dev/null; echo $?
+#---
+# parameter: assignment with escaped equals
+a\=b 2>/dev/null; echo $?
+#---
+# parameter: assignment with empty value
+a=; echo "[$a]"; unset a; a= true; echo "[$a]"
+#---
+# parameter: assignment value with tilde
+HOME=/h; a=~; b=~/x; c=x:~; d="~"; echo $a $b $c $d
+#---
+# parameter: tilde expansions
+HOME=/h; echo ~ ~/x ~root | head -c 40; echo
+#---
+# parameter: tilde not at start
+HOME=/h; echo a~ x/~ \~ "~"
+#---
+# parameter: tilde with unknown user
+echo ~nosuchuser_zz
+#---
+# parameter: tilde in a for list
+HOME=/h; for x in ~ ~/y; do echo $x; done
+#---
+# parameter: tilde in case pattern
+HOME=/h; case /h in ~) echo m;; esac
+#---
+# parameter: tilde unset HOME
+unset HOME; echo ~ | head -c 1 >/dev/null; echo ok
+#---
+# parameter: tilde with HOME with trailing slash
+HOME=/h/; echo ~/x
+#---
+# parameter: tilde with HOME root
+HOME=/; echo ~ ~/x
+#---
+# quoting: backslash newline in double quotes
+echo "a\
+b"
+#---
+# quoting: backslash in single quotes
+echo 'a\nb\\'
+#---
+# quoting: backslash before ordinary char in dq
+echo "a\qb\$c\`d\"e\\f"
+#---
+# quoting: quote removal after expansion
+a='"x"'; echo $a "$a"
+#---
+# quoting: quotes in assignment value
+a="x y"'z'\ w; echo "$a"
+#---
+# quoting: empty quotes in the middle of a word
+echo a""b a''b ""
+#---
+# quoting: dollar in single quotes inside double quotes
+echo "'$HOME'" | head -c 0; echo "'x'"
+#---
+# quoting: backquote and dollar paren forms
+echo `echo a` $(echo b) "`echo c`" "$(echo d)"
+#---
+# quoting: backquote with backslashes
+echo `echo \$HOME | head -c 0`; echo `echo a\\b`; echo "`echo a\\\\b`"
+#---
+# quoting: nested backquotes
+echo `echo \`echo x\``
+#---
+# quoting: command substitution with quotes inside
+echo "$(echo "a b")" $(echo 'c  d')
+#---
+# quoting: command substitution with case parens
+echo $(case x in x) echo ok;; esac)
+#---
+# quoting: command substitution with a comment containing paren
+echo $(echo a # )
+)
+#---
+# quoting: command substitution strips trailing newlines only
+echo "[$(printf 'a\n\n\n')]" "[$(printf '\n\na')]"
+#---
+# quoting: command substitution with an unbalanced quote in a comment
+echo $(echo a # it's
+)
+#---
+# quoting: arithmetic with nested parens
+echo $(( (1+2)*3 )) $((1+(2*3)))
+#---
+# quoting: $(( vs $( ( ambiguity
+echo $( (echo sub) ) $((1)) 
+#---
+# quoting: dollar single quotes
+echo $'a\tb' $'\x41' $'\101' $'é'
+#---
+# quoting: escaped newline in word
+echo a\
+b
+#---
+# quoting: hash in the middle
+echo a#b #c
+#---
+# quoting: glob characters quoted
+: > a1 a2; echo a\* "a*" 'a*' a?
+#---
+# quoting: glob with brackets and negation
+: > a1 a2 b1; echo [ab]1 [!a]1 [^a]1 [a-b]2
+#---
+# quoting: glob dot files
+: > .h f; echo * .[a-z]* ; echo .*[a-z]
+#---
+# quoting: glob no match keeps pattern
+echo nomatch* [x] a?c
+#---
+# quoting: glob with set -f
+: > f; set -f; echo *; set +f; echo *
+#---
+# quoting: glob directories
+mkdir d1 d2; : > d1/x d2/x; echo */x d?/x */
+#---
+# quoting: glob sort order
+: > b a B A 1 _x; echo *
+#---
+# quoting: glob bracket with slash
+mkdir d; : > d/x; echo d[/]x
+#---
+# quoting: glob bracket forms
+: > a b ]; echo []]  [a-]  [!]a]
+#---
+# quoting: glob character classes
+: > a1 B2 _3; echo [[:alpha:]]* [[:digit:]]* [[:upper:]]*
+#---
+# quoting: glob backslash escapes
+: > 'a*' ab; echo a\* 'a*'
+#---
+# quoting: variable with glob chars is expanded
+: > f1; v='f*'; echo $v "$v"
+#---
+# quoting: here-doc body quotes
+cat <<EOF
+'single' "double" \$x \\ \`
+EOF
+#---
+# quoting: here-doc with expansion
+a=1; cat <<EOF
+$a ${a} $((a+1)) $(echo c)
+EOF
+#---
+# quoting: here-doc quoted delimiter
+a=1; cat <<'EOF'
+$a ${a} $(echo c) \$x
+EOF
+#---
+# quoting: here-doc partially quoted delimiter
+a=1; cat <<E"O"F
+$a
+EOF
+#---
+# quoting: here-doc backslash delimiter
+a=1; cat <<\EOF
+$a
+EOF
+#---
+# quoting: here-doc tabs stripped
+cat <<-EOF
+	one
+		two
+	EOF
+#---
+# quoting: here-doc dash with spaces not stripped
+cat <<-EOF
+  one
+EOF
+#---
+# quoting: here-doc in a function
+f() { cat <<EOF
+in $1
+EOF
+}; f x
+#---
+# quoting: two here-docs on one line
+cat <<A; cat <<B
+a
+A
+b
+B
+#---
+# quoting: here-doc with a command after
+cat <<EOF | tr a-z A-Z
+abc
+EOF
+#---
+# quoting: here-doc to a file then read
+cat <<EOF > f
+x
+EOF
+cat f
+#---
+# quoting: here-doc with line continuation
+cat <<EOF
+a\
+b
+EOF
+#---
+# quoting: here-doc with backslash newline and quoted delimiter
+cat <<'EOF'
+a\
+b
+EOF
+#---
+# quoting: here-doc delimiter at end without newline
+printf 'cat <<EOF\nx\nEOF' | sh
+#---
+# quoting: here-doc empty body
+cat <<EOF
+EOF
+echo $?
+#---
+# quoting: here-doc inside command substitution
+echo "$(cat <<EOF
+x
+EOF
+)"
+#---
+# quoting: here-doc and fd redirection
+cat 3<<EOF <&3
+x
+EOF
+#---
+# quoting: here-doc stdin with a loop
+while read l; do echo "[$l]"; done <<EOF
+a b
+c
+EOF
+#---
+# quoting: here-doc with a parameter expansion in delimiter line
+a=EOF; cat <<EOF
+x
+EOF
+#---
+# quoting: here-doc with special chars
+cat <<EOF
+$ % ^ & * ( ) ~ # !
+EOF
+#---
+# quoting: here-doc body with a trailing backslash
+cat <<EOF
+a\\
+b
+EOF
+#---
+# arithmetic: basic precedence
+echo $((1+2*3)) $(((1+2)*3)) $((2**3)) 2>&1 | head -c 60; echo
+#---
+# arithmetic: unary and not
+echo $((-3)) $((+3)) $((!0)) $((!5)) $((~0))
+#---
+# arithmetic: division and modulo signs
+echo $((7/2)) $((-7/2)) $((7%3)) $((-7%3)) $((7%-3))
+#---
+# arithmetic: shifts and bitwise
+echo $((1<<4)) $((256>>2)) $((6&3)) $((6|3)) $((6^3))
+#---
+# arithmetic: comparison and logic
+echo $((1<2)) $((2<=1)) $((3==3)) $((3!=3)) $((1&&0)) $((1||0))
+#---
+# arithmetic: ternary
+echo $((1?2:3)) $((0?2:3)) $((1?0?4:5:6))
+#---
+# arithmetic: assignment operators
+a=5; echo $((a+=2)) $((a-=1)) $((a*=3)) $((a/=2)) $((a%=5)) $((a<<=2)) $((a>>=1)) $((a&=6)) $((a|=1)) $((a^=3)) $a
+#---
+# arithmetic: variables by name and by dollar
+a=3; b=4; echo $((a*b)) $(($a*$b))
+#---
+# arithmetic: variable containing an expression
+a='1+2'; echo $((a*2))
+#---
+# arithmetic: variable containing another variable name
+b=5; a=b; echo $((a+1))
+#---
+# arithmetic: unset and empty variables
+unset u; e=; echo $((u+1)) $((e+1))
+#---
+# arithmetic: hex and octal
+echo $((0x10)) $((010)) $((0X1f)) $((-010))
+#---
+# arithmetic: bad octal
+echo $((08))
+#---
+# arithmetic: bad number suffix
+echo $((1a))
+#---
+# arithmetic: whitespace and newlines
+echo $(( 1 +
+2 ))
+#---
+# arithmetic: empty expression
+echo $(())
+#---
+# arithmetic: only spaces
+echo $(( ))
+#---
+# arithmetic: comma operator
+echo $((1,2))
+#---
+# arithmetic: increments
+a=1; echo $((a++)) $a $((++a))
+#---
+# arithmetic: exponent
+echo $((2**10))
+#---
+# arithmetic: large values
+echo $((9223372036854775807)) $((9223372036854775807+1)) $((-9223372036854775807-1))
+#---
+# arithmetic: multiplication overflow wraps
+echo $((4611686018427387904*2)) $((4611686018427387904*4))
+#---
+# arithmetic: division of min by -1
+echo $((-9223372036854775807-1)) ; echo $(( (-9223372036854775807-1) / -1 )) 
+#---
+# arithmetic: modulo min by -1
+echo $(( (-9223372036854775807-1) % -1 ))
+#---
+# arithmetic: shift counts
+echo $((1<<63)) $((1<<64)) $((-1>>1)) $((1<<-1))
+#---
+# arithmetic: nested substitution
+a=2; echo $(( $(echo 3) + ${a} ))
+#---
+# arithmetic: in a for list and a condition
+for i in $((1+1)) $((2+2)); do echo $i; done; [ $((1+1)) -eq 2 ] && echo y
+#---
+# arithmetic: assignment of invalid lvalue
+echo $((1=2))
+#---
+# arithmetic: unbalanced parens
+echo $((1+(2))
+#---
+# arithmetic: double quotes inside
+echo $(("1"+2))
+#---
+# arithmetic: character constant
+echo $(('a'))
+#---
+# arithmetic: $(( with a comment char
+echo $((1#2))
+#---
+# arithmetic: variable with spaces
+a=' 5 '; echo $((a+1))
+#---
+# arithmetic: variable with trailing text
+a='5x'; echo $((a+1))
+#---
+# arithmetic: negative zero and unary chains
+echo $((- -3)) $((!!5)) $((~~5)) $((-+-3))
+#---
+# arithmetic: logical short circuit side effects
+a=0; echo $((0 && (a=1))) $a $((1 || (a=2))) $a
+#---
+# arithmetic: ternary side effects
+a=0; echo $((1 ? (a=1) : (a=2))) $a
+#---
+# arithmetic: relational chain
+echo $((1<2<3)) $((3>2>1))
+#---
+# arithmetic: assignment in condition
+if [ $((a=3)) -eq 3 ]; then echo $a; fi
+#---
+# arithmetic: with positional
+set -- 4 5; echo $(($1*$2)) $(($1+$#))
+#---
+# arithmetic: with command-sub result
+echo $(($(echo 5)*2))
+#---
+# arithmetic: result used as number word
+echo $((3))4
+#---
+# control: for with no list uses positional
+set -- a b; for x; do echo $x; done
+#---
+# control: for with glob list
+: > f1 f2; for x in f*; do echo $x; done
+#---
+# control: for var persists
+for x in a b; do :; done; echo $x
+#---
+# control: for with empty list var
+for x in $nolist; do echo no; done; echo $?
+#---
+# control: for with break and continue
+for x in 1 2 3; do [ $x = 2 ] && continue; [ $x = 3 ] && break; echo $x; done
+#---
+# control: break with a count
+for a in 1 2; do for b in 1 2; do echo $a$b; break 2; done; done
+#---
+# control: continue with a count
+for a in 1 2; do for b in 1 2; do echo $a$b; continue 2; done; done
+#---
+# control: break count too large
+for a in 1 2; do break 5; echo no; done; echo end
+#---
+# control: break zero
+for a in 1; do break 0; done 2>/dev/null; echo $?
+#---
+# control: break in while
+i=0; while :; do i=$((i+1)); [ $i -gt 2 ] && break; done; echo $i
+#---
+# control: while read loop with here-doc
+while read a b; do echo "$b $a"; done <<EOF
+1 2
+3 4
+EOF
+#---
+# control: while with compound condition
+i=0; while [ $i -lt 2 ] && [ $i -ge 0 ]; do i=$((i+1)); done; echo $i
+#---
+# control: until loop
+i=0; until [ $i -ge 3 ]; do i=$((i+1)); done; echo $i
+#---
+# control: loop exit status
+i=0; while [ $i -lt 2 ]; do i=$((i+1)); (exit 3); done; echo $?
+#---
+# control: loop with redirection
+for i in 1 2; do echo $i; done > f; cat f
+#---
+# control: pipeline into loop
+printf 'a\nb\n' | while read l; do echo "<$l>"; done
+#---
+# control: variable set in pipeline loop lost
+x=0; printf 'a\n' | while read l; do x=1; done; echo $x
+#---
+# control: case patterns
+x=abc; case $x in a*) echo 1;; *c) echo 2;; esac
+#---
+# control: case with alternation
+case b in a|b) echo ab;; esac
+#---
+# control: case fallthrough none
+case a in a) echo 1;; a) echo 2;; esac
+#---
+# control: case quoted pattern
+x='a*'; case abc in "$x") echo lit;; a*) echo glob;; esac
+#---
+# control: case with bracket
+case 5 in [0-9]) echo d;; esac
+#---
+# control: case with empty word
+case "" in "") echo empty;; esac
+#---
+# control: case without terminator on last
+case a in a) echo x esac
+#---
+# control: case empty body
+case a in a) ;; esac; echo $?
+#---
+# control: case with leading paren
+case a in (a) echo p;; esac
+#---
+# control: case status of no match
+case x in y) echo;; esac; echo $?
+#---
+# control: case with newline separation
+case a in
+a)
+  echo nl
+  ;;
+esac
+#---
+# control: case with escaped char
+case 'a b' in a\ b) echo m;; esac
+#---
+# control: case dollar in pattern
+a='?'; case x in $a) echo glob;; esac
+#---
+# control: case on a command substitution
+case $(echo yes) in yes) echo y;; esac
+#---
+# control: if elif else chain
+if false; then echo 1; elif false; then echo 2; else echo 3; fi
+#---
+# control: if with compound condition
+if false || true; then echo ok; fi
+#---
+# control: if condition with side effect
+if x=5; then echo $x; fi
+#---
+# control: if status when no branch
+if true; then :; fi; echo $?
+#---
+# control: if with empty then is an error
+if true; then fi
+#---
+# control: if else empty is an error
+if true; then echo a; else fi
+#---
+# control: negation
+! true; echo $?; ! false; echo $?
+#---
+# control: negated pipeline
+! echo a | grep -q b; echo $?
+#---
+# control: and-or lists
+true && echo a || echo b; false && echo c || echo d
+#---
+# control: and-or with newlines
+true &&
+echo nl
+#---
+# control: semicolons and background
+echo a; echo b & wait; echo c
+#---
+# control: subshell isolation
+x=1; (x=2; echo $x); echo $x
+#---
+# control: subshell cd isolation
+(cd /; pwd) >/dev/null; pwd | head -c 0; echo ok
+#---
+# control: group redirection
+{ echo a; echo b; } > f; cat f
+#---
+# control: group in pipeline keeps variables? (subshell)
+x=1; { x=2; } | cat; echo $x
+#---
+# control: command group without trailing semicolon is an error
+{ echo a }
+#---
+# control: brace as a word
+echo { a }; echo {a}
+#---
+# control: empty subshell
+( ) 
+#---
+# control: nested subshell
+( ( echo deep ) )
+#---
+# control: subshell exit status
+( exit 3 ); echo $?
+#---
+# control: time-less pipeline status
+true | false | true; echo $?
+#---
+# control: background and $!
+true & p=$!; wait $p; echo $?; [ -n "$p" ] && echo set
+#---
+# control: wait with no children
+wait; echo $?
+#---
+# control: wait for specific failing job
+(exit 4) & wait $!; echo $?
+#---
+# control: wait unknown pid
+wait 99999 2>/dev/null; echo $?
+#---
+# control: here-doc as stdin of background
+cat <<EOF & wait
+bg
+EOF
+#---
+# function: define and call
+f() { echo "in $1"; }; f x
+#---
+# function: return status
+f() { return 3; }; f; echo $?
+#---
+# function: return without value
+f() { false; return; }; f; echo $?
+#---
+# function: recursion
+f() { [ $1 -le 0 ] && return 0; echo $1; f $(($1-1)); }; f 3
+#---
+# function: positional isolation
+f() { echo $#; }; set -- a b c; f x; echo $#
+#---
+# function: shift in a function
+f() { shift; echo $@; }; set -- a b; f 1 2 3; echo $@
+#---
+# function: variables are global
+f() { x=2; }; x=1; f; echo $x
+#---
+# function: function with redirection
+f() { echo hi; } > f.out; f; cat f.out
+#---
+# function: function body is a compound command
+f() ( echo sub; x=1 ); f; echo "[$x]"
+#---
+# function: function with if body
+f() if true; then echo y; fi; f
+#---
+# function: redefinition
+f() { echo 1; }; f() { echo 2; }; f
+#---
+# function: unset
+f() { echo 1; }; unset -f f; f 2>/dev/null; echo $?
+#---
+# function: call before definition
+f 2>/dev/null; echo $?; f() { echo x; }; f
+#---
+# function: function overrides a regular builtin
+echo() { printf 'fn %s\n' "$*"; }; echo hi; command echo hi
+#---
+# function: function overriding a special builtin
+eval() { echo fn; }; eval x
+#---
+# function: function named like a special builtin and exit
+export() { echo fn; }; export x 2>/dev/null; echo $?
+#---
+# function: function and assignment prefix
+f() { echo "[$a]"; }; a=1 f; echo "[$a]"
+#---
+# function: function and exit
+f() { exit 3; }; f; echo no
+#---
+# function: function in subshell and return
+f() { return 2; }; (f; echo $?)
+#---
+# function: return in dot script inside function
+echo 'return 5' > s; f() { . ./s; echo after; }; f; echo $?
+#---
+# function: return in dot at top level
+echo 'return 5; echo no' > s; . ./s; echo $?
+#---
+# function: return in a loop in a function
+f() { for i in 1 2; do return 4; done; }; f; echo $?
+#---
+# function: break in a function inside a loop
+f() { break; }; for i in 1 2; do f; echo $i; done; echo end
+#---
+# function: local variables via subshell
+f() ( x=2; echo $x ); x=1; f; echo $x
+#---
+# function: function definition status
+f() { :; }; echo $?
+#---
+# function: funcs with the same name as variable
+f=1; f() { echo fn; }; f; echo $f
+#---
+# function: $0 inside
+f() { echo "${0##*/}" | head -c 0; echo ok; }; f
+#---
+# function: nested definition
+f() { g() { echo g; }; }; f; g
+#---
+# function: recursion depth moderate
+f() { [ $1 -gt 200 ] && echo done && return; f $(($1+1)); }; f 0
+#---
+# function: arguments with spaces
+f() { for a in "$@"; do echo "[$a]"; done; }; f 'a b' c ''
+#---
+# function: "$@" empty argument kept
+f() { echo $#; }; f "" ""
+#---
+# function: function call in command substitution
+f() { echo sub; }; x=$(f); echo $x
+#---
+# function: function and trap
+f() { trap 'echo t' EXIT; }; f; echo done
+#---
+# function: function with here-doc
+f() { cat; }; f <<EOF
+body
+EOF
+#---
+# function: definition with newline before brace
+f()
+{
+  echo nl
+}
+f
+#---
+# function: definition with space before parens
+f ( ) { echo sp; }; f
+#---
+# function: definition with redirect on body
+f() { cat; } <<EOF
+fromdef
+EOF
+f
+#---
+# function: invalid function name
+1f() { :; }; echo $?
+#---
+# function: function name with a dash
+a-b() { echo dash; }; a-b
+#---
+# function: quoted function name
+'f'() { echo q; }; f

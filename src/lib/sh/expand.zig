@@ -63,7 +63,9 @@ const X = struct {
 
     fn boundary(x: *X) Error!void {
         if (x.join) {
-            try x.put(' ', quoted);
+            // `$@` in a context that does not split joins like `$*`: with
+            // the first character of IFS (dash, FreeBSD sh)
+            if (ifsFirst(x.sh)) |c| try x.put(c, quoted);
             return;
         }
         if (x.cur.b.items.len > 0 or x.marker) try x.done.append(x.a, x.cur);
@@ -283,6 +285,9 @@ fn emit(x: *X, pv: PV, name: []const u8, is_quoted: bool) Error!void {
             x.marker = true; // "$unset" is one empty field
         },
         .one => |v| {
+            // an empty quoted value is a field that survives splitting of
+            // an adjacent unquoted expansion (`"$e"$s`)
+            if (is_quoted and v.len == 0) try x.put(0, empty_q);
             try x.putAll(v, fl);
             if (is_quoted) x.marker = true;
         },
@@ -300,6 +305,7 @@ fn emit(x: *X, pv: PV, name: []const u8, is_quoted: bool) Error!void {
             }
             for (list, 0..) |v, i| {
                 if (i > 0) try x.boundary();
+                if (is_quoted and v.len == 0) try x.put(0, empty_q);
                 try x.putAll(v, fl);
                 if (is_quoted) x.marker = true;
             }
@@ -341,12 +347,12 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
     const is_empty = is_unset or switch (pv) {
         .one => |v| v.len == 0,
         .many => |l| blk: {
-            // `$*` with only empty parameters is empty too.
-            var all = true;
-            for (l) |v| if (v.len > 0) {
-                all = false;
-            };
-            break :blk all and l.len == 0;
+            // `$@` and `$*` count as null when their joined text (the
+            // parameters separated by the first IFS character) is empty:
+            // `set -- ""` makes `${@:-x}` x, `set -- "" ""` does not
+            // (dash; FreeBSD sh agrees for one empty parameter).
+            if (l.len == 0) break :blk true;
+            break :blk (try joined(x, pv)).len == 0;
         },
         .unset => true,
     };
@@ -367,7 +373,9 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
             const n: usize = switch (pv) {
                 .unset => 0,
                 .one => |v| v.len,
-                .many => |l| l.len,
+                // `${#@}` and `${#*}` are unspecified; dash and FreeBSD sh
+                // give the length of the joined parameters
+                .many => (try joined(x, pv)).len,
             };
             var buf: [24]u8 = undefined;
             const s = std.fmt.bufPrint(&buf, "{d}", .{n}) catch unreachable;
@@ -418,8 +426,32 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
         },
         .trim_prefix_small, .trim_prefix_large, .trim_suffix_small, .trim_suffix_large => {
             if (is_unset and sh.flags.nounset and !multi) return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
-            const v = try joined(x, pv);
             const pat = try stringMode(sh, x.a, p.arg, false, true);
+            if (pv == .many and p.name[0] == '@') {
+                // POSIX leaves `${@%pat}` unspecified. dash, FreeBSD sh and
+                // busybox ash trim the positional parameters as one string
+                // (joined by the first IFS character) and keep the field
+                // boundaries: only the first parameter loses a prefix, only
+                // the last one a suffix.
+                const l = pv.many;
+                const v = try joined(x, pv);
+                const r = trim(v, pat, p.op);
+                const prefix = p.op == .trim_prefix_small or p.op == .trim_prefix_large;
+                const cut_front: usize = if (prefix) v.len - r.len else 0;
+                const keep_end: usize = if (prefix) v.len else r.len;
+                const sep: usize = if (ifsFirst(sh) != null) 1 else 0;
+                const out = try x.a.alloc([]const u8, l.len);
+                var off: usize = 0;
+                for (l, out) |f, *o| {
+                    const lo = @max(off, cut_front);
+                    const hi = @min(off + f.len, keep_end);
+                    o.* = if (hi > lo) v[lo..hi] else "";
+                    off += f.len + sep;
+                }
+                try emit(x, .{ .many = out }, p.name, p.quoted);
+                return;
+            }
+            const v = try joined(x, pv);
             const r = trim(v, pat, p.op);
             try x.putAll(r, if (p.quoted) quoted else field);
             if (p.quoted) x.marker = true;
@@ -563,10 +595,12 @@ fn glob(sh: *Shell, a: Allocator, fb: FieldBuf, out: *std.ArrayList([]const u8))
     try out.append(a, b);
 }
 
-fn joinPath(a: Allocator, prefix: []const u8, name: []const u8) Allocator.Error![]const u8 {
+/// `prefix` + `/` + `name`; slashes of the pattern are kept as they are
+/// (`/.//etc` stays `/.//etc`, dash and FreeBSD sh). `lead` is the length of
+/// the leading run of slashes of an absolute pattern, which already ends in one.
+fn joinPath(a: Allocator, prefix: []const u8, name: []const u8, lead: usize) Allocator.Error![]const u8 {
     if (prefix.len == 0) return name;
-    // only the root has no separator to add: a run of slashes in the pattern is kept
-    if (prefix.len == 1 and prefix[0] == '/') return std.fmt.allocPrint(a, "{s}{s}", .{ prefix, name });
+    if (prefix.len <= lead) return std.fmt.allocPrint(a, "{s}{s}", .{ prefix, name });
     return std.fmt.allocPrint(a, "{s}/{s}", .{ prefix, name });
 }
 
@@ -580,15 +614,16 @@ fn globWalk(a: Allocator, pat: []const u8, out: *std.ArrayList([]const u8)) Erro
     while (it.next()) |s| try segs.append(a, s);
     var prefix: []const u8 = "";
     var start: usize = 0;
+    var lead: usize = 0;
     if (pat.len > 0 and pat[0] == '/') {
-        prefix = "/";
-        start = 1;
-        while (start < segs.items.len and segs.items[start].len == 0) start += 1;
+        while (lead < pat.len and pat[lead] == '/') lead += 1;
+        prefix = pat[0..lead];
+        start = lead;
     }
-    try walk(a, prefix, segs.items, start, out);
+    try walk(a, prefix, lead, segs.items, start, out);
 }
 
-fn walk(a: Allocator, prefix: []const u8, segs: []const []const u8, idx: usize, out: *std.ArrayList([]const u8)) Error!void {
+fn walk(a: Allocator, prefix: []const u8, lead: usize, segs: []const []const u8, idx: usize, out: *std.ArrayList([]const u8)) Error!void {
     if (idx >= segs.len) {
         try out.append(a, prefix);
         return;
@@ -597,23 +632,22 @@ fn walk(a: Allocator, prefix: []const u8, segs: []const []const u8, idx: usize, 
     const last = idx + 1 == segs.len;
     if (seg.len == 0) {
         // `a//b` or a trailing slash: keep it in the result.
-        // every slash of a run is kept (dash, FreeBSD sh)
-        const p2 = try std.fmt.allocPrint(a, "{s}/", .{prefix});
+        const p2 = try joinPath(a, prefix, "", lead);
         if (last) {
             if (sys.stat(prefix, true)) |info| {
                 if (info.kind == .dir) try out.append(a, p2);
             } else |_| {}
             return;
         }
-        return walk(a, p2, segs, idx + 1, out);
+        return walk(a, p2, lead, segs, idx + 1, out);
     }
     if (!pattern.hasMagic(seg)) {
         const name = try pattern.unescape(a, seg);
-        const path = try joinPath(a, prefix, name);
+        const path = try joinPath(a, prefix, name, lead);
         if (last) {
             _ = sys.stat(path, false) catch return;
             try out.append(a, path);
-        } else try walk(a, path, segs, idx + 1, out);
+        } else try walk(a, path, lead, segs, idx + 1, out);
         return;
     }
     var names: std.ArrayList([]u8) = .empty;
@@ -623,13 +657,13 @@ fn walk(a: Allocator, prefix: []const u8, segs: []const []const u8, idx: usize, 
     for (names.items) |nm| {
         if (nm[0] == '.' and !dot_ok) continue;
         if (!pattern.match(seg, nm)) continue;
-        const path = try joinPath(a, prefix, nm);
+        const path = try joinPath(a, prefix, nm, lead);
         if (last) {
             try out.append(a, path);
         } else {
             const info = sys.stat(path, true) catch continue;
             if (info.kind != .dir) continue;
-            try walk(a, path, segs, idx + 1, out);
+            try walk(a, path, lead, segs, idx + 1, out);
         }
     }
 }

@@ -189,7 +189,7 @@ fn returnCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             sh.diagCmdK(.illegal_number, args[1], "return", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         };
-        if (n < 0) {
+        if (n < 0 or n > std.math.maxInt(i32)) {
             sh.diagCmdK(.illegal_number, args[1], "return", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         }
@@ -207,7 +207,7 @@ fn exitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             sh.diagCmdK(.illegal_number, args[1], "exit", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         };
-        if (n < 0) {
+        if (n < 0 or n > std.math.maxInt(i32)) {
             sh.diagCmdK(.illegal_number, args[1], "exit", "Illegal number: {s}", .{args[1]});
             return die(sh, 2);
         }
@@ -250,6 +250,10 @@ fn dot(sh: *Shell, a: Allocator, args_in: []const []const u8) u8 {
             return die(sh, 2);
         }
     }
+    // a directory reads as an empty file (dash, FreeBSD sh)
+    if (sys.stat(path, true)) |info| {
+        if (info.kind == .dir) return 0;
+    } else |_| {}
     const text = exec.readFile(a, path) orelse {
         sh.diagCmdK(.cannot_open, path, ".", "cannot open {s}: No such file", .{path});
         return die(sh, 2);
@@ -306,6 +310,7 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     };
     sys.execve(a, path, rest, env) catch {};
     const e = sys.errno();
+    if (e == sys.E_NOEXEC) exec.execScript(sh, a, path, rest, &.{}, &.{});
     if (interactive_main) for (own) |sg| {
         // exec failed: the shell goes on as before
         if (sh.traps[sg]) |t| {
@@ -393,6 +398,12 @@ fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
         return 2;
     }
     for (args[1..]) |arg| {
+        // `local -` restores the shell options when the function returns
+        // (dash, FreeBSD sh)
+        if (std.mem.eql(u8, arg, "-")) {
+            sh.locals.append(sh.gpa, .{ .name = sh.gpa.dupe(u8, "-") catch return 2, .old = null, .flags = sh.flags }) catch return 2;
+            continue;
+        }
         const eq = std.mem.indexOfScalar(u8, arg, '=');
         const name = if (eq) |e| arg[0..e] else arg;
         if (!lexer.isName(name)) {
@@ -414,9 +425,9 @@ fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             .readonly = ov.readonly,
         } else null;
         sh.locals.append(sh.gpa, .{ .name = sh.gpa.dupe(u8, name) catch return 2, .old = old }) catch return 2;
-        if (eq) |e| {
-            sh.setVar(name, arg[e + 1 ..]) catch return 2;
-        } else sh.unsetVar(name) catch {};
+        // `local x` without a value keeps the current value, as in dash and
+        // FreeBSD sh (the variable is local from now on)
+        if (eq) |e| sh.setVar(name, arg[e + 1 ..]) catch return 2;
     }
     return 0;
 }
@@ -662,7 +673,7 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         _ = sh.out(out.items);
         return 0;
     }
-    if (std.mem.eql(u8, args[i], "-l")) {
+    if (!had_dd and std.mem.eql(u8, args[i], "-l")) {
         var out: std.ArrayList(u8) = .empty;
         for (sys.signal_names[1..]) |nm| out.print(a, "{s}\n", .{nm}) catch return 2;
         _ = sh.out(out.items);
@@ -1267,6 +1278,11 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         }
         if (std.mem.eql(u8, args[i], "-r")) {
             raw = true;
+        } else if (std.mem.eql(u8, args[i], "-p") and i + 1 < args.len) {
+            // `read -p prompt` is not POSIX; dash and FreeBSD sh accept it and
+            // write the prompt to standard error when reading a terminal
+            i += 1;
+            if (sys.isatty(0)) sh.errRaw(args[i]);
         } else {
             sh.diagCmdK(.illegal_option, args[i], "read", "Illegal option {s}", .{args[i]});
             return 2;
@@ -1455,7 +1471,8 @@ const T = struct {
     }
 
     fn num(self: *T, s: []const u8) TestErr!i64 {
-        return parseNum(s) orelse self.fail("Illegal number: {s}", .{s});
+        // blanks around the number are allowed (strtoimax; dash, FreeBSD sh)
+        return parseNum(std.mem.trim(u8, s, " \t\n")) orelse self.fail("Illegal number: {s}", .{s});
     }
 
     fn primary(self: *T) TestErr!bool {
@@ -1492,7 +1509,7 @@ const T = struct {
             }
             const operand = self.args[self.i + 1];
             self.i += 2;
-            return self.evalUnary(c[1], operand);
+            return try self.evalUnary(c[1], operand);
         }
         self.i += 1;
         // A word followed by something that is not an operator is an error
@@ -1500,12 +1517,13 @@ const T = struct {
         return c.len > 0;
     }
 
-    fn evalUnary(_: *T, op: u8, s: []const u8) bool {
+    fn evalUnary(self: *T, op: u8, s: []const u8) TestErr!bool {
         switch (op) {
             'z' => return s.len == 0,
             'n' => return s.len > 0,
             't' => {
-                const fd = parseNum(s) orelse return false;
+                const fd = parseNum(s) orelse return self.fail("Illegal number: {s}", .{s});
+                if (fd < 0 or fd > std.math.maxInt(i32)) return false;
                 return sys.isatty(@intCast(fd));
             },
             'r' => return sys.access(s, 4),
@@ -1578,6 +1596,11 @@ fn evalCounted(t: *T, args: []const []const u8) TestErr!bool {
         2 => {
             if (eq(u8, args[0], "!")) return args[1].len == 0;
             if (T.isUnary(args[0])) return t.evalUnary(args[0][1], args[1]);
+            // dash and FreeBSD sh read `[ -a -a ]` as an empty AND and `[ -o -o ]`
+            // as an empty OR: false and true, no error; any other `-a x` is an
+            // error as above.
+            if (eq(u8, args[0], "-a") and eq(u8, args[1], "-a")) return false;
+            if (eq(u8, args[0], "-o") and eq(u8, args[1], "-o")) return true;
             return t.fail("{s}: unexpected operator", .{args[0]});
         },
         3 => {
@@ -1797,10 +1820,9 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     const optstr = args[1];
     const name = args[2];
-    if (!lexer.isName(name)) {
-        sh.diagCmdK(.bad_variable_name, name, "getopts", "{s}: bad variable name", .{name});
-        return 2;
-    }
+    // an invalid variable name is reported, but the option is still parsed
+    // (OPTIND and OPTARG are set) and the status is 2 (dash, FreeBSD sh)
+    if (!lexer.isName(name)) sh.diagCmdK(.bad_variable_name, name, "getopts", "{s}: bad variable name", .{name});
     const list: []const []const u8 = if (args.len > 3) args[3..] else @as([]const []const u8, @ptrCast(sh.params.items));
     const silent = optstr.len > 0 and optstr[0] == ':';
     const os = if (silent) optstr[1..] else optstr;
@@ -1811,13 +1833,14 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var idx = if (sub > 0) optind - 1 else optind;
     const finish = struct {
         fn f(s: *Shell, n: []const u8, val: []const u8, oi: usize, sub_: usize, st: u8) u8 {
-            s.setVar(n, val) catch {};
+            const ok = lexer.isName(n);
+            if (ok) s.setVar(n, val) catch {};
             var buf: [24]u8 = undefined;
             const t = std.fmt.bufPrint(&buf, "{d}", .{oi}) catch "1";
             s.setVarRaw("OPTIND", t) catch {};
             s.getopts_last_optind = oi;
             s.getopts_sub = sub_;
-            return st;
+            return if (ok) st else 2;
         }
     }.f;
     if (idx > list.len) return finish(sh, name, "?", idx, 0, 1);
@@ -1872,9 +1895,19 @@ fn killCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     if (i < args.len and std.mem.eql(u8, args[i], "-l")) {
         var out: std.ArrayList(u8) = .empty;
         if (i + 1 < args.len) {
-            const n = parseNum(args[i + 1]) orelse return 2;
-            const s: usize = @intCast(if (n > 128) n - 128 else n);
-            if (s > 0 and s < sys.signal_names.len) out.print(a, "{s}\n", .{sys.signal_names[s]}) catch return 2;
+            // `kill -l N`: a signal number or the exit status of a process
+            // killed by it (128+N); 0, 128 and anything else is an error
+            // (dash and FreeBSD sh).
+            const n = parseNum(args[i + 1]) orelse {
+                sh.diagCmdK(.kill_error, null, "kill", "invalid signal number or exit status: {s}", .{args[i + 1]});
+                return 2;
+            };
+            const s: i64 = if (n > 128) n - 128 else n;
+            if (s <= 0 or s >= sys.signal_names.len) {
+                sh.diagCmdK(.kill_error, null, "kill", "invalid signal number or exit status: {s}", .{args[i + 1]});
+                return 2;
+            }
+            out.print(a, "{s}\n", .{sys.signal_names[@intCast(s)]}) catch return 2;
         } else for (sys.signal_names[1..]) |nm| out.print(a, "{s}\n", .{nm}) catch return 2;
         _ = sh.out(out.items);
         return 0;
@@ -1939,6 +1972,10 @@ fn umaskCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         } else _ = sh.out(std.fmt.allocPrint(a, "{o:0>4}\n", .{m}) catch return 2);
         return 0;
     }
+    if (args[i].len > 1 and args[i][0] == '-' and !std.mem.eql(u8, args[i], "--")) {
+        sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{args[i][1]}), "umask", "Illegal option {s}", .{args[i]});
+        return 2;
+    }
     if (args[i].len > 0 and !std.ascii.isDigit(args[i][0])) {
         // symbolic mode (POSIX umask): applied to the permissions the mask
         // allows, i.e. its complement
@@ -1954,11 +1991,8 @@ fn umaskCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         sh.diagCmdK(.illegal_number, args[i], "umask", "Illegal number: {s}", .{args[i]});
         return 2;
     };
-    if (m > 0o777) {
-        sh.diagCmdK(.illegal_number, args[i], "umask", "Illegal number: {s}", .{args[i]});
-        return 2;
-    }
-    _ = sys.umaskSet(m);
+    // a numeric mask keeps only the permission bits (dash, FreeBSD sh)
+    _ = sys.umaskSet(m & 0o777);
     return 0;
 }
 
@@ -2013,6 +2047,10 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         };
     }
     if (all) {
+        if (i < args.len) {
+            sh.diagCmdK(.usage, null, "ulimit", "too many arguments", .{});
+            return 2;
+        }
         // POSIX.1-2024 `ulimit -a`: every limit this shell knows, one per line
         const Row = struct { label: []const u8, opt: u8, res: u32, scale: u64 };
         const rows = [_]Row{
@@ -2055,6 +2093,10 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             return 2;
         };
     };
+    if (i + 1 < args.len) {
+        sh.diagCmdK(.usage, null, "ulimit", "too many arguments", .{});
+        return 2;
+    }
     if (hard or !soft_set) cur.hard = v;
     if (!hard or soft_set) cur.soft = v;
     if (hard and !soft_set) cur.soft = @min(cur.soft, v);

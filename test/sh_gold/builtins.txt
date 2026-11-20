@@ -1,0 +1,643 @@
+# read: basic splitting
+echo 'a b  c d' | { read x y z; echo "[$x][$y][$z]"; }
+#---
+# read: fewer fields than names
+echo 'a' | { read x y; echo "[$x][$y]"; }
+#---
+# read: a single name takes the line
+echo '  a  b  ' | { read x; echo "[$x]"; }
+#---
+# read: IFS non-whitespace
+echo 'a:b::c' | { IFS=: read x y z w; echo "[$x][$y][$z][$w]"; }
+#---
+# read: trailing delimiter
+echo 'a:b:' | { IFS=: read x y z; echo "[$x][$y][$z]"; }
+#---
+# read: backslash continuation
+printf 'a\\\nb\n' | { read x; echo "[$x]"; }
+#---
+# read: backslash with -r
+printf 'a\\\nb\n' | { read -r x; echo "[$x]"; }
+#---
+# read: backslash escapes
+printf 'a\\ b c\n' | { read x y; echo "[$x][$y]"; }
+#---
+# read: eof without newline
+printf 'abc' | { read x; echo "[$x] $?"; }
+#---
+# read: eof status
+{ read x; echo "[$x] $?"; } < /dev/null
+#---
+# read: empty line
+echo | { read x; echo "[$x] $?"; }
+#---
+# read: multiple lines in loop
+printf 'a\nb\n' | { while read l; do echo "<$l>"; done; }
+#---
+# read: read from here-doc preserves rest
+{ read a; read b; echo "$a$b"; } <<EOF
+1
+2
+EOF
+#---
+# read: invalid name
+echo x | read 1a 2>/dev/null; echo $?
+#---
+# read: no variable
+echo x | { read 2>/dev/null; echo $?; }
+#---
+# read: variable IFS unset restoration
+echo 'a b' | { IFS=: read x; echo "[$x]"; echo "[$IFS]" | od -c | head -1; }
+#---
+# read: readonly variable
+readonly r=1; echo x | read r 2>/dev/null; echo $?
+#---
+# read: tabs and newlines in IFS
+printf 'a\tb\n' | { read x y; echo "[$x][$y]"; }
+#---
+# read: -r with trailing backslash
+printf 'a\\\n' | { read -r x; echo "[$x]"; }
+#---
+# read: option -p is not POSIX
+echo x | { read -p 'p' x 2>/dev/null; echo $?; }
+#---
+# read: all whitespace line
+echo '   ' | { read x y; echo "[$x][$y]"; }
+#---
+# getopts: simple
+set -- -a -b arg rest; while getopts ab: o; do echo "$o $OPTARG $OPTIND"; done; echo $OPTIND
+#---
+# getopts: clustered
+set -- -ab foo; while getopts ab: o; do echo "$o [$OPTARG] $OPTIND"; done
+#---
+# getopts: attached argument
+set -- -bfoo; while getopts ab: o; do echo "$o [$OPTARG] $OPTIND"; done
+#---
+# getopts: unknown option
+set -- -z; getopts ab o 2>/dev/null; echo "$o [$OPTARG] $OPTIND $?"
+#---
+# getopts: silent unknown option
+set -- -z; getopts :ab o; echo "$o [$OPTARG] $OPTIND $?"
+#---
+# getopts: missing argument
+set -- -b; getopts b: o 2>/dev/null; echo "$o [$OPTARG] $OPTIND $?"
+#---
+# getopts: silent missing argument
+set -- -b; getopts :b: o; echo "$o [$OPTARG] $OPTIND $?"
+#---
+# getopts: end of options by --
+set -- -a -- -b; while getopts ab o; do echo $o; done; echo $OPTIND
+#---
+# getopts: stops at first non-option
+set -- -a x -b; while getopts ab o; do echo $o; done; echo $OPTIND
+#---
+# getopts: explicit parameters
+getopts ab o -a -b; echo "$o $OPTIND"
+#---
+# getopts: reset OPTIND
+set -- -a; getopts a o; OPTIND=1; getopts a o; echo "$o $OPTIND"
+#---
+# getopts: a lone dash
+set -- -; getopts a o; echo "$? $OPTIND"
+#---
+# getopts: option char colon
+set -- -:; getopts a o 2>/dev/null; echo "$o $?"
+#---
+# getopts: optstring with leading plus
+set -- +a; getopts a o 2>/dev/null; echo "$o $? $OPTIND"
+#---
+# getopts: OPTARG unset after option without argument
+set -- -b x -a; getopts b:a o; getopts b:a o; echo "[$OPTARG]"
+#---
+# getopts: status at end is 1
+set --; getopts a o; echo $?
+#---
+# getopts: no args
+getopts 2>/dev/null; echo $?
+#---
+# getopts: in a function uses the function arguments
+f() { getopts a o; echo "$o $OPTIND"; }; set -- -z; f -a
+#---
+# test: string tests
+[ -z '' ] && echo z; [ -n x ] && echo n; [ x ] && echo s; [ '' ] || echo empty
+#---
+# test: string comparison
+[ a = a ] && echo eq; [ a != b ] && echo ne; [ a = b ] || echo notq
+#---
+# test: numeric comparison
+[ 1 -eq 1 ] && echo eq; [ 1 -ne 2 ] && echo ne; [ 2 -gt 1 ] && echo gt; [ 1 -lt 2 ] && echo lt; [ 2 -ge 2 ] && echo ge; [ 2 -le 2 ] && echo le
+#---
+# test: numeric with spaces
+[ ' 1' -eq 1 ] && echo sp
+#---
+# test: numeric with non-number
+[ a -eq 1 ] 2>/dev/null; echo $?
+#---
+# test: numeric with empty
+[ '' -eq 0 ] 2>/dev/null; echo $?
+#---
+# test: negative numbers
+[ -1 -lt 0 ] && echo neg
+#---
+# test: one argument forms
+[ '!' ] && echo bang; [ -n ] && echo n; [ -z ] && echo z; [ '(' ] && echo paren
+#---
+# test: two argument forms
+[ ! '' ] && echo t; [ ! x ] || echo f; [ -n x ] && echo n
+#---
+# test: three argument forms
+[ ! -n x ] || echo f; [ a = a ] && echo e; [ -n = -n ] && echo opeq
+#---
+# test: four argument forms
+[ ! a = b ] && echo t; [ '(' a ')' ] && echo p
+#---
+# test: -a and -o
+[ a = a -a b = b ] && echo and; [ a = b -o b = b ] && echo or
+#---
+# test: precedence of -a over -o
+[ 1 = 1 -o 1 = 2 -a 1 = 2 ] && echo t
+#---
+# test: parentheses
+[ \( 1 = 2 -o 1 = 1 \) -a 2 = 2 ] && echo t
+#---
+# test: bang and combination
+[ ! 1 = 2 -a 2 = 2 ] && echo t
+#---
+# test: file tests
+: > f; mkdir d; ln -s f l; [ -e f ] && echo e; [ -f f ] && echo f; [ -d d ] && echo d; [ -L l ] && echo L; [ -h l ] && echo h; [ -s f ] || echo nonempty; [ -r f ] && echo r; [ -w f ] && echo w; [ -x f ] || echo nx
+#---
+# test: -s on nonempty file
+echo x > f; [ -s f ] && echo s
+#---
+# test: file tests on missing
+[ -e nosuch ] || echo no; [ -f nosuch ] || echo nof; [ -d nosuch ] || echo nod
+#---
+# test: -x on dir
+mkdir d; [ -x d ] && echo x
+#---
+# test: -nt -ot -ef
+: > a; sleep 0.01; : > b; touch -d '2000-01-01' a; [ b -nt a ] && echo nt; [ a -ot b ] && echo ot; ln b c; [ b -ef c ] && echo ef
+#---
+# test: -p -c -b -S -t
+[ -c /dev/null ] && echo c; [ -t 99 ] || echo nt
+#---
+# test: -u -g -k
+: > f; chmod u+s f; [ -u f ] && echo u; [ -g f ] || echo ng
+#---
+# test: string < > not posix
+[ a '<' b ] && echo lt
+#---
+# test: unknown operator
+[ a -foo b ] 2>/dev/null; echo $?
+#---
+# test: missing bracket
+[ a = a 2>/dev/null; echo $?
+#---
+# test: empty brackets
+[ ] ; echo $?
+#---
+# test: = with empty operands
+[ '' = '' ] && echo e; [ = = = ] && echo e2
+#---
+# test: with variables unquoted empty
+e=; [ $e = x ] 2>/dev/null; echo $?
+#---
+# test: -n with unquoted empty
+e=; [ -n $e ] && echo t || echo f
+#---
+# test: long expressions
+[ 1 = 1 -a 2 = 2 -a 3 = 3 -a 4 = 4 ] && echo t
+#---
+# test: using test as name
+test 1 -eq 1 && echo ok; test ! 1 -eq 1; echo $?
+#---
+# test: -o option test
+[ -o noglob ] 2>/dev/null; echo $?
+#---
+# test: exit status 2 on error
+[ 1 -eq ] 2>/dev/null; echo $?
+#---
+# echo: basic
+echo a b; echo; echo ''; echo -n a; echo
+#---
+# echo: options like -n
+echo -n -n a; echo; echo -nn x; echo
+#---
+# echo: backslashes
+echo 'a\tb' 'c\nd' 'e\\f' 'g\cx'
+#---
+# echo: octal escapes
+echo '\0101' '\101'
+#---
+# echo: dash alone and --
+echo -; echo --; echo -- x
+#---
+# echo: -e is printed or accepted
+echo -e 'a\tb'
+#---
+# echo: many spaces
+echo a    b
+#---
+# eval: concatenation and status
+eval 'echo a' 'b'; eval false; echo $?; eval; echo $?
+#---
+# eval: with quotes and substitutions
+x='a b'; eval echo "$x"; eval 'echo "$x"'
+#---
+# eval: assignment in eval persists
+eval 'y=1'; echo $y
+#---
+# eval: syntax error status
+eval 'echo a; (' 2>/dev/null; echo $?
+#---
+# eval: return inside eval in function
+f() { eval 'return 3'; echo no; }; f; echo $?
+#---
+# eval: break in eval in loop
+for i in 1 2; do eval break; echo $i; done; echo end
+#---
+# eval: positional
+set -- a b; eval 'echo $#'
+#---
+# command: -v and -V
+command -v echo; command -v nosuch_zz; echo $?
+#---
+# command: -v for function and alias
+f() { :; }; command -v f; alias a=b; command -v a
+#---
+# command: -v for keyword
+command -v if
+#---
+# command: -V forms
+command -V echo 2>&1 | head -1 | sed 's/.* is .*/is/'
+#---
+# command: bypasses functions
+echo() { printf 'fn\n'; }; command echo real
+#---
+# command: -p
+command -p echo ok
+#---
+# command: exec status not found
+command nosuch_zz 2>/dev/null; echo $?
+#---
+# command: with assignment prefix
+a=1 command sh -c 'echo $a'
+#---
+# command: special builtin prefix assignment is temporary
+a=1 command :; echo "[$a]"
+#---
+# command: no operands
+command; echo $?
+#---
+# type: builtin and function
+f() { :; }; type f echo 2>&1 | sed 's/^\(f\|echo\) is .*/\1 is/'
+#---
+# type: not found status
+type nosuch_zz 2>/dev/null; echo $?
+#---
+# type: keyword
+type if 2>&1 | head -1
+#---
+# unset: variables and functions
+a=1; f() { :; }; unset a f; echo "[$a]"; f 2>/dev/null; echo $?
+#---
+# unset: a function when both exist
+f=1; f() { echo fn; }; unset f; f
+#---
+# unset: invalid name
+unset 1a 2>/dev/null; echo $?
+#---
+# unset: positional
+set -- a b; unset 1 2>/dev/null; echo "$#"
+#---
+# export: names with equals and listing
+export A=1 B; export -p | grep -E '^export (A|B)' | sort
+#---
+# export: reassign keeps exported
+export A=1; A=2; sh -c 'echo $A'
+#---
+# export: invalid name
+export 1a=2 2>/dev/null; echo $?
+#---
+# readonly: assignment error
+readonly A=1; (A=2) 2>/dev/null; echo $?; readonly A=3 2>/dev/null; echo $?
+#---
+# readonly: unset
+readonly A=1; unset A 2>/dev/null; echo $?
+#---
+# readonly: without value
+readonly B; B=1 2>/dev/null; echo $?
+#---
+# shift: status
+set -- a; shift; echo $?; shift 2>/dev/null; echo $?
+#---
+# shift: error count
+set -- a b; shift 3 2>/dev/null; echo $? $#
+#---
+# colon and true false
+:; echo $?; true; echo $?; false; echo $?; : a b; echo $?
+#---
+# colon with expansions
+: ${x:=5}; echo $x
+#---
+# exit: statuses
+(exit); echo $?; false; (exit); echo $?
+#---
+# exit: invalid
+(exit x) 2>/dev/null; echo $?
+#---
+# exit: trap order
+trap 'echo t1' EXIT; (trap 'echo t2' EXIT; exit 1); echo $?
+#---
+# trap: print format
+trap 'echo hi' INT; trap
+#---
+# trap: reset and ignore
+trap 'echo hi' INT; trap - INT; trap; trap '' INT; trap
+#---
+# trap: numeric condition
+trap 'echo x' 0; trap | head -1
+#---
+# trap: by number list
+trap 'echo c' 2; trap | grep -c INT
+#---
+# trap: invalid signal
+trap 'echo' NOSUCH 2>/dev/null; echo $?
+#---
+# trap: signal delivery
+trap 'echo got' USR1; kill -USR1 $$; echo after
+#---
+# trap: EXIT in function
+f() { trap 'echo bye' EXIT; }; f; echo end
+#---
+# trap: ERR is not posix
+trap 'echo err' ERR 2>/dev/null; echo $?
+#---
+# trap: command with exit status
+trap 'echo $?' EXIT; false
+#---
+# trap: trap in subshell
+trap 'echo parent' EXIT; (echo sub); echo end
+#---
+# trap: signal while waiting
+trap 'echo caught' USR1; (sleep 0.1; kill -USR1 $$) & wait; echo done
+#---
+# set: -u and +u
+set -u; echo ${x-d}; set +u; echo $x
+#---
+# set: -C noclobber
+set -C; echo a > f; echo b > f 2>/dev/null; echo $?; echo c >| f; cat f
+#---
+# set: -C with append
+set -C; : > f; echo a >> f; cat f
+#---
+# set: -f
+set -f; echo *; set +f
+#---
+# set: -x trace goes to stderr
+set -x; echo a 2>&1 | head -c 0; echo ok
+#---
+# set: -n skips execution
+set -n; echo no; echo $?
+#---
+# set: -v prints input
+set -v; echo a 2>&1 | head -c 0; echo ok
+#---
+# set: -a exports
+set -a; v=1; sh -c 'echo $v'
+#---
+# set: -e and -u together in $-
+set -eu; case $- in *e*u*|*u*e*) echo both;; esac
+#---
+# set: -o names
+set -o noglob; echo $-; set +o noglob; echo $-
+#---
+# set: -o unknown
+set -o nosuchopt 2>/dev/null; echo $?
+#---
+# set: -- clears options
+set -e; set --; echo $-
+#---
+# set: - ends options
+set - a b; echo $# $-
+#---
+# set: -o errexit and -e same
+set -o errexit; case $- in *e*) echo e;; esac
+#---
+# set: -o allexport
+set -o allexport; case $- in *a*) echo a;; esac
+#---
+# set: -o ignoreeof is accepted
+set -o ignoreeof 2>/dev/null; echo $?
+#---
+# set: -o nolog
+set -o nolog 2>/dev/null; echo $?
+#---
+# set: -h
+set -h 2>/dev/null; echo $?
+#---
+# set: -m without a terminal
+set -m 2>/dev/null; echo $?
+#---
+# set: -b
+set -b 2>/dev/null; echo $?
+#---
+# set: bare set shows variables sorted
+b=2; a=1; set | grep -E '^[ab]=' 
+#---
+# set: values are quoted when needed
+a='x y'; b="it's"; set | grep -E '^[ab]='
+#---
+# umask: default and set
+umask 022; umask; umask 077; umask; umask -S
+#---
+# umask: symbolic
+umask 022; umask u=rwx,g=rx,o=rx; umask; umask g+w; umask
+#---
+# umask: invalid
+umask 999 2>/dev/null; echo $?
+#---
+# alias: basic
+alias ll='echo ls'; ll; unalias ll; ll 2>/dev/null; echo $?
+#---
+# alias: listing
+alias a=b c=d; alias | sort
+#---
+# alias: expansion only in command position
+alias x='echo X'; echo x; x
+#---
+# alias: not used inside a function defined earlier
+f() { x; }; alias x='echo X'; f 2>/dev/null; echo $?
+#---
+# alias: defined on the same line does not apply
+alias y='echo Y'; y 2>/dev/null; echo $?
+#---
+# alias: not found
+alias nosuch 2>/dev/null; echo $?; unalias nosuch 2>/dev/null; echo $?
+#---
+# alias: unalias -a
+alias a=b; unalias -a; alias; echo $?
+#---
+# alias: trailing blank
+alias e='echo ' w=World; e w
+#---
+# alias: with eval
+alias z='echo Z'; eval z
+#---
+# hash: basics
+hash -r; hash nosuch_zz 2>/dev/null; echo $?; hash -r; hash | wc -l | tr -d ' '
+#---
+# wait: no jobs and status
+wait; echo $?; sh -c 'exit 3' & wait $!; echo $?
+#---
+# wait: multiple
+(exit 1) & a=$!; (exit 2) & b=$!; wait $a $b; echo $?
+#---
+# exec: redirections only
+exec 3>f; echo hi >&3; exec 3>&-; cat f
+#---
+# exec: persistent redirection of stdout
+exec > f; echo a; echo b >&2 2>/dev/null; cat f 2>/dev/null
+#---
+# exec: command replaces the shell
+exec echo replaced; echo no
+#---
+# exec: input redirection
+echo data > f; exec < f; read x; echo $x
+#---
+# exec: fd dup
+exec 3>&1; echo out >&3
+#---
+# exec: closed stdin
+exec <&-; cat 2>/dev/null; echo $?
+#---
+# dot: reads file and sees variables
+echo 'v=from_dot' > s; . ./s; echo $v
+#---
+# dot: searches PATH
+mkdir bin; echo 'echo found' > bin/s; PATH=$PWD/bin:$PATH . s
+#---
+# dot: arguments
+echo 'echo $# $1' > s; . ./s a b
+#---
+# dot: restores positional
+echo ':' > s; set -- x y; . ./s a; echo $#
+#---
+# dot: exit in dot
+echo 'exit 4' > s; (. ./s); echo $?
+#---
+# dot: syntax error in dot file
+echo 'if' > s; . ./s 2>/dev/null; echo $?
+#---
+# dot: no argument
+. 2>/dev/null; echo $?
+#---
+# dot: return in file
+echo 'echo a; return 2; echo b' > s; . ./s; echo $?
+#---
+# misc: line continuation in assignments and comments
+a=1\
+2; echo $a # comment \
+echo b
+#---
+# misc: comment at end without newline
+echo a # c
+#---
+# misc: command on several lines with pipe
+echo a |
+cat
+#---
+# misc: semicolon alone
+;
+#---
+# misc: double semicolon at top level
+;;
+#---
+# misc: empty command lines
+echo a;; echo b
+#---
+# misc: ampersand alone
+&
+#---
+# misc: pipe at start
+| cat
+#---
+# misc: redirection only
+> f; ls f; echo $?
+#---
+# misc: redirection with no command and substitution
+> f $(echo ignored); echo $?
+#---
+# misc: reserved word as an argument
+echo if then else fi
+#---
+# misc: reserved word quoted as command
+'if' 2>/dev/null; echo $?
+#---
+# misc: ! as an argument
+echo ! a; echo a !
+#---
+# misc: {} as arguments
+echo {} ; echo }{
+#---
+# misc: in as a command word
+in 2>/dev/null; echo $?
+#---
+# misc: for loop variable with in on next line
+for x
+in a b
+do echo $x; done
+#---
+# misc: case in a one-liner with semicolons
+case a in a) echo 1;; b) echo 2;; esac; echo end
+#---
+# misc: long pipeline status
+true | true | false | true; echo $?
+#---
+# misc: pipeline with redirection in the middle
+echo a | cat > f | cat; cat f
+#---
+# misc: stderr redirection to stdout order
+sh -c 'echo out; echo err >&2' 2>&1 >/dev/null
+#---
+# misc: redirect order matters
+sh -c 'echo err >&2' >/dev/null 2>&1; sh -c 'echo err >&2' 2>&1 >/dev/null
+#---
+# misc: file descriptor 3 inherited
+exec 3>f; sh -c 'echo x >&3'; cat f
+#---
+# misc: read-write redirection
+echo abc > f; exec 3<> f; read x <&3; echo $x
+#---
+# misc: append redirection
+echo a > f; echo b >> f; cat f
+#---
+# misc: redirection with variable
+f=out; echo x > $f; cat out
+#---
+# misc: redirection from directory
+cat < . 2>/dev/null; echo $?
+#---
+# misc: input redirection from missing file in a pipeline
+cat < nosuch 2>/dev/null | cat; echo $?
+#---
+# misc: noclobber and /dev/null
+set -C; echo x > /dev/null; echo $?
+#---
+# misc: >&- and <&-
+echo a >&-; echo $?
+#---
+# misc: tilde in redirection target
+HOME=$PWD; echo x > ~/f; cat f
+#---
+# misc: command with leading assignment and redirection
+a=1 sh -c 'echo $a' > f; cat f
+#---
+# misc: spaces around redirection
+echo hi>f;cat<f
+#---
+# misc: number before redirection with space
+echo hi 2 > f; cat f
+#---
+# misc: $? after pipeline with ! 
+! true | false; echo $?

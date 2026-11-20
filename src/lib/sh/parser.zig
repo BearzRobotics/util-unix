@@ -542,6 +542,8 @@ pub const Parser = struct {
                 'c' => {
                     const x = self.cur() orelse continue;
                     self.pos += 1;
+                    // `\c\\` is control-backslash: the escaped backslash is one unit
+                    if (x == '\\' and self.cur() == '\\') self.pos += 1;
                     try out.append(a, if (x == '?') 127 else x & 0x1f);
                 },
                 'x' => {
@@ -623,9 +625,12 @@ pub const Parser = struct {
         var length = false;
         if (c == '#') {
             const n = self.at(1);
-            if (n != null and n.? != '}' and (lexer.isNameStart(n.?) or std.ascii.isDigit(n.?) or n.? == '@' or n.? == '*' or n.? == '$' or n.? == '!' or n.? == '?')) {
+            if (n != null and n.? != '}' and (lexer.isNameStart(n.?) or std.ascii.isDigit(n.?) or n.? == '@' or n.? == '*' or n.? == '$' or n.? == '!' or n.? == '?' or n.? == '-' or n.? == '#')) {
                 // `${#name}` is the length; `${#}` and `${#-...}` use `#` itself.
-                if (!(n.? == '?' or n.? == '$' or n.? == '!') or self.at(2) == '}') {
+                // `${##}`, `${#-}`, `${#?}`, `${#$}`, `${#!}` are the length of
+                // that special parameter (dash, FreeBSD sh); `${#-x}` stays
+                // the default value of `#`.
+                if (!(n.? == '?' or n.? == '$' or n.? == '!' or n.? == '-' or n.? == '#') or self.at(2) == '}') {
                     length = true;
                     self.pos += 1;
                     c = self.cur().?;
@@ -712,7 +717,9 @@ pub const Parser = struct {
             else => return self.badSubst(b, in_dq, bstart),
         }
         p.op = op;
-        var inner: Builder = .{};
+        // in an assignment the word of `${x-word}` also expands tildes after
+        // colons (dash, FreeBSD sh)
+        var inner: Builder = .{ .assign = b.assign };
         // the word of `#` `##` `%` `%%` is a pattern even inside double quotes:
         // its own quotes and unquoted characters keep their meaning (POSIX 2.6.2)
         const trim_op = op == .trim_prefix_small or op == .trim_prefix_large or op == .trim_suffix_small or op == .trim_suffix_large;
@@ -1412,6 +1419,9 @@ pub const Parser = struct {
                     quoted = true;
                     try delim.appendSlice(self.a, s);
                 },
+                // a command substitution in the delimiter is an error (dash,
+                // FreeBSD sh); POSIX leaves the delimiter's expansions undefined
+                .cmdsub => return self.failK(.unexpected_token, "Syntax error: Illegal eof marker for << redirection", .{}),
                 else => quoted = quoted,
             };
             r.target = &.{};

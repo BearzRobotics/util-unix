@@ -86,6 +86,8 @@ pub const Job = jobs_mod.Job;
 pub const Saved = struct {
     name: []u8,
     old: ?Var,
+    /// `local -`: the shell options to restore when the function returns.
+    flags: ?Flags = null,
 };
 
 pub const Shell = struct {
@@ -348,7 +350,9 @@ pub const Shell = struct {
         if (std.mem.eql(u8, name, "PATH")) self.clearHash();
         if (v.value) |old| self.gpa.free(old);
         v.value = null;
-        if (!v.exported and !v.readonly) {
+        // unset also drops the export attribute (dash, FreeBSD sh): a later
+        // assignment does not export again.
+        if (!v.readonly) {
             if (self.vars.fetchRemove(name)) |kv| self.gpa.free(kv.key);
         }
     }
