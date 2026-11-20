@@ -1,0 +1,2 @@
+{"code":"SH2001","kind":"division_by_zero","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"division by zero in '1/0'","help":"test the divisor before dividing","token":"","expected":"","posix":"arithmetic expression: division by zero: \"1/0\""}
+rc=2

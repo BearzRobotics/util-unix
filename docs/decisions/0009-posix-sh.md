@@ -1,6 +1,6 @@
 # 0009: A POSIX shell, `sh`
 
-Status: accepted by the maintainer. Date: 2026-11-19. Not started when this was written.
+Status: accepted by the maintainer. Date: 2026-11-19. Milestone 1 implemented (see docs/compatibility/sh.md); milestones 2 and 3 not started.
 
 ## Goal
 

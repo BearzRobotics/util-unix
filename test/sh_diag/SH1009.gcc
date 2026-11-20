@@ -1,0 +1,2 @@
+-c:1:1: error: 'eval' cannot be used as a function name [SH1009]
+rc=2

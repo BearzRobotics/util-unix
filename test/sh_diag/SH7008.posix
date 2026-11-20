@@ -1,0 +1,2 @@
+s.sh:1:1: warning: `echo -e` prints the option itself in some shells and escapes in others [SH7008]
+rc=1

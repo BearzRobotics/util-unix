@@ -1,0 +1,2 @@
+{"code":"SH2006","kind":"cannot_assign","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"cannot assign to '1' in this way","help":"positional and special parameters cannot be assigned by expansion; use `set --`","token":"","expected":"","posix":"1: cannot assign in this way"}
+rc=2

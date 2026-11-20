@@ -1,0 +1,2 @@
+s.sh:1:7: warning: `local` is not defined by POSIX; common shells accept it but behave differently [SH7007]
+rc=1

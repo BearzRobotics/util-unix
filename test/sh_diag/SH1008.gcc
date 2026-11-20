@@ -1,0 +1,2 @@
+-c:1:5: error: '1x' is not a valid variable name for `for` [SH1008]
+rc=2

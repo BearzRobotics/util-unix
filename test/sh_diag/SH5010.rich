@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5010]: write error: I/O error
+  |
+1 | echo hi >&-
+  | ^^^^
+help: standard output is closed or full
+rc=1

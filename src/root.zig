@@ -28,6 +28,9 @@ pub const stty = @import("lib/stty.zig");
 pub const who = @import("lib/who.zig");
 pub const utmp = @import("lib/utmp.zig");
 pub const json = @import("lib/json.zig");
+pub const sh = @import("lib/sh.zig");
+/// Operating-system facilities `std.Io` lacks (docs/std-io-gaps.md).
+pub const sys = @import("sys.zig");
 
 test {
     _ = fsown;
@@ -50,4 +53,5 @@ test {
     _ = who;
     _ = utmp;
     _ = json;
+    _ = sh;
 }

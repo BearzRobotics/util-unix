@@ -1,0 +1,2 @@
+sh: 1: arithmetic expression: division by zero: "1/0"
+rc=2

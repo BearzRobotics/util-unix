@@ -1,0 +1,2 @@
+{"code":"SH7003","kind":"lint_rm_variable","severity":"warning","file":"s.sh","line":1,"column":1,"end":3,"message":"`rm -r` of a path starting with a variable: if it is empty the path becomes `/...`","help":"use `${var:?}` so an empty value stops the script","token":"","expected":"","posix":"`rm -r` on a path built from a variable that may be empty"}
+rc=1

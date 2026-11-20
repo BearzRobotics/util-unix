@@ -1,0 +1,6 @@
+sh: -c:1:6: error[SH1005]: unterminated arithmetic expansion (opened at line 1, column 6)
+  |
+1 | echo $((1+2)
+  |      ^^^
+help: close it with `))`; for a nested subshell write `$( (cmd) )` with a space
+rc=2

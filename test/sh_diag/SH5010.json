@@ -1,0 +1,2 @@
+{"code":"SH5010","kind":"io_error","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"write error: I/O error","help":"standard output is closed or full","token":"","expected":"","posix":"echo: I/O error"}
+rc=1

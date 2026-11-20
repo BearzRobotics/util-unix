@@ -1,0 +1,6 @@
+sh: -c:1:6: error[SH1001]: unexpected ')'
+  |
+1 | echo )
+  |      ^
+help: check for a missing separator (`;` or newline) or a stray operator before it
+rc=2

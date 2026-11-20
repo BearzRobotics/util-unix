@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH1006]: bad substitution
+  |
+1 | echo ${x!}
+  | ^^^^
+help: POSIX has `-` `=` `?` `+` (with or without `:`) and `#` `##` `%` `%%`; `${x/a/b}` and `${x:1:2}` are not POSIX
+rc=2

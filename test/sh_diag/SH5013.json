@@ -1,0 +1,2 @@
+{"code":"SH5013","kind":"not_in_function","severity":"error","file":"-c","line":1,"column":1,"end":6,"message":"`local` can only be used inside a function","help":"declare the variable normally, or move the code into a function","token":"","expected":"","posix":"local: not in a function"}
+rc=2

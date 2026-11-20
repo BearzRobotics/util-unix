@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH3001]: cannot open 'missing.txt' for reading
+  |
+1 | cat < missing.txt
+  | ^^^
+help: check that the path exists and is readable
+rc=2

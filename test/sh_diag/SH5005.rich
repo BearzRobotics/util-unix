@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5005]: '1x' is not a valid variable name
+  |
+1 | export 1x=3
+  | ^^^^^^
+help: variable names use letters, digits and underscores, not starting with a digit
+rc=2

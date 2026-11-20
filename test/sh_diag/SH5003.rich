@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5003]: cannot change directory to '/nonexistent'
+  |
+1 | cd /nonexistent
+  | ^^
+help: check that it exists and you may enter it
+rc=2

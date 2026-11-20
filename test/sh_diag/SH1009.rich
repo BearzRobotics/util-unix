@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH1009]: 'eval' cannot be used as a function name
+  |
+1 | eval() { :; }
+  | ^^^^
+help: choose another name: special builtins such as eval, set or exit cannot be redefined as functions
+rc=2

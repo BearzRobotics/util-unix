@@ -1,0 +1,2 @@
+-c:1:1: error: '1x' is not a valid variable name [SH5005]
+rc=2

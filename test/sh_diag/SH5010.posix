@@ -1,0 +1,2 @@
+sh: 1: echo: I/O error
+rc=1

@@ -1,0 +1,2 @@
+s.sh:1:1: warning: `rm -r` of a path starting with a variable: if it is empty the path becomes `/...` [SH7003]
+rc=1

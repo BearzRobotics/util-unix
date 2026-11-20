@@ -1,0 +1,2 @@
+{"code":"SH3003","kind":"bad_fd","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"file descriptor 9 is not open","help":"open it first with `exec N>file`, or redirect to an existing one","token":"","expected":"","posix":"9: Bad file descriptor"}
+rc=2

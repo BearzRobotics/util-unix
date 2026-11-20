@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH2001]: division by zero in '1/0'
+  |
+1 | echo $((1/0))
+  | ^^^^
+help: test the divisor before dividing
+rc=2

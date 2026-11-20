@@ -1,0 +1,2 @@
+-c:1:1: error: no alias named 'nosuch' [SH5011]
+rc=1

@@ -1,0 +1,6 @@
+sh: s.sh:1:1: warning[SH7002]: `cd` may fail and the script carries on in the wrong directory
+  |
+1 | cd /build
+  | ^^
+help: write `cd dir || exit 1`
+rc=1

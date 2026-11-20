@@ -1,0 +1,2 @@
+-c:1:1: error: cannot assign to '1' in this way [SH2006]
+rc=2

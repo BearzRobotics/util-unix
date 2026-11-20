@@ -1,0 +1,2 @@
+-c:1:1: error: cannot create '/nonexistent/f' [SH3002]
+rc=2

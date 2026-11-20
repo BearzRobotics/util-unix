@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5004]: 'NOSUCH' is not a signal
+  |
+1 | trap : NOSUCH
+  | ^^^^
+help: use `kill -l` to list names; `trap` also accepts numbers and `EXIT`
+rc=1

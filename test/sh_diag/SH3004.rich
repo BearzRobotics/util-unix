@@ -1,0 +1,6 @@
+sh: -c:1:21: error[SH3004]: 'f' exists and `set -C` (noclobber) is on
+  |
+1 | set -C; echo a > f; echo b > f
+  |                     ^^^^
+help: use `>|` to overwrite on purpose, or `>>` to append
+rc=2

@@ -1,0 +1,2 @@
+s.sh:1:1: warning: '==' is a bash extension in `[`; POSIX has `=` [SH7009]
+rc=1

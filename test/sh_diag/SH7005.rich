@@ -1,0 +1,6 @@
+s.sh: s.sh:1:17: error[SH1001]: unexpected '}'
+  |
+1 | function f { :; }
+  |                 ^
+help: check for a missing separator (`;` or newline) or a stray operator before it
+rc=2

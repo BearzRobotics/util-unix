@@ -1,0 +1,2 @@
+-c:1:15: error: 'r' is read-only [SH2007]
+rc=2

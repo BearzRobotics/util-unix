@@ -1,0 +1,2 @@
+-c:1:1: error: 'NOSUCH' is not a signal [SH5004]
+rc=1

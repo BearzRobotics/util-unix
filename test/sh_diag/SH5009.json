@@ -1,0 +1,2 @@
+{"code":"SH5009","kind":"usage","severity":"error","file":"-c","line":1,"column":1,"end":8,"message":"getopts: usage: getopts optstring var [arg]","help":"see the usage line in the message","token":"","expected":"","posix":"getopts: usage: getopts optstring var [arg]"}
+rc=2

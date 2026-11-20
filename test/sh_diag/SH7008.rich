@@ -1,0 +1,6 @@
+sh: s.sh:1:1: warning[SH7008]: `echo -e` prints the option itself in some shells and escapes in others
+  |
+1 | echo -e "a\tb"
+  | ^^^^
+help: use `printf`
+rc=1

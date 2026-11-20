@@ -1,0 +1,2 @@
+{"code":"SH5006","kind":"test_error","severity":"error","file":"-c","line":1,"column":1,"end":2,"message":"[: a: unexpected operator","help":"quote operands, and check that `[` ends with `]`","token":"","expected":"","posix":"[: a: unexpected operator"}
+rc=2

@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH2006]: cannot assign to '1' in this way
+  |
+1 | echo ${1=x}
+  | ^^^^
+help: positional and special parameters cannot be assigned by expansion; use `set --`
+rc=2

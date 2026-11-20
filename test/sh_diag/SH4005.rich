@@ -1,0 +1,6 @@
+sh: -c:2:1: warning[SH4005]: `set -e` is on and 'false' failed, so the shell exits
+  |
+2 | false
+  | ^^^^^
+help: test the command (`cmd || handle`) if the failure is expected
+rc=1

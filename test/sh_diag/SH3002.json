@@ -1,0 +1,2 @@
+{"code":"SH3002","kind":"cannot_create","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"cannot create '/nonexistent/f'","help":"check that the directory exists and is writable","token":"","expected":"","posix":"cannot create /nonexistent/f: Directory nonexistent"}
+rc=2

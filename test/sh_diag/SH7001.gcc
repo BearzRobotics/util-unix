@@ -1,0 +1,2 @@
+s.sh:1:1: warning: unquoted expansion of 'file' is split on whitespace and expanded as a glob [SH7001]
+rc=1

@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5001]: unknown option '-Z'
+  |
+1 | set -Z
+  | ^^^
+help: see the builtin's description in the manual
+rc=2

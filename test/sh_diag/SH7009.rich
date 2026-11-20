@@ -1,0 +1,6 @@
+sh: s.sh:1:1: warning[SH7009]: '==' is a bash extension in `[`; POSIX has `=`
+  |
+1 | [ "$a" == b ]
+  | ^
+help: use `=`
+rc=1

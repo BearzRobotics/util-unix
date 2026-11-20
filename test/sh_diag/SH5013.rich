@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5013]: `local` can only be used inside a function
+  |
+1 | local x=1
+  | ^^^^^
+help: declare the variable normally, or move the code into a function
+rc=2

@@ -1,0 +1,2 @@
+sh: 1: export: 1x: bad variable name
+rc=2

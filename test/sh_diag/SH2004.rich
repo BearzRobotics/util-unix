@@ -1,0 +1,6 @@
+sh: -c:1:9: error[SH2004]: variable 'x' is not set
+  |
+1 | set -u; echo $x
+  |         ^^^^
+help: assign it first or use `${name-default}`
+rc=2

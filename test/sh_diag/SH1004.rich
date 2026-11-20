@@ -1,0 +1,6 @@
+sh: -c:1:6: error[SH1004]: unterminated command substitution (opened at line 1, column 6)
+  |
+1 | echo $(date
+  |      ^^
+help: add the closing `)`
+rc=2

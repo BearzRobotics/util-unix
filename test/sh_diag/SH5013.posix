@@ -1,0 +1,2 @@
+sh: 1: local: not in a function
+rc=2

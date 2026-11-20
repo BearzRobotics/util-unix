@@ -1,0 +1,2 @@
+sh: 1: getopts: usage: getopts optstring var [arg]
+rc=2
