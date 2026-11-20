@@ -1,2 +1,2 @@
--c:1:1: error: 'file' is not a file descriptor number [SH3005]
+-c:1:11: error: 'file' is not a file descriptor number [SH3005]
 rc=2

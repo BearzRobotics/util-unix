@@ -1,2 +1,2 @@
-{"code":"SH1005","kind":"unterminated_arithmetic","severity":"error","file":"-c","line":1,"column":6,"end":9,"message":"unterminated arithmetic expansion (opened at line 1, column 6)","help":"close it with `))`; for a nested subshell write `$( (cmd) )` with a space","token":"","expected":"","posix":"Syntax error: Missing '))'"}
+{"code":"SH1005","kind":"unterminated_arithmetic","severity":"error","file":"-c","line":1,"column":6,"end":9,"message":"unterminated arithmetic expansion (opened at line 1, column 6)","help":"close it with `))`; for a nested subshell write `$( (cmd) )` with a space","token":"","expected":"","posix":"Syntax error: Missing '))'","shellcheck":"SC1073"}
 rc=2

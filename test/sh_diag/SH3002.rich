@@ -1,6 +1,6 @@
-sh: -c:1:1: error[SH3002]: cannot create '/nonexistent/f'
+sh: -c:1:10: error[SH3002]: cannot create '/nonexistent/f'
   |
 1 | echo x > /nonexistent/f
-  | ^^^^
+  |          ^^^^^^^^^^^^^^
 help: check that the directory exists and is writable
 rc=2

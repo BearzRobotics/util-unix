@@ -119,6 +119,7 @@ pub const Parser = struct {
     /// Last alias expanded; stops direct self-reference.
     last_alias: []const u8 = "",
     alias_budget: u32 = 200,
+    blank_marks: std.ArrayList(usize) = .empty,
     /// A line number offset for sub-parsers.
     depth: u32 = 0,
 
@@ -791,7 +792,9 @@ pub const Parser = struct {
                     break;
                 }
                 try body.appendSlice(a, ln);
-                try body.append(a, '\n');
+                // end of input inside the body: dash and FreeBSD sh keep the
+                // text exactly, with no newline the input did not have
+                if (end < self.src.len) try body.append(a, '\n');
             }
             if (!found) self.warn_heredoc = .{ .line = h.line, .delim = h.delim };
             if (h.quoted) {
@@ -959,29 +962,56 @@ pub const Parser = struct {
         return self.mk(line, .{ .pipeline = .{ .negate = negate, .commands = try cmds.toOwnedSlice(self.a) } });
     }
 
+    /// Replace the peeked word by its alias value if it names one. A value
+    /// ending in a blank makes the word after it eligible too (POSIX 2.3.1);
+    /// `blank_marks` holds the offsets where such values end.
+    fn aliasStep(self: *Parser) Error!bool {
+        const al = self.aliases orelse return false;
+        if (self.alias_budget == 0) return false;
+        const t = try self.peek();
+        const w = switch (t.tag) {
+            .word => |w| w,
+            else => return false,
+        };
+        if (w.len != 1) return false;
+        const name = switch (w[0]) {
+            .text => |s| s,
+            else => return false,
+        };
+        if (lexer.reservedOf(w) != null or std.mem.eql(u8, name, self.last_alias)) return false;
+        const val = al.get(al.ctx, name) orelse return false;
+        self.alias_budget -= 1;
+        self.last_alias = name;
+        const ns = try self.a.alloc(u8, val.len + self.src.len - self.pos);
+        @memcpy(ns[0..val.len], val);
+        @memcpy(ns[val.len..], self.src[self.pos..]);
+        for (self.blank_marks.items) |*m| m.* = (m.* + val.len) -| self.pos;
+        if (val.len > 0 and (val[val.len - 1] == ' ' or val[val.len - 1] == '\t')) try self.blank_marks.append(self.a, val.len);
+        self.src = ns;
+        self.pos = 0;
+        self.peeked = null;
+        return true;
+    }
+
     fn maybeAlias(self: *Parser) Error!void {
-        const al = self.aliases orelse return;
-        while (self.alias_budget > 0) {
+        while (try self.aliasStep()) {}
+    }
+
+    /// Called before each word of a simple command: the word right after an
+    /// alias value that ended in a blank is alias-expanded as well.
+    fn aliasPending(self: *Parser) Error!void {
+        while (self.blank_marks.items.len > 0) {
             const t = try self.peek();
-            const w = switch (t.tag) {
-                .word => |w| w,
-                else => return,
-            };
-            if (w.len != 1) return;
-            const name = switch (w[0]) {
-                .text => |s| s,
-                else => return,
-            };
-            if (lexer.reservedOf(w) != null or std.mem.eql(u8, name, self.last_alias)) return;
-            const val = al.get(al.ctx, name) orelse return;
-            self.alias_budget -= 1;
-            self.last_alias = name;
-            const ns = try self.a.alloc(u8, val.len + self.src.len - self.pos);
-            @memcpy(ns[0..val.len], val);
-            @memcpy(ns[val.len..], self.src[self.pos..]);
-            self.src = ns;
-            self.pos = 0;
-            self.peeked = null;
+            var due = false;
+            var i: usize = 0;
+            while (i < self.blank_marks.items.len) {
+                if (self.blank_marks.items[i] <= t.start) {
+                    due = true;
+                    _ = self.blank_marks.swapRemove(i);
+                } else i += 1;
+            }
+            if (!due) return;
+            if (!(try self.aliasStep())) return;
         }
     }
 
@@ -1271,6 +1301,7 @@ pub const Parser = struct {
                 try redirs.append(a, r);
                 continue;
             }
+            try self.aliasPending();
             const t = try self.peek();
             const w = switch (t.tag) {
                 .word => |w| w,
@@ -1319,8 +1350,8 @@ pub const Parser = struct {
                     return self.mk(line, .{ .function = .{ .name = fname, .body = body } });
                 }
             }
-            try self.maybeAliasNext(words.items.len);
         }
+        self.blank_marks.clearRetainingCapacity();
         if (assigns.items.len == 0 and words.items.len == 0 and redirs.items.len == 0) return self.unexpected(try self.peek(), null);
         return self.mkSimple(line, cmd_start, cmd_end, .{ .simple = .{
             .assigns = try assigns.toOwnedSlice(a),
@@ -1329,10 +1360,6 @@ pub const Parser = struct {
         } });
     }
 
-    fn maybeAliasNext(self: *Parser, nwords: usize) Error!void {
-        _ = self;
-        _ = nwords;
-    }
 };
 
 /// Parse a whole source text. The result owns its arena. On a syntax error

@@ -1,2 +1,2 @@
-{"code":"SH1003","kind":"unterminated_heredoc","severity":"warning","file":"-c","line":1,"column":0,"end":0,"message":"here-document delimited by end of file (wanted 'EOF') (started at line 1)","help":"put the delimiter alone on a line after the body","token":"","expected":"","posix":"here-document delimited by end-of-file"}
+{"code":"SH1003","kind":"unterminated_heredoc","severity":"warning","file":"-c","line":1,"column":0,"end":0,"message":"here-document delimited by end of file (wanted 'EOF') (started at line 1)","help":"put the delimiter alone on a line after the body","token":"","expected":"","posix":"here-document delimited by end-of-file","shellcheck":"SC1044"}
 rc=0

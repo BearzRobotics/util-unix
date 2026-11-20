@@ -48,7 +48,7 @@ Every message of sh has a stable code `SHxxxx`. This file is generated from `src
 | SH5009 | usage | 2 | A builtin was called with the wrong number of arguments |
 | SH5010 | io_error | 1 | Writing to standard output failed |
 | SH5011 | alias_not_found | 1 | `alias` or `unalias` named an alias that is not defined |
-| SH5012 | bad_limit | 1 | `ulimit` could not read or set the limit |
+| SH5012 | bad_limit | 2 | `ulimit` could not read or set the limit |
 | SH5013 | not_in_function | 2 | `local` was used outside a function |
 | SH6001 | invocation_option | 2 | `sh` was started with an option it does not have |
 | SH6002 | missing_argument | 2 | `sh -c` or `-o` needs an argument |
@@ -63,12 +63,24 @@ Every message of sh has a stable code `SHxxxx`. This file is generated from `src
 | SH7009 | lint_double_equals | 1 | `==` in `[` is not POSIX |
 | SH9000 | other | 0 | Any other message |
 
-# LINT CODES AND SHELLCHECK
+# SHELLCHECK MAPPING
 
-The `--check` codes and the nearest ShellCheck id (a pointer for readers who know that tool; the messages are our own).
+The nearest ShellCheck id of each code that has one (a pointer for readers who know that tool, verified by running `shellcheck -s dash` on the bad example of the entry; only the numbers are referenced, the messages are our own). The JSON diagnostic has the same value in its `shellcheck` field, `sh --explain` prints it, `sh --list-diagnostics --diagnostics=json` lists it.
 
 | Code | Kind | ShellCheck |
 |------|------|------------|
+| SH1001 | unexpected_token | SC1089 |
+| SH1002 | unterminated_quote | SC1073 |
+| SH1003 | unterminated_heredoc | SC1044 |
+| SH1004 | unterminated_command_substitution | SC1073 |
+| SH1005 | unterminated_arithmetic | SC1073 |
+| SH1007 | mismatched_closer | SC1061 |
+| SH1008 | bad_for_variable | SC1073 |
+| SH1010 | missing_redirect_target | SC1073 |
+| SH2002 | arithmetic_syntax | SC1102 |
+| SH2004 | unset_variable | SC2154 |
+| SH3005 | bad_fd_number | SC3021 |
+| SH5013 | not_in_function | SC2168 |
 | SH7001 | lint_unquoted_expansion | SC2086 |
 | SH7002 | lint_cd_unchecked | SC2164 |
 | SH7003 | lint_rm_variable | SC2115 |
@@ -430,13 +442,13 @@ fork(2) or pipe(2) failed, usually because of a resource limit.
 
 Bad:
 
-    (ulimit -u 1; : | :)
+    (ulimit -n 3; : | :)
 
 Good:
 
     (: | :)
 
-dash says: `Cannot fork`
+dash says: `Pipe call failed`
 
 ## SH4004 cannot_open_script
 
@@ -630,13 +642,13 @@ getrlimit/setrlimit failed.
 
 Bad:
 
-    ulimit -n 99999999999
+    ulimit -n 2000000000
 
 Good:
 
     ulimit -n 256
 
-dash says: `ulimit: bad limit: Operation not permitted`
+dash says: `ulimit: error setting limit (Operation not permitted)`
 
 ## SH5013 not_in_function
 

@@ -1,6 +1,6 @@
-sh: -c:1:8: error[SH2003]: 'abc' is not a number
+sh: -c:1:13: error[SH2003]: 'abc' is not a number
   |
 1 | x=abc; echo $((x+1))
-  |        ^^^^
+  |             ^^^^^^^^
 help: pass a plain decimal, `0x` hexadecimal or `0` octal integer
 rc=2

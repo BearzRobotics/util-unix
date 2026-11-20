@@ -64,6 +64,8 @@ pub const DiagStyle = diagmod.Style;
 pub const Options = struct {
     /// `$0` and the diagnostic prefix.
     name: []const u8 = "sh",
+    /// Program name in the rich diagnostic header (`sh: file:3:1: error...`).
+    prog: []const u8 = "sh",
     /// Initial variables (the process environment). Not retained.
     environ: ?*const std.process.Environ.Map = null,
     flags: Flags = .{},
@@ -89,6 +91,7 @@ pub const Shell = struct {
     env: Env,
     gpa: Allocator,
     name: []u8,
+    prog: []u8,
     vars: std.StringHashMapUnmanaged(Var) = .empty,
     funcs: std.StringHashMapUnmanaged(*const ast.Node) = .empty,
     aliases: std.StringHashMapUnmanaged([]u8) = .empty,
@@ -102,6 +105,11 @@ pub const Shell = struct {
     line: u32 = 0,
     /// Line offset of the command currently being run (for `eval`).
     traps: [sys.nsig]?[]u8 = @splat(null),
+    /// In a subshell: the traps the parent had when it was forked, reported
+    /// by `trap` with no operands (POSIX.1-2024 2.14, trap) until the
+    /// subshell sets that condition itself (`trap_set`).
+    parent_traps: [sys.nsig]?[]u8 = @splat(null),
+    trap_set: [sys.nsig]bool = @splat(false),
     /// Signals ignored by the shell on entry (cannot be trapped).
     inherited_ignore: [sys.nsig]bool = @splat(false),
     flow: Flow = .none,
@@ -147,6 +155,7 @@ pub const Shell = struct {
             .env = env,
             .gpa = gpa,
             .name = try gpa.dupe(u8, options.name),
+            .prog = try gpa.dupe(u8, options.prog),
             .flags = options.flags,
             .pid = sys.getpid(),
             .diag_style = options.diag_style,
@@ -225,6 +234,7 @@ pub const Shell = struct {
         for (self.params.items) |p| gpa.free(p);
         self.params.deinit(gpa);
         for (self.traps) |t| if (t) |s| gpa.free(s);
+        for (self.parent_traps) |t| if (t) |s| gpa.free(s);
         self.jobs.deinit(gpa);
         for (self.locals.items) |l| {
             gpa.free(l.name);
@@ -234,6 +244,7 @@ pub const Shell = struct {
         for (self.pinned.items) |*p| p.deinit();
         self.pinned.deinit(gpa);
         gpa.free(self.name);
+        gpa.free(self.prog);
         gpa.free(self.label);
         gpa.destroy(self);
     }
@@ -339,40 +350,51 @@ pub const Shell = struct {
         sys.writeAll(2, bytes) catch {};
     }
 
-    /// A diagnostic in dash's wording; classified into the catalog.
-    pub fn diag(self: *Shell, comptime fmt: []const u8, args: anytype) void {
+    /// A diagnostic in dash's wording with an explicit catalog kind. `subject`
+    /// is the name, path or number the rich message talks about; null means
+    /// the whole formatted text.
+    pub fn diagK(self: *Shell, kind: diagmod.Kind, subject: ?[]const u8, comptime fmt: []const u8, args: anytype) void {
         var buf: [2048]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, fmt, args) catch buf[0..0];
-        self.diagText(msg);
+        self.diagWith2(msg, false, .{ .kind = kind, .subject = subject orelse msg });
     }
 
-    pub fn diagText(self: *Shell, msg: []const u8) void {
-        self.diagWith(msg, false);
+    /// Like `diagK` for messages dash prints without any prefix (trap, getopts).
+    pub fn diagBareK(self: *Shell, kind: diagmod.Kind, subject: ?[]const u8, msg: []const u8) void {
+        self.diagWith2(msg, true, .{ .kind = kind, .subject = subject orelse msg });
     }
 
-    /// Like `diagText` for messages dash prints without any prefix.
-    pub fn diagBare(self: *Shell, msg: []const u8) void {
-        self.diagWith(msg, true);
+    /// `name: line: cmd: message` for builtins.
+    pub fn diagCmdK(self: *Shell, kind: diagmod.Kind, subject: ?[]const u8, cmd: []const u8, comptime fmt: []const u8, args: anytype) void {
+        var buf: [2048]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "{s}: " ++ fmt, .{cmd} ++ args) catch buf[0..0];
+        self.diagWith2(msg, false, .{ .kind = kind, .subject = subject orelse msg });
     }
 
-    /// Report with an explicit kind (when the text alone cannot say).
+    /// Report with an explicit kind and a ready message.
     pub fn diagKind(self: *Shell, kind: diagmod.Kind, subject: []const u8, msg: []const u8) void {
         self.diagWith2(msg, false, .{ .kind = kind, .subject = subject });
     }
 
-    fn diagWith(self: *Shell, msg: []const u8, bare: bool) void {
-        self.diagWith2(msg, bare, diagmod.classify(msg));
-    }
-
     fn diagWith2(self: *Shell, msg: []const u8, bare: bool, c: diagmod.Classified) void {
         const e = diagmod.entryOf(c.kind);
+        var col = self.cur_col;
+        var end_col = self.cur_end_col;
+        if (self.line > 0 and self.cur_src.len > 0) {
+            if (diagmod.sourceLine(self.cur_src, self.line)) |text| {
+                if (diagmod.refine(text, self.cur_col, c.kind, c.subject)) |sp| {
+                    col = sp.col;
+                    end_col = sp.end;
+                }
+            }
+        }
         var d: Diagnostic = .{
             .code = e.code,
             .kind = c.kind,
             .label = self.label,
             .line = self.line,
-            .column = self.cur_col,
-            .end_column = self.cur_end_col,
+            .column = col,
+            .end_column = end_col,
             .subject = c.subject,
             .posix = msg,
             .bare = bare,
@@ -390,15 +412,10 @@ pub const Shell = struct {
         if (d.severity == .warning and self.diag_style == .posix) return;
         var arena = std.heap.ArenaAllocator.init(self.gpa);
         defer arena.deinit();
-        const text = diagmod.render(arena.allocator(), d, self.name, self.diag_style, self.diag_color, self.flags.interactive) catch return;
+        var dd = d.*;
+        dd.prog = self.prog;
+        const text = diagmod.render(arena.allocator(), &dd, self.name, self.diag_style, self.diag_color, self.flags.interactive) catch return;
         self.errRaw(text);
-    }
-
-    /// `name: line: cmd: message` for builtins.
-    pub fn diagCmd(self: *Shell, cmd: []const u8, comptime fmt: []const u8, args: anytype) void {
-        var buf: [2048]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, "{s}: " ++ fmt, .{cmd} ++ args) catch buf[0..0];
-        self.diagText(msg);
     }
 
     // --- registration for hosts -------------------------------------------
@@ -419,6 +436,11 @@ pub const Shell = struct {
     /// A syntax error is reported as a diagnostic and gives status 2.
     pub fn runString(self: *Shell, src: []const u8) RunError!u8 {
         return exec.runSource(self, src, .{});
+    }
+
+    /// Run a script read incrementally from a descriptor (standard input).
+    pub fn runFd(self: *Shell, fd: i32) RunError!u8 {
+        return exec.runStream(self, fd);
     }
 
     /// Parse without running (the library half of `sh -n`).

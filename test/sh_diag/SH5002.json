@@ -1,2 +1,2 @@
-{"code":"SH5002","kind":"cannot_shift","severity":"error","file":"-c","line":1,"column":11,"end":16,"message":"cannot shift: fewer than the requested parameters","help":"compare `$#` with the count first","token":"","expected":"","posix":"shift: can't shift that many"}
+{"code":"SH5002","kind":"cannot_shift","severity":"error","file":"-c","line":1,"column":11,"end":16,"message":"cannot shift: fewer than the requested parameters","help":"compare `$#` with the count first","token":"","expected":"","posix":"shift: can't shift that many","shellcheck":null}
 rc=2

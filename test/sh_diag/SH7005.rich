@@ -1,4 +1,4 @@
-s.sh: s.sh:1:17: error[SH1001]: unexpected '}'
+sh: s.sh:1:17: error[SH1001]: unexpected '}'
   |
 1 | function f { :; }
   |                 ^

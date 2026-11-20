@@ -1,2 +1,2 @@
-{"code":"SH4002","kind":"not_executable","severity":"error","file":"-c","line":1,"column":46,"end":55,"message":"cannot execute './notexec': permission denied or not an executable file","help":"make it executable with `chmod +x`, or run it through its interpreter","token":"","expected":"","posix":"./notexec: Permission denied"}
+{"code":"SH4002","kind":"not_executable","severity":"error","file":"-c","line":1,"column":46,"end":55,"message":"cannot execute './notexec': permission denied or not an executable file","help":"make it executable with `chmod +x`, or run it through its interpreter","token":"","expected":"","posix":"./notexec: Permission denied","shellcheck":null}
 rc=126

@@ -1,2 +1,2 @@
-{"code":"SH7006","kind":"lint_source","severity":"warning","file":"s.sh","line":1,"column":1,"end":7,"message":"`source` is a bash extension; the POSIX spelling is `.`","help":"use `. ./file`","token":"","expected":"","posix":"`source` is not POSIX"}
+{"code":"SH7006","kind":"lint_source","severity":"warning","file":"s.sh","line":1,"column":1,"end":7,"message":"`source` is a bash extension; the POSIX spelling is `.`","help":"use `. ./file`","token":"","expected":"","posix":"`source` is not POSIX","shellcheck":"SC3046"}
 rc=1

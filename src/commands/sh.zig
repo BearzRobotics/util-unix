@@ -60,6 +60,33 @@ fn argError(ctx: cli.Context, style: diag.Style, comptime kind: diag.Kind, subje
     sys.writeAll(2, text) catch {};
 }
 
+fn listOrExplain(ctx: cli.Context, list: bool, want: ?[]const u8, json: bool) u8 {
+    var arena = std.heap.ArenaAllocator.init(ctx.gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    if (want) |w| {
+        var code_text: []const u8 = w;
+        if (code_text.len > 2 and (code_text[0] == 'S' or code_text[0] == 's') and (code_text[1] == 'H' or code_text[1] == 'h')) code_text = code_text[2..];
+        const code = std.fmt.parseInt(u16, code_text, 10) catch 0;
+        const e = diag.entryByCode(code) orelse {
+            var buf: [200]u8 = undefined;
+            const m = std.fmt.bufPrint(&buf, "{s}: no such diagnostic code: {s}\n", .{ ctx.name, w }) catch "";
+            sys.writeAll(2, m) catch {};
+            return 2;
+        };
+        writeOut((if (json) diag.explainJson(a, e) else diag.explain(a, e)) catch return 2);
+        return 0;
+    }
+    if (list and json) {
+        writeOut(diag.catalogJson(a) catch return 2);
+        return 0;
+    }
+    var out: std.ArrayList(u8) = .empty;
+    for (&diag.catalog) |*e| out.print(a, "SH{d} {s}\n", .{ e.code, @tagName(e.kind) }) catch return 2;
+    writeOut(out.items);
+    return 0;
+}
+
 pub fn main(ctx: cli.Context) u8 {
     const gpa = ctx.gpa;
     var flags: sh.Flags = .{};
@@ -67,6 +94,9 @@ pub fn main(ctx: cli.Context) u8 {
     var from_stdin = false;
     var check_mode = false;
     var style_opt: ?diag.Style = null;
+    var color_mode: enum { auto, always, never } = .auto;
+    var list_diag = false;
+    var explain_arg: ?[]const u8 = null;
     var style_auto = true;
     if (cli.getenv(ctx, "SH_DIAGNOSTICS")) |v| {
         if (parseStyle(v)) |st| {
@@ -117,32 +147,26 @@ pub fn main(ctx: cli.Context) u8 {
                 writeOut(diag.catalogMarkdown(arena.allocator()) catch return 2);
                 return 0;
             } else if (std.mem.eql(u8, a, "--list-diagnostics")) {
-                var arena = std.heap.ArenaAllocator.init(gpa);
-                defer arena.deinit();
-                var out: std.ArrayList(u8) = .empty;
-                for (&diag.catalog) |*e| out.print(arena.allocator(), "SH{d} {s}\n", .{ e.code, @tagName(e.kind) }) catch return 2;
-                writeOut(out.items);
-                return 0;
+                list_diag = true;
+            } else if (std.mem.startsWith(u8, a, "--color=") or std.mem.startsWith(u8, a, "--diagnostics-color=")) {
+                const v = a[std.mem.indexOfScalar(u8, a, '=').? + 1 ..];
+                if (std.mem.eql(u8, v, "auto")) {
+                    color_mode = .auto;
+                } else if (std.mem.eql(u8, v, "always")) {
+                    color_mode = .always;
+                } else if (std.mem.eql(u8, v, "never")) {
+                    color_mode = .never;
+                } else {
+                    argError(ctx, .posix, .invocation_option, a, "Illegal option --color value (auto, always or never)");
+                    return 2;
+                }
             } else if (std.mem.eql(u8, a, "--explain")) {
                 i += 1;
                 if (i >= args.len) {
                     argError(ctx, .posix, .missing_argument, "--explain", "--explain requires a code such as SH1001");
                     return 2;
                 }
-                const want = args[i];
-                var code_text: []const u8 = want;
-                if (code_text.len > 2 and (code_text[0] == 'S' or code_text[0] == 's') and (code_text[1] == 'H' or code_text[1] == 'h')) code_text = code_text[2..];
-                const code = std.fmt.parseInt(u16, code_text, 10) catch 0;
-                const e = diag.entryByCode(code) orelse {
-                    var buf: [200]u8 = undefined;
-                    const m = std.fmt.bufPrint(&buf, "{s}: no such diagnostic code: {s}\n", .{ ctx.name, want }) catch "";
-                    sys.writeAll(2, m) catch {};
-                    return 2;
-                };
-                var arena = std.heap.ArenaAllocator.init(gpa);
-                defer arena.deinit();
-                writeOut(diag.explain(arena.allocator(), e) catch return 2);
-                return 0;
+                explain_arg = args[i];
             } else {
                 var buf: [200]u8 = undefined;
                 argError(ctx, style_opt orelse .posix, .invocation_option, a, std.fmt.bufPrint(&buf, "Illegal option {s}", .{a}) catch "Illegal option");
@@ -234,6 +258,7 @@ pub fn main(ctx: cli.Context) u8 {
         }
         i += 1;
     }
+    if (list_diag or explain_arg != null) return listOrExplain(ctx, list_diag, explain_arg, style_opt == .json);
     var rest = args[i..];
     var name: []const u8 = ctx.name;
     var label: []const u8 = "stdin";
@@ -263,7 +288,6 @@ pub fn main(ctx: cli.Context) u8 {
         }
     } else if (from_stdin or rest.len == 0) {
         from_stdin = true;
-        script = readAll(gpa, 0);
     } else {
         name = rest[0];
         label = rest[0];
@@ -281,11 +305,16 @@ pub fn main(ctx: cli.Context) u8 {
     // Diagnostics style: explicit, else rich on a terminal, else posix.
     const tty = sys.isatty(2);
     const style: diag.Style = style_opt orelse if (style_auto and tty) .rich else .posix;
-    const color = style == .rich and tty and cli.getenv(ctx, "NO_COLOR") == null;
+    const color = style == .rich and switch (color_mode) {
+        .always => true,
+        .never => false,
+        .auto => tty and cli.getenv(ctx, "NO_COLOR") == null,
+    };
 
     var st_io = std.Io.Threaded.init_single_threaded;
     const shell = sh.Shell.init(.{ .io = st_io.io(), .gpa = gpa }, .{
         .name = name,
+        .prog = ctx.name,
         .environ = ctx.environ,
         .flags = flags,
         .diag_style = style,
@@ -300,6 +329,10 @@ pub fn main(ctx: cli.Context) u8 {
         }
     }
     shell.setParams(rest) catch return 2;
+    if (from_stdin and !check_mode) {
+        _ = shell.runFd(0) catch return 2;
+        return shell.finish();
+    }
     const text: []const u8 = if (is_c) command.? else (script orelse {
         cli.warn(ctx, "cannot read input", .{});
         return 2;

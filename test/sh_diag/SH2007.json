@@ -1,2 +1,2 @@
-{"code":"SH2007","kind":"readonly_assignment","severity":"error","file":"-c","line":1,"column":15,"end":18,"message":"'r' is read-only","help":"do not modify it, or start a new shell where it is not read-only","token":"","expected":"","posix":"r: is read only"}
+{"code":"SH2007","kind":"readonly_assignment","severity":"error","file":"-c","line":1,"column":15,"end":18,"message":"'r' is read-only","help":"do not modify it, or start a new shell where it is not read-only","token":"","expected":"","posix":"r: is read only","shellcheck":null}
 rc=2

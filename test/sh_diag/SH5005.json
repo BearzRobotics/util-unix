@@ -1,2 +1,2 @@
-{"code":"SH5005","kind":"bad_variable_name","severity":"error","file":"-c","line":1,"column":1,"end":7,"message":"'1x' is not a valid variable name","help":"variable names use letters, digits and underscores, not starting with a digit","token":"","expected":"","posix":"export: 1x: bad variable name"}
+{"code":"SH5005","kind":"bad_variable_name","severity":"error","file":"-c","line":1,"column":1,"end":7,"message":"'1x' is not a valid variable name","help":"variable names use letters, digits and underscores, not starting with a digit","token":"","expected":"","posix":"export: 1x: bad variable name","shellcheck":null}
 rc=2

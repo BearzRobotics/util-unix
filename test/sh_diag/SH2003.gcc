@@ -1,2 +1,2 @@
--c:1:8: error: 'abc' is not a number [SH2003]
+-c:1:13: error: 'abc' is not a number [SH2003]
 rc=2

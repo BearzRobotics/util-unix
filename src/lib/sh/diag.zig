@@ -100,20 +100,20 @@ pub const Entry = struct {
 };
 
 pub const catalog = [_]Entry{
-    .{ .code = 1001, .kind = .unexpected_token, .exit = 2, .summary = "A token appeared where the grammar does not allow it", .rich = "unexpected {s}", .help = "check for a missing separator (`;` or newline) or a stray operator before it", .explain = "The parser met a token that cannot start or continue the construct being read, for example a stray `)`, `;;` or `fi`. POSIX XCU 2.10 gives the grammar; a command may not begin with a reserved word such as `then`, `fi` or `done`.", .bad = "echo )", .good = "echo ')'", .dash = "Syntax error: \")\" unexpected" },
-    .{ .code = 1002, .kind = .unterminated_quote, .exit = 2, .summary = "A quote is not closed before the end of the input", .rich = "unterminated {s} quote", .help = "add the closing quote, or escape the quote character with a backslash", .explain = "A single quote, double quote or backquote was opened and the input ended before the matching one. Everything after it is part of the quoted text, so the whole rest of the script is consumed.", .bad = "echo 'abc", .good = "echo 'abc'", .dash = "Syntax error: Unterminated quoted string" },
-    .{ .code = 1003, .kind = .unterminated_heredoc, .exit = 0, .summary = "A here-document ends at the end of the input, not at its delimiter", .rich = "here-document delimited by end of file (wanted '{s}')", .help = "put the delimiter alone on a line after the body", .explain = "POSIX XCU 2.7.4 ends a here-document at a line containing only the delimiter. Reaching the end of the input first is accepted with a warning, as in dash and bash.", .bad = "cat <<EOF\nbody", .good = "cat <<EOF\nbody\nEOF", .dash = "warning: here-document at line 1 delimited by end-of-file (wanted `EOF')" },
-    .{ .code = 1004, .kind = .unterminated_command_substitution, .exit = 2, .summary = "A `$(` has no matching `)`", .rich = "unterminated command substitution", .help = "add the closing `)`", .explain = "A command substitution `$(...)` was opened and the input ended before its closing parenthesis.", .bad = "echo $(date", .good = "echo $(date)", .dash = "Syntax error: end of file unexpected (expecting \")\")" },
-    .{ .code = 1005, .kind = .unterminated_arithmetic, .exit = 2, .summary = "A `$((` has no matching `))`", .rich = "unterminated arithmetic expansion", .help = "close it with `))`; for a nested subshell write `$( (cmd) )` with a space", .explain = "An arithmetic expansion `$((...))` needs the closing `))`. Text that opens with `$((` but never closes it is an error here, as in dash.", .bad = "echo $((1+2)", .good = "echo $((1+2))", .dash = "Syntax error: Missing '))'" },
+    .{ .code = 1001, .kind = .unexpected_token, .exit = 2, .summary = "A token appeared where the grammar does not allow it", .rich = "unexpected {s}", .help = "check for a missing separator (`;` or newline) or a stray operator before it", .explain = "The parser met a token that cannot start or continue the construct being read, for example a stray `)`, `;;` or `fi`. POSIX XCU 2.10 gives the grammar; a command may not begin with a reserved word such as `then`, `fi` or `done`.", .bad = "echo )", .good = "echo ')'", .dash = "Syntax error: \")\" unexpected", .shellcheck = "SC1089" },
+    .{ .code = 1002, .kind = .unterminated_quote, .exit = 2, .summary = "A quote is not closed before the end of the input", .rich = "unterminated {s} quote", .help = "add the closing quote, or escape the quote character with a backslash", .explain = "A single quote, double quote or backquote was opened and the input ended before the matching one. Everything after it is part of the quoted text, so the whole rest of the script is consumed.", .bad = "echo 'abc", .good = "echo 'abc'", .dash = "Syntax error: Unterminated quoted string", .shellcheck = "SC1073" },
+    .{ .code = 1003, .kind = .unterminated_heredoc, .exit = 0, .summary = "A here-document ends at the end of the input, not at its delimiter", .rich = "here-document delimited by end of file (wanted '{s}')", .help = "put the delimiter alone on a line after the body", .explain = "POSIX XCU 2.7.4 ends a here-document at a line containing only the delimiter. Reaching the end of the input first is accepted with a warning, as in dash and bash.", .bad = "cat <<EOF\nbody", .good = "cat <<EOF\nbody\nEOF", .dash = "warning: here-document at line 1 delimited by end-of-file (wanted `EOF')", .shellcheck = "SC1044" },
+    .{ .code = 1004, .kind = .unterminated_command_substitution, .exit = 2, .summary = "A `$(` has no matching `)`", .rich = "unterminated command substitution", .help = "add the closing `)`", .explain = "A command substitution `$(...)` was opened and the input ended before its closing parenthesis.", .bad = "echo $(date", .good = "echo $(date)", .dash = "Syntax error: end of file unexpected (expecting \")\")", .shellcheck = "SC1073" },
+    .{ .code = 1005, .kind = .unterminated_arithmetic, .exit = 2, .summary = "A `$((` has no matching `))`", .rich = "unterminated arithmetic expansion", .help = "close it with `))`; for a nested subshell write `$( (cmd) )` with a space", .explain = "An arithmetic expansion `$((...))` needs the closing `))`. Text that opens with `$((` but never closes it is an error here, as in dash.", .bad = "echo $((1+2)", .good = "echo $((1+2))", .dash = "Syntax error: Missing '))'", .shellcheck = "SC1073" },
     .{ .code = 1006, .kind = .bad_substitution, .exit = 2, .summary = "A `${...}` has an operator the shell does not know", .rich = "bad substitution", .help = "POSIX has `-` `=` `?` `+` (with or without `:`) and `#` `##` `%` `%%`; `${x/a/b}` and `${x:1:2}` are not POSIX", .explain = "Only the parameter expansion forms of POSIX XCU 2.6.2 are accepted; bash extensions such as substring and replacement are rejected.", .bad = "echo ${x/a/b}", .good = "echo \"$x\" | sed 's/a/b/'", .dash = "Bad substitution" },
-    .{ .code = 1007, .kind = .mismatched_closer, .exit = 2, .summary = "A token other than the expected closer ends a compound command", .rich = "unexpected {s}", .help = "close the construct with the keyword named in the message", .explain = "A compound command (`if`, `while`, `until`, `for`, `case`, `{`, `(`) must end with its own closing keyword. The message names the keyword that was expected and where the construct started.", .bad = "while true; do\n  echo x\nfi", .good = "while true; do\n  echo x\ndone", .dash = "Syntax error: \"fi\" unexpected (expecting \"done\")" },
-    .{ .code = 1008, .kind = .bad_for_variable, .exit = 2, .summary = "The `for` variable is not a valid name", .rich = "'{s}' is not a valid variable name for `for`", .help = "use letters, digits and underscores, not starting with a digit", .explain = "The word after `for` must be a name (POSIX XBD 3.216).", .bad = "for 1x in a; do :; done", .good = "for x1 in a; do :; done", .dash = "Syntax error: Bad for loop variable" },
+    .{ .code = 1007, .kind = .mismatched_closer, .exit = 2, .summary = "A token other than the expected closer ends a compound command", .rich = "unexpected {s}", .help = "close the construct with the keyword named in the message", .explain = "A compound command (`if`, `while`, `until`, `for`, `case`, `{`, `(`) must end with its own closing keyword. The message names the keyword that was expected and where the construct started.", .bad = "while true; do\n  echo x\nfi", .good = "while true; do\n  echo x\ndone", .dash = "Syntax error: \"fi\" unexpected (expecting \"done\")", .shellcheck = "SC1061" },
+    .{ .code = 1008, .kind = .bad_for_variable, .exit = 2, .summary = "The `for` variable is not a valid name", .rich = "'{s}' is not a valid variable name for `for`", .help = "use letters, digits and underscores, not starting with a digit", .explain = "The word after `for` must be a name (POSIX XBD 3.216).", .bad = "for 1x in a; do :; done", .good = "for x1 in a; do :; done", .dash = "Syntax error: Bad for loop variable", .shellcheck = "SC1073" },
     .{ .code = 1009, .kind = .bad_function_name, .exit = 2, .summary = "The function name is not a valid name", .rich = "'{s}' cannot be used as a function name", .help = "choose another name: special builtins such as eval, set or exit cannot be redefined as functions", .explain = "A function definition `name() body` needs a POSIX name.", .bad = "1f() { :; }", .good = "f1() { :; }", .dash = "Syntax error: Bad function name" },
-    .{ .code = 1010, .kind = .missing_redirect_target, .exit = 2, .summary = "A redirection operator has no file name", .rich = "redirection '{s}' needs a file name or descriptor", .help = "write the target after the operator, e.g. `> file` or `>&2`", .explain = "Every redirection operator is followed by a word naming a file, a descriptor or a here-document delimiter.", .bad = "echo >", .good = "echo > file", .dash = "Syntax error: newline unexpected" },
+    .{ .code = 1010, .kind = .missing_redirect_target, .exit = 2, .summary = "A redirection operator has no file name", .rich = "redirection '{s}' needs a file name or descriptor", .help = "write the target after the operator, e.g. `> file` or `>&2`", .explain = "Every redirection operator is followed by a word naming a file, a descriptor or a here-document delimiter.", .bad = "echo >", .good = "echo > file", .dash = "Syntax error: newline unexpected", .shellcheck = "SC1073" },
     .{ .code = 2001, .kind = .division_by_zero, .exit = 2, .summary = "Division or remainder by zero in arithmetic", .rich = "division by zero in '{s}'", .help = "test the divisor before dividing", .explain = "POSIX XCU 2.6.4 evaluates $(( )) as signed C integers; dividing by zero is an error and a non-interactive shell exits with status 2.", .bad = "echo $((1/0))", .good = "[ \"$d\" -ne 0 ] && echo $((1/d))", .dash = "arithmetic expression: division by zero: \"1/0\"" },
-    .{ .code = 2002, .kind = .arithmetic_syntax, .exit = 2, .summary = "Malformed arithmetic expression", .rich = "{s}", .help = "check operators and parentheses; only C integer operators are available (no `,` `**` `++`)", .explain = "The expression inside $(( )) does not parse: a missing operand, an unknown operator, a bad octal digit or trailing text.", .bad = "echo $((1+))", .good = "echo $((1+1))", .dash = "arithmetic expression: expecting primary: \"1+\"" },
+    .{ .code = 2002, .kind = .arithmetic_syntax, .exit = 2, .summary = "Malformed arithmetic expression", .rich = "{s}", .help = "check operators and parentheses; only C integer operators are available (no `,` `**` `++`)", .explain = "The expression inside $(( )) does not parse: a missing operand, an unknown operator, a bad octal digit or trailing text.", .bad = "echo $((1+))", .good = "echo $((1+1))", .dash = "arithmetic expression: expecting primary: \"1+\"", .shellcheck = "SC1102" },
     .{ .code = 2003, .kind = .illegal_number, .exit = 2, .summary = "A value that must be a number is not one", .rich = "'{s}' is not a number", .help = "pass a plain decimal, `0x` hexadecimal or `0` octal integer", .explain = "A variable used in arithmetic, or an argument of a builtin such as `exit`, `shift` or `test -eq`, was not an integer.", .bad = "x=abc; echo $((x+1))", .good = "x=3; echo $((x+1))", .dash = "Illegal number: abc" },
-    .{ .code = 2004, .kind = .unset_variable, .exit = 2, .summary = "A variable is unset while `set -u` is in effect", .rich = "variable '{s}' is not set", .help = "assign it first or use `${name-default}`", .explain = "With `set -u` (nounset), expanding an unset parameter other than `@` or `*` is an error (POSIX XCU 2.6.2, 'set -u').", .bad = "set -u; echo $x", .good = "set -u; echo ${x-}", .dash = "x: parameter not set" },
+    .{ .code = 2004, .kind = .unset_variable, .exit = 2, .summary = "A variable is unset while `set -u` is in effect", .rich = "variable '{s}' is not set", .help = "assign it first or use `${name-default}`", .explain = "With `set -u` (nounset), expanding an unset parameter other than `@` or `*` is an error (POSIX XCU 2.6.2, 'set -u').", .bad = "set -u; echo $x", .good = "set -u; echo ${x-}", .dash = "x: parameter not set", .shellcheck = "SC2154" },
     .{ .code = 2005, .kind = .parameter_error, .exit = 2, .summary = "`${name?message}` found the variable unset or null", .rich = "{s}", .help = "set the variable or catch the error with `${name-default}`", .explain = "The `?` form of parameter expansion writes the message to standard error and a non-interactive shell exits (POSIX XCU 2.6.2).", .bad = "echo ${x?need x}", .good = "x=1; echo ${x?need x}", .dash = "x: need x" },
     .{ .code = 2006, .kind = .cannot_assign, .exit = 2, .summary = "`${name=word}` on something that is not a variable", .rich = "cannot assign to '{s}' in this way", .help = "positional and special parameters cannot be assigned by expansion; use `set --`", .explain = "The `=` form assigns to a variable; `$1`, `$@` and the other special parameters are not variables.", .bad = "echo ${1=x}", .good = "set -- x", .dash = "1: cannot assign in this way" },
     .{ .code = 2007, .kind = .readonly_assignment, .exit = 2, .summary = "Assignment to or unsetting of a read-only variable", .rich = "'{s}' is read-only", .help = "do not modify it, or start a new shell where it is not read-only", .explain = "A variable marked `readonly` can no longer be assigned or unset; a non-interactive shell exits (POSIX XCU 2.8.1).", .bad = "readonly r=1; r=2", .good = "r=1; r=2", .dash = "r: is read only" },
@@ -121,10 +121,10 @@ pub const catalog = [_]Entry{
     .{ .code = 3002, .kind = .cannot_create, .exit = 2, .summary = "A file for output redirection cannot be created", .rich = "cannot create '{s}'", .help = "check that the directory exists and is writable", .explain = "`> file` or `>> file` could not create or open the file for writing.", .bad = "echo x > /nonexistent/f", .good = "echo x > ./f", .dash = "cannot create /nonexistent/f: Directory nonexistent" },
     .{ .code = 3003, .kind = .bad_fd, .exit = 2, .summary = "A descriptor in a duplication is not open", .rich = "file descriptor {s} is not open", .help = "open it first with `exec N>file`, or redirect to an existing one", .explain = "`n>&m` and `n<&m` need `m` to be open (POSIX XCU 2.7.6).", .bad = "echo hi >&9", .good = "exec 9>&1; echo hi >&9", .dash = "9: Bad file descriptor" },
     .{ .code = 3004, .kind = .noclobber, .exit = 2, .summary = "`set -C` refuses to overwrite an existing file", .rich = "'{s}' exists and `set -C` (noclobber) is on", .help = "use `>|` to overwrite on purpose, or `>>` to append", .explain = "With noclobber `>` does not truncate an existing regular file (POSIX XCU 2.7.2).", .bad = "set -C; echo a > f; echo b > f", .good = "set -C; echo a > f; echo b >| f", .dash = "cannot create f: File exists" },
-    .{ .code = 3005, .kind = .bad_fd_number, .exit = 2, .summary = "The word after `>&` or `<&` is neither a number nor `-`", .rich = "'{s}' is not a file descriptor number", .help = "use a number, or `-` to close", .explain = "Duplication redirections take a descriptor number or `-` (POSIX XCU 2.7.5, 2.7.6).", .bad = "echo hi >&file", .good = "echo hi >file", .dash = "Syntax error: Bad fd number" },
+    .{ .code = 3005, .kind = .bad_fd_number, .exit = 2, .summary = "The word after `>&` or `<&` is neither a number nor `-`", .rich = "'{s}' is not a file descriptor number", .help = "use a number, or `-` to close", .explain = "Duplication redirections take a descriptor number or `-` (POSIX XCU 2.7.5, 2.7.6).", .bad = "echo hi >&file", .good = "echo hi >file", .dash = "Syntax error: Bad fd number", .shellcheck = "SC3021" },
     .{ .code = 4001, .kind = .not_found, .exit = 127, .summary = "The command was not found", .rich = "command not found: '{s}'", .help = "check the spelling and that its directory is in PATH", .explain = "Neither a function, a builtin nor an executable file of that name exists in PATH. The exit status is 127 (POSIX XCU 2.8.2).", .bad = "nosuchcommand", .good = "ls", .dash = "nosuchcommand: not found" },
     .{ .code = 4002, .kind = .not_executable, .exit = 126, .summary = "The file was found but cannot be executed", .rich = "cannot execute '{s}': permission denied or not an executable file", .help = "make it executable with `chmod +x`, or run it through its interpreter", .explain = "The file exists but is not executable, or is a directory. The exit status is 126.", .bad = "./notexecutable", .good = "chmod +x notexecutable && ./notexecutable", .dash = "./notexecutable: Permission denied" },
-    .{ .code = 4003, .kind = .cannot_fork, .exit = 2, .summary = "A process or pipe could not be created", .rich = "{s}", .help = "the system is out of processes or descriptors; check ulimits", .explain = "fork(2) or pipe(2) failed, usually because of a resource limit.", .bad = "(ulimit -u 1; : | :)", .good = "(: | :)", .dash = "Cannot fork" },
+    .{ .code = 4003, .kind = .cannot_fork, .exit = 2, .summary = "A process or pipe could not be created", .rich = "{s}", .help = "the system is out of processes or descriptors; check ulimits", .explain = "fork(2) or pipe(2) failed, usually because of a resource limit.", .bad = "(ulimit -n 3; : | :)", .good = "(: | :)", .dash = "Pipe call failed" },
     .{ .code = 4004, .kind = .cannot_open_script, .exit = 127, .summary = "The script file named on the command line cannot be opened", .rich = "cannot open script '{s}'", .help = "check the path", .explain = "`sh file` could not read the file; the exit status is 127.", .bad = "sh nosuch.sh", .good = "sh ./script.sh", .dash = "Can't open nosuch.sh" },
     .{ .code = 4005, .kind = .errexit_exit, .exit = 0, .summary = "`set -e` ended the shell after a failing command (note, rich and json styles only)", .rich = "`set -e` is on and '{s}' failed, so the shell exits", .help = "test the command (`cmd || handle`) if the failure is expected", .explain = "POSIX XCU 2.14 `set -e`: a failing command that is not part of a condition, an `&&`/`||` list (except the last) or a negated pipeline ends the shell with that command's status. This note names the command and line; it is never printed in the posix style, and never changes the exit status.", .bad = "set -e\nfalse\necho unreachable", .good = "set -e\nfalse || :\necho reachable", .dash = "(none: dash exits silently)" },
     .{ .code = 5001, .kind = .illegal_option, .exit = 2, .summary = "A builtin was given an option it does not have", .rich = "unknown option '{s}'", .help = "see the builtin's description in the manual", .explain = "A special builtin that gets an invalid option makes a non-interactive shell exit (POSIX XCU 2.8.1).", .bad = "set -Z", .good = "set -e", .dash = "set: Illegal option -Z" },
@@ -138,8 +138,8 @@ pub const catalog = [_]Entry{
     .{ .code = 5009, .kind = .usage, .exit = 2, .summary = "A builtin was called with the wrong number of arguments", .rich = "{s}", .help = "see the usage line in the message", .explain = "The builtin needs more operands than it got.", .bad = "getopts a", .good = "getopts a opt", .dash = "getopts: usage: getopts optstring var [arg]" },
     .{ .code = 5010, .kind = .io_error, .exit = 1, .summary = "Writing to standard output failed", .rich = "write error: {s}", .help = "standard output is closed or full", .explain = "A builtin could not write its output (closed descriptor, full disk).", .bad = "echo hi >&-", .good = "echo hi", .dash = "echo: echo: I/O error" },
     .{ .code = 5011, .kind = .alias_not_found, .exit = 1, .summary = "`alias` or `unalias` named an alias that is not defined", .rich = "no alias named '{s}'", .help = "`alias` with no arguments lists the defined aliases", .explain = "Aliases are looked up by exact name.", .bad = "unalias nosuch", .good = "alias ll='ls -l'; unalias ll", .dash = "unalias: nosuch: not found" },
-    .{ .code = 5012, .kind = .bad_limit, .exit = 1, .summary = "`ulimit` could not read or set the limit", .rich = "{s}", .help = "the hard limit cannot be raised without privilege", .explain = "getrlimit/setrlimit failed.", .bad = "ulimit -n 99999999999", .good = "ulimit -n 256", .dash = "ulimit: bad limit: Operation not permitted" },
-    .{ .code = 5013, .kind = .not_in_function, .exit = 2, .summary = "`local` was used outside a function", .rich = "`local` can only be used inside a function", .help = "declare the variable normally, or move the code into a function", .explain = "`local` is not in POSIX; where available it is only valid in a function body.", .bad = "local x=1", .good = "f() { local x=1; }", .dash = "local: not in a function" },
+    .{ .code = 5012, .kind = .bad_limit, .exit = 2, .summary = "`ulimit` could not read or set the limit", .rich = "{s}", .help = "the hard limit cannot be raised without privilege", .explain = "getrlimit/setrlimit failed.", .bad = "ulimit -n 2000000000", .good = "ulimit -n 256", .dash = "ulimit: error setting limit (Operation not permitted)" },
+    .{ .code = 5013, .kind = .not_in_function, .exit = 2, .summary = "`local` was used outside a function", .rich = "`local` can only be used inside a function", .help = "declare the variable normally, or move the code into a function", .explain = "`local` is not in POSIX; where available it is only valid in a function body.", .bad = "local x=1", .good = "f() { local x=1; }", .dash = "local: not in a function", .shellcheck = "SC2168" },
     .{ .code = 6001, .kind = .invocation_option, .exit = 2, .summary = "`sh` was started with an option it does not have", .rich = "unknown option '{s}'", .help = "see `sh` in the manual for the option list", .explain = "The command line options are those of POSIX `sh`: -a -b -C -e -f -h -i -m -n -u -v -x, -c, -s, -o and +o.", .bad = "sh -Z", .good = "sh -e", .dash = "Illegal option -Z" },
     .{ .code = 6002, .kind = .missing_argument, .exit = 2, .summary = "`sh -c` or `-o` needs an argument", .rich = "{s}", .help = "give the command string after `-c`", .explain = "`sh -c` requires the command string as the next operand.", .bad = "sh -c", .good = "sh -c 'echo hi'", .dash = "-c requires an argument" },
     .{ .code = 7001, .kind = .lint_unquoted_expansion, .exit = 1, .summary = "An unquoted expansion is split into words and globbed", .rich = "unquoted expansion of '{s}' is split on whitespace and expanded as a glob", .help = "quote it as \"${name}\" unless you want word splitting", .explain = "Unquoted `$name` and `$(cmd)` results undergo field splitting and pathname expansion (POSIX XCU 2.6.5, 2.6.6), so a value with spaces or `*` becomes several arguments.", .bad = "rm $file", .good = "rm \"$file\"", .dash = "(none)", .shellcheck = "SC2086" },
@@ -192,87 +192,82 @@ pub const Diagnostic = struct {
     bare: bool = false,
     /// Whole source text the line/column refer to (for the excerpt).
     source: []const u8 = "",
+    /// Name of the shell program for the rich and gcc headers (`sh`); empty
+    /// means the `name` argument of `render`.
+    prog: []const u8 = "",
 };
 
 pub const Style = enum { rich, posix, json, gcc };
 
-fn startsWith(s: []const u8, p: []const u8) bool {
-    return std.mem.startsWith(u8, s, p);
-}
-fn endsWith(s: []const u8, p: []const u8) bool {
-    return std.mem.endsWith(u8, s, p);
-}
-fn contains(s: []const u8, p: []const u8) bool {
-    return std.mem.indexOf(u8, s, p) != null;
-}
-
 pub const Classified = struct { kind: Kind, subject: []const u8 };
 
-/// Place a runtime message (dash wording, without prefix) into the catalog.
-pub fn classify(msg: []const u8) Classified {
-    if (contains(msg, "arithmetic expression: division by zero")) return .{ .kind = .division_by_zero, .subject = afterLast(msg, ": \"", "\"") };
-    if (startsWith(msg, "arithmetic expression:")) return .{ .kind = .arithmetic_syntax, .subject = msg };
-    if (contains(msg, "Illegal number: ")) return .{ .kind = .illegal_number, .subject = msg[std.mem.lastIndexOf(u8, msg, "Illegal number: ").? + 16 ..] };
-    if (contains(msg, "Illegal option")) return .{ .kind = .illegal_option, .subject = msg[std.mem.lastIndexOf(u8, msg, "Illegal option ").? + 15 ..] };
-    if (endsWith(msg, "parameter not set")) return .{ .kind = .unset_variable, .subject = msg[0 .. msg.len - ": parameter not set".len] };
-    if (endsWith(msg, "parameter null or not set")) return .{ .kind = .parameter_error, .subject = msg };
-    if (endsWith(msg, "cannot assign in this way")) return .{ .kind = .cannot_assign, .subject = msg[0 .. msg.len - ": cannot assign in this way".len] };
-    if (endsWith(msg, "is read only")) {
-        const body = msg[0 .. msg.len - ": is read only".len];
-        return .{ .kind = .readonly_assignment, .subject = lastField(body) };
+pub const Span = struct { col: u32, end: u32 };
+
+/// Narrow the caret of a runtime error from the whole command word to the
+/// part of the source line that the problem is about: the redirection target,
+/// the `${...}` or `$((...))` expansion, the variable. `line` is the source
+/// line, `from_col` the 1-based column to start searching from. Null when
+/// the subject cannot be found (the command word is then underlined).
+pub fn refine(line: []const u8, from_col: u32, kind: Kind, subject: []const u8) ?Span {
+    if (subject.len == 0 and kind != .division_by_zero and kind != .arithmetic_syntax) return null;
+    const start: usize = if (from_col > 0) from_col - 1 else 0;
+    if (start > line.len) return null;
+    const hay = line[start..];
+    switch (kind) {
+        .cannot_open, .cannot_create, .noclobber, .bad_fd, .bad_fd_number => {
+            const i = std.mem.indexOf(u8, hay, subject) orelse return null;
+            return .{ .col = @intCast(start + i + 1), .end = @intCast(start + i + 1 + subject.len) };
+        },
+        .unset_variable, .parameter_error, .cannot_assign, .bad_substitution, .readonly_assignment => {
+            // the name is the subject up to the first ':' (parameter_error subjects are "name: message")
+            const name_end = std.mem.indexOf(u8, subject, ":") orelse subject.len;
+            const name = subject[0..name_end];
+            if (name.len == 0) return null;
+            var i: usize = 0;
+            while (std.mem.indexOfScalarPos(u8, hay, i, '$')) |d| {
+                i = d + 1;
+                const rest = hay[d + 1 ..];
+                if (rest.len > 0 and rest[0] == '{' and std.mem.startsWith(u8, rest[1..], name)) {
+                    const close = std.mem.indexOfScalar(u8, rest, '}') orelse rest.len - 1;
+                    return .{ .col = @intCast(start + d + 1), .end = @intCast(start + d + 1 + close + 2) };
+                }
+                if (std.mem.startsWith(u8, rest, name)) return .{ .col = @intCast(start + d + 1), .end = @intCast(start + d + 1 + 1 + name.len) };
+            }
+            if (kind == .readonly_assignment) {
+                // `name=value` assignment
+                var k: usize = 0;
+                while (std.mem.indexOfPos(u8, hay, k, name)) |j| {
+                    k = j + 1;
+                    if (j + name.len < hay.len and hay[j + name.len] == '=' and (j == 0 or hay[j - 1] == ' ' or hay[j - 1] == '\t' or hay[j - 1] == ';')) {
+                        var e = j + name.len + 1;
+                        while (e < hay.len and hay[e] != ' ' and hay[e] != '\t' and hay[e] != ';') e += 1;
+                        return .{ .col = @intCast(start + j + 1), .end = @intCast(start + e + 1) };
+                    }
+                }
+            }
+            return null;
+        },
+        .division_by_zero, .arithmetic_syntax, .illegal_number => {
+            const i = std.mem.indexOf(u8, hay, "$((") orelse return null;
+            var depth: u32 = 0;
+            var j = i + 1;
+            while (j < hay.len) : (j += 1) {
+                if (hay[j] == '(') depth += 1;
+                if (hay[j] == ')') {
+                    if (depth <= 1) break;
+                    depth -= 1;
+                }
+            }
+            const end = @min(j + 2, hay.len);
+            return .{ .col = @intCast(start + i + 1), .end = @intCast(start + end + 1) };
+        },
+        else => return null,
     }
-    if (contains(msg, "cannot create temporary")) return .{ .kind = .cannot_create, .subject = "temporary file" };
-    if (contains(msg, "cannot create ")) return classifyOpen(msg, "cannot create ", if (endsWith(msg, "File exists")) .noclobber else .cannot_create);
-    if (contains(msg, "cannot open ")) return classifyOpen(msg, "cannot open ", .cannot_open);
-    if (endsWith(msg, "Bad file descriptor")) return .{ .kind = .bad_fd, .subject = msg[0 .. msg.len - ": Bad file descriptor".len] };
-    if (contains(msg, "Bad fd number")) return .{ .kind = .bad_fd_number, .subject = "" };
-    if (endsWith(msg, "bad variable name")) return .{ .kind = .bad_variable_name, .subject = lastField(msg[0 .. msg.len - ": bad variable name".len]) };
-    if (contains(msg, "can't shift")) return .{ .kind = .cannot_shift, .subject = "" };
-    if (contains(msg, "can't cd to ")) return .{ .kind = .cannot_cd, .subject = msg[std.mem.indexOf(u8, msg, "can't cd to ").? + 12 ..] };
-    if (endsWith(msg, "bad trap")) return .{ .kind = .bad_trap, .subject = lastField(msg[0 .. msg.len - ": bad trap".len]) };
-    if (endsWith(msg, ": not found") or endsWith(msg, " not found")) {
-        if (endsWith(msg, ": not found")) {
-            const body = msg[0 .. msg.len - ": not found".len];
-            if (startsWith(msg, "alias: ") or startsWith(msg, "unalias: ")) return .{ .kind = .alias_not_found, .subject = lastField(body) };
-            return .{ .kind = .not_found, .subject = lastField(body) };
-        }
-        return .{ .kind = .alias_not_found, .subject = lastField(msg[0 .. msg.len - " not found".len]) };
-    }
-    if (endsWith(msg, "Permission denied")) return .{ .kind = .not_executable, .subject = msg[0 .. msg.len - ": Permission denied".len] };
-    if (contains(msg, "Cannot fork") or contains(msg, "Cannot create pipe")) return .{ .kind = .cannot_fork, .subject = msg };
-    if (contains(msg, "unexpected operator") or contains(msg, "argument expected") or contains(msg, "missing ]") or contains(msg, "closing paren")) return .{ .kind = .test_error, .subject = msg };
-    if (contains(msg, "expected numeric value") or contains(msg, "not completely converted")) return .{ .kind = .printf_number, .subject = lastField(msg[0 .. std.mem.lastIndexOfScalar(u8, msg, ':') orelse msg.len]) };
-    if (contains(msg, "invalid signal") or contains(msg, "invalid pid") or startsWith(msg, "kill: ")) return .{ .kind = .kill_error, .subject = msg };
-    if (contains(msg, "usage:") or contains(msg, "arg count")) return .{ .kind = .usage, .subject = msg };
-    if (contains(msg, "I/O error")) return .{ .kind = .io_error, .subject = "I/O error" };
-    if (contains(msg, "bad limit")) return .{ .kind = .bad_limit, .subject = msg };
-    if (contains(msg, "not in a function")) return .{ .kind = .not_in_function, .subject = "" };
-    if (contains(msg, "invalid directive")) return .{ .kind = .usage, .subject = msg };
-    return .{ .kind = .other, .subject = msg };
-}
-
-fn lastField(s: []const u8) []const u8 {
-    if (std.mem.lastIndexOf(u8, s, ": ")) |i| return s[i + 2 ..];
-    return s;
-}
-
-fn afterLast(s: []const u8, marker: []const u8, strip: []const u8) []const u8 {
-    const i = std.mem.lastIndexOf(u8, s, marker) orelse return s;
-    var r = s[i + marker.len ..];
-    if (endsWith(r, strip)) r = r[0 .. r.len - strip.len];
-    return r;
-}
-
-fn classifyOpen(msg: []const u8, prefix: []const u8, kind: Kind) Classified {
-    const i = std.mem.indexOf(u8, msg, prefix).? + prefix.len;
-    var path = msg[i..];
-    if (std.mem.lastIndexOf(u8, path, ": ")) |j| path = path[0..j];
-    return .{ .kind = kind, .subject = path };
 }
 
 // --- rendering ---------------------------------------------------------------
 
-fn sourceLine(src: []const u8, line: u32) ?[]const u8 {
+pub fn sourceLine(src: []const u8, line: u32) ?[]const u8 {
     if (line == 0) return null;
     var n: u32 = 1;
     var start: usize = 0;
@@ -412,6 +407,8 @@ pub fn render(a: Allocator, d: *const Diagnostic, name: []const u8, style: Style
             try jsonStr(&out, a, d.expected);
             try out.appendSlice(a, ",\"posix\":");
             try jsonStr(&out, a, d.posix);
+            try out.appendSlice(a, ",\"shellcheck\":");
+            if (e.shellcheck.len > 0) try jsonStr(&out, a, e.shellcheck) else try out.appendSlice(a, "null");
             try out.appendSlice(a, "}\n");
         },
         .rich => {
@@ -419,7 +416,7 @@ pub fn render(a: Allocator, d: *const Diagnostic, name: []const u8, style: Style
             const help = try helpText(a, d, e);
             const sev: []const u8 = if (d.severity == .err) "error" else "warning";
             const lbl: []const u8 = if (d.label.len > 0) d.label else name;
-            try out.print(a, "{s}: ", .{name});
+            try out.print(a, "{s}: ", .{if (d.prog.len > 0) d.prog else name});
             if (line > 0) {
                 try out.print(a, "{s}:{d}", .{ lbl, line });
                 if (col > 0) try out.print(a, ":{d}", .{col});
@@ -476,7 +473,7 @@ pub fn catalogMarkdown(a: Allocator) Allocator.Error![]const u8 {
         \\
     );
     for (&catalog) |*e| try out.print(a, "| SH{d} | {s} | {d} | {s} |\n", .{ e.code, @tagName(e.kind), e.exit, e.summary });
-    try out.appendSlice(a, "\n# LINT CODES AND SHELLCHECK\n\nThe `--check` codes and the nearest ShellCheck id (a pointer for readers who know that tool; the messages are our own).\n\n| Code | Kind | ShellCheck |\n|------|------|------------|\n");
+    try out.appendSlice(a, "\n# SHELLCHECK MAPPING\n\nThe nearest ShellCheck id of each code that has one (a pointer for readers who know that tool, verified by running `shellcheck -s dash` on the bad example of the entry; only the numbers are referenced, the messages are our own). The JSON diagnostic has the same value in its `shellcheck` field, `sh --explain` prints it, `sh --list-diagnostics --diagnostics=json` lists it.\n\n| Code | Kind | ShellCheck |\n|------|------|------------|\n");
     for (&catalog) |*e| if (e.shellcheck.len > 0) try out.print(a, "| SH{d} | {s} | {s} |\n", .{ e.code, @tagName(e.kind), e.shellcheck });
     try out.appendSlice(a, "\n# ENTRIES\n\n");
     for (&catalog) |*e| {
@@ -499,10 +496,53 @@ fn indent(a: Allocator, s: []const u8) Allocator.Error![]const u8 {
     return out.items;
 }
 
+pub fn severityOf(e: *const Entry) []const u8 {
+    return if (e.code == 1003 or e.code == 4005 or e.code >= 7000) "warning" else "error";
+}
+
+fn entryJson(out: *std.ArrayList(u8), a: Allocator, e: *const Entry) Allocator.Error!void {
+    try out.print(a, "{{\"code\":\"SH{d}\",\"kind\":\"{s}\",\"severity\":\"{s}\",\"exit\":{d},\"summary\":", .{ e.code, @tagName(e.kind), severityOf(e), e.exit });
+    try jsonStr(out, a, e.summary);
+    try out.appendSlice(a, ",\"message\":");
+    try jsonStr(out, a, e.rich);
+    try out.appendSlice(a, ",\"posix\":");
+    try jsonStr(out, a, e.dash);
+    try out.appendSlice(a, ",\"shellcheck\":");
+    if (e.shellcheck.len > 0) try jsonStr(out, a, e.shellcheck) else try out.appendSlice(a, "null");
+    try out.appendSlice(a, ",\"help\":");
+    try jsonStr(out, a, e.help);
+    try out.appendSlice(a, ",\"explain\":");
+    try jsonStr(out, a, e.explain);
+    try out.appendSlice(a, ",\"bad\":");
+    try jsonStr(out, a, e.bad);
+    try out.appendSlice(a, ",\"good\":");
+    try jsonStr(out, a, e.good);
+    try out.append(a, '}');
+}
+
+/// `sh --explain CODE --diagnostics=json`: one object and a newline.
+pub fn explainJson(a: Allocator, e: *const Entry) Allocator.Error![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    try entryJson(&out, a, e);
+    try out.append(a, '\n');
+    return out.items;
+}
+
+/// `sh --list-diagnostics --diagnostics=json`: one object per line for every code.
+pub fn catalogJson(a: Allocator) Allocator.Error![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (&catalog) |*e| {
+        try entryJson(&out, a, e);
+        try out.append(a, '\n');
+    }
+    return out.items;
+}
+
 /// Text of `sh --explain CODE`.
 pub fn explain(a: Allocator, e: *const Entry) Allocator.Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.print(a, "SH{d}: {s}\n\n{s}\n", .{ e.code, e.summary, e.explain });
+    if (e.shellcheck.len > 0) try out.print(a, "\nShellCheck: {s}\n", .{e.shellcheck});
     if (e.bad.len > 0) {
         try out.print(a, "\nBad:\n    {s}\n\nGood:\n    {s}\n\ndash says: {s}\n", .{ try indent(a, e.bad), try indent(a, e.good), e.dash });
     }
@@ -513,14 +553,6 @@ test "codes are unique and ordered by group" {
     for (catalog, 0..) |e, i| {
         for (catalog[i + 1 ..]) |f| try std.testing.expect(e.code != f.code);
     }
-}
-
-test "classify places dash messages" {
-    try std.testing.expectEqual(Kind.not_found, classify("nosuch: not found").kind);
-    try std.testing.expectEqualStrings("nosuch", classify("nosuch: not found").subject);
-    try std.testing.expectEqual(Kind.cannot_create, classify("cannot create /x/y: Directory nonexistent").kind);
-    try std.testing.expectEqual(Kind.readonly_assignment, classify("r: is read only").kind);
-    try std.testing.expectEqual(Kind.division_by_zero, classify("arithmetic expression: division by zero: \"1/0\"").kind);
 }
 
 test "rich rendering of a mismatched closer" {

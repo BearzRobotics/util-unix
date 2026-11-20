@@ -1,0 +1,2 @@
+{"code":"SH4003","kind":"cannot_fork","severity":"error","file":"-c","line":1,"column":2,"end":8,"message":"Pipe call failed","help":"the system is out of processes or descriptors; check ulimits","token":"","expected":"","posix":"Pipe call failed","shellcheck":null}
+rc=2

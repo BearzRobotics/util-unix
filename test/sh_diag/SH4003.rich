@@ -1,0 +1,6 @@
+sh: -c:1:2: error[SH4003]: Pipe call failed
+  |
+1 | (ulimit -n 3; : | :)
+  |  ^^^^^^
+help: the system is out of processes or descriptors; check ulimits
+rc=2

@@ -1,2 +1,2 @@
-{"code":"SH3001","kind":"cannot_open","severity":"error","file":"-c","line":1,"column":1,"end":4,"message":"cannot open 'missing.txt' for reading","help":"check that the path exists and is readable","token":"","expected":"","posix":"cannot open missing.txt: No such file"}
+{"code":"SH3001","kind":"cannot_open","severity":"error","file":"-c","line":1,"column":7,"end":18,"message":"cannot open 'missing.txt' for reading","help":"check that the path exists and is readable","token":"","expected":"","posix":"cannot open missing.txt: No such file","shellcheck":null}
 rc=2

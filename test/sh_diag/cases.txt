@@ -22,6 +22,7 @@ SH3004	set -C; echo a > f; echo b > f
 SH3005	echo hi >&file
 SH4001	nosuchcommand
 SH4002	echo 'echo hi' > notexec; chmod 644 notexec; ./notexec
+SH4003	(ulimit -n 3; : | :)
 SH4005	set -e\nfalse\necho unreachable
 SH5001	set -Z
 SH5002	set -- a; shift 2
@@ -34,6 +35,7 @@ SH5008	kill -s NOSUCH 1
 SH5009	getopts a
 SH5010	echo hi >&-
 SH5011	unalias nosuch
+SH5012	ulimit -n 2000000000
 SH5013	local x=1
 SH7001	rm $file
 SH7002	cd /build\nrm -rf ./*

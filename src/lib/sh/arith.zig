@@ -7,6 +7,7 @@
 //! required by POSIX; dash rejects them too).
 
 const std = @import("std");
+const diag = @import("diag.zig");
 
 pub const Error = error{Arith};
 
@@ -37,19 +38,25 @@ pub const Evaluator = struct {
     skip: u32 = 0,
     msg_buf: [200]u8 = undefined,
     msg_len: usize = 0,
+    /// Catalog kind and subject of the failure.
+    kind: diag.Kind = .arithmetic_syntax,
+    subject: []const u8 = "",
 
     pub fn message(self: *const Evaluator) []const u8 {
         return self.msg_buf[0..self.msg_len];
     }
 
-    fn fail(self: *Evaluator, comptime fmt: []const u8, args: anytype) Error {
+    fn fail(self: *Evaluator, kind: diag.Kind, subject: ?[]const u8, comptime fmt: []const u8, args: anytype) Error {
         const m = std.fmt.bufPrint(&self.msg_buf, fmt, args) catch self.msg_buf[0..0];
         self.msg_len = m.len;
+        self.kind = kind;
+        self.subject = subject orelse self.msg_buf[0..self.msg_len];
         return error.Arith;
     }
 
     fn failExpr(self: *Evaluator, what: []const u8) Error {
-        return self.fail("arithmetic expression: {s}: \"{s}\"", .{ what, self.text });
+        const kind: diag.Kind = if (std.mem.eql(u8, what, "division by zero")) .division_by_zero else .arithmetic_syntax;
+        return self.fail(kind, if (kind == .division_by_zero) self.text else null, "arithmetic expression: {s}: \"{s}\"", .{ what, self.text });
     }
 
     pub fn eval(host: Host, text: []const u8) struct { value: ?i64, msg: [200]u8, msg_len: usize } {
@@ -136,7 +143,7 @@ pub const Evaluator = struct {
     fn varValue(self: *Evaluator, name: []const u8) Error!i64 {
         const v = self.host.get(self.host.ctx, name) orelse return 0;
         if (v.len == 0) return 0;
-        return parseNumber(v) orelse self.fail("Illegal number: {s}", .{v});
+        return parseNumber(v) orelse self.fail(.illegal_number, v, "Illegal number: {s}", .{v});
     }
 
     // --- grammar ---
@@ -158,7 +165,7 @@ pub const Evaluator = struct {
                         const cur_v = if (self.skip == 0) try self.varValue(name) else 0;
                         val = try self.binop(o[0 .. o.len - 1], cur_v, rhs);
                     }
-                    if (self.skip == 0 and !self.host.set(self.host.ctx, name, val)) return self.fail("{s}: is read only", .{name});
+                    if (self.skip == 0 and !self.host.set(self.host.ctx, name, val)) return self.fail(.readonly_assignment, name, "{s}: is read only", .{name});
                     return val;
                 }
             }

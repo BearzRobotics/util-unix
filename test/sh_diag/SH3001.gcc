@@ -1,2 +1,2 @@
--c:1:1: error: cannot open 'missing.txt' for reading [SH3001]
+-c:1:7: error: cannot open 'missing.txt' for reading [SH3001]
 rc=2

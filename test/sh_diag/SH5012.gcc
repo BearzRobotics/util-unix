@@ -1,0 +1,2 @@
+-c:1:1: error: ulimit: error setting limit (Operation not permitted) [SH5012]
+rc=2

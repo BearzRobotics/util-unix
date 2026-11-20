@@ -18,6 +18,7 @@ const ast = @import("ast.zig");
 const arith = @import("arith.zig");
 const pattern = @import("pattern.zig");
 const lexer = @import("lexer.zig");
+const diagmod = @import("diag.zig");
 const exec = @import("exec.zig");
 const shell = @import("shell.zig");
 const Shell = shell.Shell;
@@ -76,8 +77,8 @@ const X = struct {
 
 /// Report a fatal expansion error: the (non-interactive) shell exits with
 /// status 2, as dash does.
-pub fn fatal(sh: *Shell, comptime fmt: []const u8, args: anytype) Error {
-    sh.diag(fmt, args);
+pub fn fatal(sh: *Shell, kind: diagmod.Kind, subject: ?[]const u8, comptime fmt: []const u8, args: anytype) Error {
+    sh.diagK(kind, subject, fmt, args);
     sh.status = 2;
     sh.flow = .exit_shell;
     return error.Fatal;
@@ -174,7 +175,7 @@ const ArithHost = struct {
 pub fn evalArith(sh: *Shell, text: []const u8) Error!i64 {
     var h: ArithHost = .{ .sh = sh };
     var ev: arith.Evaluator = .{ .host = .{ .ctx = &h, .get = ArithHost.get, .set = ArithHost.set }, .text = text };
-    return ev.run() catch return fatal(sh, "{s}", .{ev.message()});
+    return ev.run() catch return fatal(sh, ev.kind, ev.subject, "{s}", .{ev.message()});
 }
 
 fn homeOf(sh: *Shell, a: Allocator, user: []const u8) ?[]const u8 {
@@ -346,11 +347,11 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
             return error.Fatal;
         },
         .plain => {
-            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, "{s}: parameter not set", .{p.name});
+            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
             try emit(x, pv, p.name, p.quoted);
         },
         .length => {
-            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, "{s}: parameter not set", .{p.name});
+            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
             const n: usize = switch (pv) {
                 .unset => 0,
                 .one => |v| v.len,
@@ -376,10 +377,10 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
         },
         .assign_default => {
             if (missing) {
-                if (!lexer.isName(p.name)) return fatal(sh, "{s}: cannot assign in this way", .{p.name});
+                if (!lexer.isName(p.name)) return fatal(sh, .cannot_assign, p.name, "{s}: cannot assign in this way", .{p.name});
                 const v = try stringMode(sh, x.a, p.arg, false, false);
                 sh.setVar(p.name, v) catch |e| switch (e) {
-                    error.ReadOnly => return fatal(sh, "{s}: is read only", .{p.name}),
+                    error.ReadOnly => return fatal(sh, .readonly_assignment, p.name, "{s}: is read only", .{p.name}),
                     error.OutOfMemory => return error.OutOfMemory,
                 };
                 try x.putAll(v, if (p.quoted) quoted else field);
@@ -390,8 +391,8 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
             if (missing) {
                 const msg = try stringMode(sh, x.a, p.arg, false, false);
                 if (p.arg.len == 0) {
-                    if (p.colon) return fatal(sh, "{s}: parameter null or not set", .{p.name});
-                    return fatal(sh, "{s}: parameter not set", .{p.name});
+                    if (p.colon) return fatal(sh, .parameter_error, null, "{s}: parameter null or not set", .{p.name});
+                    return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
                 }
                 var kb: [512]u8 = undefined;
                 const text = std.fmt.bufPrint(&kb, "{s}: {s}", .{ p.name, msg }) catch p.name;
@@ -403,7 +404,7 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
             try emit(x, pv, p.name, p.quoted);
         },
         .trim_prefix_small, .trim_prefix_large, .trim_suffix_small, .trim_suffix_large => {
-            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, "{s}: parameter not set", .{p.name});
+            if (is_unset and sh.flags.nounset and !multi) return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
             const v = try joined(x, pv);
             const pat = try stringMode(sh, x.a, p.arg, false, true);
             const r = trim(v, pat, p.op);

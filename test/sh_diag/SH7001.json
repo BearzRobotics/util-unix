@@ -1,2 +1,2 @@
-{"code":"SH7001","kind":"lint_unquoted_expansion","severity":"warning","file":"s.sh","line":1,"column":1,"end":3,"message":"unquoted expansion of 'file' is split on whitespace and expanded as a glob","help":"quote it as \"${name}\" unless you want word splitting","token":"","expected":"","posix":"An unquoted expansion is split into words and globbed"}
+{"code":"SH7001","kind":"lint_unquoted_expansion","severity":"warning","file":"s.sh","line":1,"column":1,"end":3,"message":"unquoted expansion of 'file' is split on whitespace and expanded as a glob","help":"quote it as \"${name}\" unless you want word splitting","token":"","expected":"","posix":"An unquoted expansion is split into words and globbed","shellcheck":"SC2086"}
 rc=1

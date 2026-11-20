@@ -1,0 +1,2 @@
+-c:1:2: error: Pipe call failed [SH4003]
+rc=2

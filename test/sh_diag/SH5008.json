@@ -1,2 +1,2 @@
-{"code":"SH5008","kind":"kill_error","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"kill: invalid signal number or name: NOSUCH","help":"`kill -l` lists signal names","token":"","expected":"","posix":"kill: invalid signal number or name: NOSUCH"}
+{"code":"SH5008","kind":"kill_error","severity":"error","file":"-c","line":1,"column":1,"end":5,"message":"kill: invalid signal number or name: NOSUCH","help":"`kill -l` lists signal names","token":"","expected":"","posix":"kill: invalid signal number or name: NOSUCH","shellcheck":null}
 rc=2
