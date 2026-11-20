@@ -1,0 +1,77 @@
+Usage: sh [OPTION]... [-c COMMAND [NAME [ARG]...] | -s [ARG]... | FILE [ARG]...]
+  or:  sh --check FILE...
+  or:  sh --explain CODE
+  or:  sh --list-diagnostics | --diagnostics-catalog
+
+A POSIX shell: it reads commands from COMMAND, from standard input or from FILE,
+and runs them as POSIX.1-2024 describes (Shell Command Language). It implements
+POSIX and nothing else: no [[ ]], arrays or other extensions. A construct POSIX
+does not define is an error that says so.
+
+Invocation:
+  -c COMMAND     run COMMAND; the first operand after it becomes $0, the rest
+                 become $1, $2, ...
+  -s             read commands from standard input (the default with no FILE);
+                 operands become the positional parameters
+  -i             interactive shell: prompts (PS1, PS2), line editing, history
+  -l             login shell: run /etc/profile and ~/.profile first
+  FILE [ARG]...  run the script FILE; ARG become $1, $2, ...
+
+Shell options (as with `set`; -x turns an option on, +x turns it off):
+  -a  allexport      export every variable that is assigned
+  -b  notify         report finished background jobs immediately
+  -C  noclobber      '>' does not overwrite an existing regular file
+  -e  errexit        exit when a command fails (with the usual exceptions)
+  -f  noglob         disable pathname expansion
+  -h  hashall        remember command locations
+  -m  monitor        job control
+  -n  noexec         read and check commands but do not run them
+  -u  nounset        expanding an unset variable is an error
+  -v  verbose        print input lines as they are read
+  -x  xtrace         print each command, after expansion, before running it
+  -o NAME            set the option NAME (+o NAME clears it); with no NAME,
+                     print the current settings; `pipefail` is also accepted
+
+Diagnostics (these change only what is written to standard error):
+  --diagnostics=STYLE  posix: dash-style one-line messages (the default when
+                       standard error is not a terminal)
+                       rich:  source excerpt, caret, notes and a hint (the
+                       default on a terminal)
+                       json:  one JSON object per diagnostic
+                       gcc:   FILE:LINE:COL: message, for editors and CI
+                       auto:  choose posix or rich as described
+  --check FILE...      lint the scripts without running them: unquoted
+                       expansions, unchecked `cd`, `rm -r "$x/"`, non-POSIX
+                       constructs. Exit 0 clean, 1 findings, 2 syntax error.
+  --explain CODE       explain a diagnostic code such as SH1007, with a bad and
+                       a good example
+  --list-diagnostics   list every diagnostic code
+  --diagnostics-catalog  print the full catalog as Markdown
+  --help               show this help and exit
+  --version            show version, license and project address, and exit
+
+Exit status:
+  0         success (the exit status of the last command)
+  1-125     a command's own failure status, or exit N
+  2         syntax error, bad option, or an error that ends a non-interactive shell
+  126       the command was found but cannot be executed
+  127       command not found
+
+Environment:
+  HOME PATH IFS PWD OLDPWD  as POSIX defines
+  ENV                       file run by an interactive shell at start-up
+  PS1 PS2 PS4               prompts (PS4 is printed before each -x trace line)
+  HISTFILE HISTSIZE         where the history is kept, and how much of it
+  SH_DIAGNOSTICS            default for --diagnostics (inherited by child shells)
+  NO_COLOR                  never colour diagnostics
+
+Examples:
+  sh -c 'echo "$0 has $# arguments"' demo a b c
+  sh --check deploy.sh          # lint before you run it
+  SH_DIAGNOSTICS=gcc sh build.sh 2>&1 | your-editor-problem-matcher
+  sh --explain SH1007
+
+Documentation: `dkman sh` or `man sh`; the diagnostic codes are listed in
+docs/sh-diagnostics.md; the differences from dash, FreeBSD sh and bash are in
+docs/posix-shell-differences.md.
+Project and bug reports: https://github.com/BearzRobotics/util-unix
