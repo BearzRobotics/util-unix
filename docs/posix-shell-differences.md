@@ -206,7 +206,7 @@ Decision 0009: when dash and FreeBSD sh agree, so do we, unless there is a writt
 | an assignment error before an external command (`readonly a=; a=x cat`) | exits (status 2) | continues | exits (status 2) | XCU 2.8.1: a variable assignment error shall exit a non-interactive shell; dash and POSIX agree, FreeBSD sh is the odd one out |
 | an arithmetic constant outside 64 bits | saturates | error | saturates | POSIX leaves it undefined; dash followed |
 | `OPTARG` after an option that takes no argument | set to empty | unset | unset | XCU getopts: OPTARG is unset; POSIX decides (dash and FreeBSD sh disagree) |
-| `umask a b` | ignores `b` | ignores `b` | error | XCU umask takes one operand; usage error is the safe reading |
+| `umask a b` | ignores `b` | error | error | XCU umask takes one operand; dash and FreeBSD sh disagree, POSIX decides |
 | `printf '%#g' 999999.5` | `1.e+06` | `1.00000e+06` | `1.00000e+06` | C says the exponent form keeps the precision; glibc deviates (our output is exact for every other value) |
 
 The cases marked P or recorded as varying in `test/test_sh.sh` (129 in all) carry the same classification in the table above.
