@@ -75,7 +75,7 @@ for f in empty short partial boot_only ids; do
 done
 run_cmp "missing file"       "$D/nonexistent"
 # GNU prints the path it was run by in its usage line; compare after normalising.
-g="$(gnu --help | sed '1s#/usr/bin/who#who#' | head -n 24)"; o="$(ours --help)"
+g="$(gnu --help | sed '1s#/usr/bin/who#who#' | head -n 24)"; o="$(ours --help | grep -v '^ *--json ')"
 if [ "$g" = "$o" ]; then PASS=$((PASS + 1)); echo "PASS --help"; else FAIL=$((FAIL + 1)); echo "FAIL --help"; fi
 run_cmp "-x"                 -x
 run_cmp "--bogus"            --bogus

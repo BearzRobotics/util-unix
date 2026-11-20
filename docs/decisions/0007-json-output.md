@@ -14,8 +14,8 @@ call the library directly or run the binaries and parse their output.
   The text path is untouched: its output, option parsing and diagnostics stay
   byte-identical to GNU, so the differential tests keep their meaning.
   (Checked by building `main` and comparing the text output of 19 invocations.)
-- The wrappers gain a non-GNU `--json` long option. It has no short form and
-  is deliberately absent from `--help`, whose text is compared with GNU's.
+- The wrappers gain a non-GNU `--json` long option. It has no short form. It
+  was first kept out of `--help`; since 2026-11-19 it is listed there (rule 7).
 - Shared escaping is in `lib/json.zig` (RFC 8259). Input that is not valid
   UTF-8 is written as U+FFFD, one per bad byte, so output always parses.
 - Shapes, chosen for jq and `jsonParse` ease:
@@ -57,8 +57,10 @@ These apply to all later commands so that scripts can rely on them.
 6. **Errors:** diagnostics go to stderr in the normal text form and the exit
    status is the command's usual one. Standard output still holds valid JSON
    for the part that succeeded.
-7. **No effect without the flag:** `--json` is a long option only, absent from
-   `--help`, and the text path stays byte-identical to GNU.
+7. **No effect without the flag:** `--json` is a long option only and the text
+   path stays byte-identical to GNU. Update 2026-11-19: it is listed in
+   `--help` as a line marked "(not in GNU)" and in the man page; differential
+   `--help` tests drop that one line before comparing.
 
 ## Alternatives considered
 
