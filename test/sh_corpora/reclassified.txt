@@ -1,0 +1,19 @@
+# Corpus cases that dash meets and we do not, kept on purpose. Not bugs: each line gives the reason.
+# Format: corpus TAB file TAB case TAB reason (freebsd: corpus TAB case TAB reason).
+# Used by test/test_sh_corpora.sh (not counted as bugs) and tools/sh-corpora-doc.py (listed as shell-specific).
+oils	builtin-cd.test.sh	cd BAD/..	POSIX.1-2024 cd step 8: a dot-dot after a component that is not a directory fails; FreeBSD sh, bash and zsh fail, dash and mksh skip the check
+oils	builtin-cd.test.sh	Survey of getcwd() syscall	counts getcwd(2) calls under strace, an implementation detail (we validate $PWD once at startup)
+oils	builtin-cd.test.sh	chdir is a synonym for cd - busybox ash	chdir is not POSIX
+oils	builtin-kill.test.sh	kill -n 9 specifies the signal number	POSIX.1-2024 kill -n; dash predates it
+oils	builtin-kill.test.sh	kill -15 %% kills current job	job specifiers work in a non-interactive shell (FreeBSD sh, bash); dash does not accept %%
+oils	builtin-meta.test.sh	command -v doesn't find non-executable file	command -v names only what the shell would run: FreeBSD sh and bash refuse a non-executable file, dash reports it
+oils	builtin-type.test.sh	type of relative path	a non-executable file is not a command: FreeBSD sh and bash refuse it, dash reports it
+oils	builtin-process.test.sh	exec builtin accepts --	POSIX utility syntax guideline 10: exec accepts --; FreeBSD sh and bash do, dash fails with "exec: --: not found"
+oils	builtin-process.test.sh	exec -- 2>&1	same: dash does not accept -- after exec
+oils	builtin-process.test.sh	arg that would overflow 64 bits is detected	ulimit rejects a value that overflows once scaled (FreeBSD sh: bad number, bash); dash wraps around silently
+oils	builtin-trap.test.sh	traps are not active inside subshells $() ()  trap | cat	POSIX.1-2024 trap: a subshell lists the parent's traps until it sets its own (dash and FreeBSD sh print nothing)
+oils	builtin-trap.test.sh	SIGINT and INT are aliases	a SIG prefix is accepted (FreeBSD sh, bash); dash rejects it as a bad trap
+oils	builtin-trap.test.sh	trap 1 is equivalent to SIGHUP; HUP is equivalent to SIGHUP	a SIG prefix is accepted (FreeBSD sh, bash); dash rejects it as a bad trap
+oils	command_.test.sh	filling $PATH cache, then deleting command	a remembered command that disappeared is searched again (FreeBSD sh, bash); dash keeps the stale entry and fails with 127
+oils	redirect.test.sh	&>> appends stdout and stderr	&>> is not POSIX; the corpus case exits 1 on dash by design
+oils	toysh-posix.test.sh	no shebang	POSIX.1-2024 trap: a subshell lists the parent's traps (dash and FreeBSD sh print nothing)

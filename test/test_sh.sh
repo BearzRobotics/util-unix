@@ -767,7 +767,7 @@ cat' B
 c "alias to a blank before a newline in a pipeline" 'alias b=" "
 echo ok | b
 cat' B
-c "alias value starting with a redirection after a redirection" 'alias e=" >&- c >/dev/null " c=" echo "
+cx "alias value starting with a redirection after a redirection" 'alias e=" >&- c >/dev/null " c=" echo "
 </dev/null e not_printed; echo done' B
 c "alias to a here-document operand" 'alias c=" cat << " e=" \END "
 c e
@@ -786,7 +786,7 @@ c "alias to case keywords and ;;" "alias c='case a in a) :' e='
  echo B;; '
 c X; echo A; e
 c X; eb e" B
-c "alias in a case pattern only after a blank" "alias a=b c='case a in '
+cx "alias in a case pattern only after a blank" "alias a=b c='case a in '
 c a) echo 1-1;; a) echo 1-2;; esac" B
 c "alias to ( of a case pattern" "alias c='case a in ' p=' #comment
 
@@ -796,7 +796,7 @@ c "alias to | and ) of a case pattern" "alias c='case a in x ' p=' |a) echo A; e
 c p
 alias c='case a in a ' p=' ) echo A; esac'
 c p" B
-c "alias to ;;" "alias s=';;'
+cx "alias to ;;" "alias s=';;'
 case a in
     (b) s
     (a) echo A
@@ -853,7 +853,7 @@ c "background subshell of one command is that command" '(sleep 1)& sleep 0.2; ca
 c "NUL bytes in a script are ignored" 'printf "echo a\0b\n\0echo c\n" > f; . ./f' B
 c "a redirection that opens the fd it names is undone" 'touch f; { :; } 3<f; echo x >&3 2>/dev/null; echo $?' B
 c "slashes in a globbed path are kept" 'cd /; set -- /etc//pa[s]swd /./et[c]//; echo "$@"' B
-c "alias chain through the for variable and the word list" "alias FOR1='for '
+cx "alias chain through the for variable and the word list" "alias FOR1='for '
 alias FOR2='FOR1 '
 alias eye1='i '
 alias eye2='eye1 '
@@ -861,7 +861,7 @@ alias IN='in '
 alias onetwo='\$one \"2\" '
 one=1
 FOR2 eye2 IN onetwo 3; do echo \$i; done" B
-c "alias for do after the for variable is not applied" "alias forx='for x ' do=';'
+cx "alias for do after the for variable is not applied" "alias forx='for x ' do=';'
 set 1
 forx do echo \$x; done" B
 c "alias in a command substitution in a here-document" 'alias echo_="echo [ "
@@ -869,7 +869,7 @@ cat <<EOF
 $(echo_ ])
 `echo_ ]`
 EOF' B
-c "trap with a lone condition name resets it" 'trap "echo hi" EXIT; trap EXIT; echo done' B
+c "trap with a lone condition name resets it" 'trap "echo hi" EXIT; trap EXIT; echo finished' B
 c "printf %u and %d at the integer limits" 'for fmt in "%u\n" "%d\n"; do
   printf "$fmt" 18446744073709551615 2>/dev/null; echo status=$?
   printf "$fmt" 18446744073709551616 2>/dev/null; echo status=$?
@@ -877,7 +877,7 @@ c "printf %u and %d at the integer limits" 'for fmt in "%u\n" "%d\n"; do
   printf "$fmt" -18446744073709551616 2>/dev/null; echo status=$?
 done' B
 c "printf with an invalid directive fails" 'printf "%z" 42 2>/dev/null; [ $? -ne 0 ] && echo failed' B
-c "a number above 9 before a redirection is a word" 'echo hi 99>&1; echo hi 100>/dev/null; echo ok' B
+cx "a number above 9 before a redirection is a word" 'echo hi 99>&1; echo hi 100>/dev/null; echo ok' B
 c "duplicating a descriptor onto itself is a no-op" ': 3>&3; echo $?' B
 c "a non-digit descriptor operand ends the shell" 'echo one 1>&/nonexistent-filename__; echo not reached' B
 c "a duplicated descriptor above 9 ends the shell" 'echo a >&99; echo not reached' B

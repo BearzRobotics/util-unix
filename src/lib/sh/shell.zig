@@ -328,6 +328,20 @@ pub const Shell = struct {
         self.hash.clearRetainingCapacity();
     }
 
+    /// `cd` invalidates the remembered locations that are relative to the old directory.
+    pub fn clearRelativeHash(self: *Shell) void {
+        var drop: std.ArrayList([]const u8) = .empty;
+        defer drop.deinit(self.gpa);
+        var it = self.hash.iterator();
+        while (it.next()) |e| {
+            if (e.value_ptr.*.len == 0 or e.value_ptr.*[0] != '/') drop.append(self.gpa, e.key_ptr.*) catch {};
+        }
+        for (drop.items) |k| if (self.hash.fetchRemove(k)) |kv| {
+            self.gpa.free(kv.key);
+            self.gpa.free(kv.value);
+        };
+    }
+
     pub fn unsetVar(self: *Shell, name: []const u8) SetError!void {
         const v = self.vars.getPtr(name) orelse return;
         if (v.readonly) return error.ReadOnly;

@@ -166,6 +166,13 @@ want_corpus oils && corpus_oils
 grep -c '^BUG	' "$REPORT" | sed 's/^/open bugs: /'
 if [ -f "$KNOWN" ]; then
     grep '^BUG	' "$REPORT" | awk -F'\t' '{ if ($2 == "freebsd") print $1 FS $2 FS $3; else print $1 FS $2 FS $3 FS $4 }' | sort -u > "$TMP/bugs.now"
+    # cases recorded as shell-specific on purpose (with the reason) are not bugs
+    RECLASS="$HERE/sh_corpora/reclassified.txt"
+    if [ -f "$RECLASS" ]; then
+        grep -v '^#' "$RECLASS" | awk -F'\t' 'NF >= 3 { if ($1 == "freebsd") print "BUG" FS $1 FS $2; else print "BUG" FS $1 FS $2 FS $3 }' | sort -u > "$TMP/bugs.reclass"
+        comm -23 "$TMP/bugs.now" "$TMP/bugs.reclass" > "$TMP/bugs.now2"
+        mv "$TMP/bugs.now2" "$TMP/bugs.now"
+    fi
     sort -u "$KNOWN" > "$TMP/bugs.known"
     new="$(comm -23 "$TMP/bugs.now" "$TMP/bugs.known")"
     if [ -n "$new" ]; then

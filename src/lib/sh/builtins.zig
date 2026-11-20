@@ -804,6 +804,7 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         _ = e;
         return 2;
     };
+    sh.clearRelativeHash();
     const new_pwd: []const u8 = if (physical) (physicalCwd(a) orelse target) else curpath;
     sh.setVarRaw("OLDPWD", old_pwd) catch {};
     if (sh.vars.getPtr("OLDPWD")) |v| v.exported = true; // dash, bash and FreeBSD sh export it
@@ -1938,10 +1939,12 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var scale: u64 = 1024;
     var hard = false;
     var soft_set = false;
+    var all = false;
     while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
         for (args[i][1..]) |c| switch (c) {
             'H' => hard = true,
             'S' => soft_set = true,
+            'a' => all = true,
             'f' => {
                 res = 1;
                 scale = 1024;
@@ -1979,6 +1982,29 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 return 2;
             },
         };
+    }
+    if (all) {
+        // POSIX.1-2024 `ulimit -a`: every limit this shell knows, one per line
+        const Row = struct { label: []const u8, opt: u8, res: u32, scale: u64 };
+        const rows = [_]Row{
+            .{ .label = "time(seconds)", .opt = 't', .res = 0, .scale = 1 },
+            .{ .label = "file(blocks)", .opt = 'f', .res = 1, .scale = 1024 },
+            .{ .label = "data(kbytes)", .opt = 'd', .res = 2, .scale = 1024 },
+            .{ .label = "stack(kbytes)", .opt = 's', .res = 3, .scale = 1024 },
+            .{ .label = "coredump(blocks)", .opt = 'c', .res = 4, .scale = 1024 },
+            .{ .label = "memory(kbytes)", .opt = 'm', .res = 5, .scale = 1024 },
+            .{ .label = "nofiles(descriptors)", .opt = 'n', .res = 7, .scale = 1 },
+            .{ .label = "vmemory(kbytes)", .opt = 'v', .res = 9, .scale = 1024 },
+        };
+        var out: std.ArrayList(u8) = .empty;
+        for (rows) |row| {
+            const lim = sys.getrlimit(row.res) catch continue;
+            const v = if (hard) lim.hard else lim.soft;
+            out.print(a, "-{c}: {s:<22}", .{ row.opt, row.label }) catch return 2;
+            if (v == sys.infinity) out.appendSlice(a, "unlimited\n") catch return 2 else out.print(a, "{d}\n", .{v / row.scale}) catch return 2;
+        }
+        _ = sh.out(out.items);
+        return 0;
     }
     var cur = sys.getrlimit(res) catch {
         sh.diagCmdK(.bad_limit, null, "ulimit", "error getting limit ({s})", .{sys.strerror(sys.errno())});

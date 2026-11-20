@@ -26,6 +26,21 @@ INTERACTIVE = re.compile(r"interactive|spares interactive|jobs|job_spec|%%|%\+|%
 DELIBERATE = re.compile(r"\$''|\$'|== |is alias for =|ulimit|umask|printf %q|printf -v|strftime|sh \+c|--help|-l flag|source doesn't|local|declare|array|SHELL is set|Unicode|UTF-8", re.I)
 ALIAS_YASH = re.compile(r"alias")
 
+# Cases that are not bugs although dash meets the corpus expectation and we do not: each
+# is a documented choice (POSIX, or dash and FreeBSD sh disagree). Format of
+# test/sh_corpora/reclassified.txt: corpus TAB file-or-case TAB case-name TAB reason
+reclass = {}
+rpath = os.path.join(root, "test/sh_corpora/reclassified.txt")
+if os.path.exists(rpath):
+    for ln in open(rpath, encoding="utf-8"):
+        if ln.startswith("#") or not ln.strip():
+            continue
+        f = ln.rstrip("\n").split("\t")
+        if len(f) >= 4:
+            reclass[(f[0], f[1], f[2] if f[0] != "freebsd" else "")] = f[3]
+        elif len(f) == 3:
+            reclass[(f[0], f[1], "")] = f[2]
+
 rows = collections.defaultdict(list)
 for line in open(report, encoding="utf-8", errors="replace"):
     parts = line.rstrip("\n").split("\t")
@@ -40,6 +55,9 @@ for line in open(report, encoding="utf-8", errors="replace"):
         label = "follows dash"
     elif cat in ("BASH",):
         label = "shell-specific"
+    elif cat == "BUG" and (corpus, where, name if corpus != "freebsd" else "") in reclass:
+        label = "shell-specific"
+        extra = "reclassified: " + reclass[(corpus, where, name if corpus != "freebsd" else "")]
     elif cat == "BUG":
         if INTERACTIVE.search(name + " " + extra):
             label = "interactive/jobs"
@@ -71,7 +89,8 @@ for corpus in ("yash", "freebsd", "oils"):
     for label, where, name, extra in sorted(items):
         if label == "follows dash":
             continue
-        out.append("| %s | %s | %s |" % (label, where, name.replace("|", "\\|")))
+        why = " (%s)" % extra[len("reclassified: "):] if extra.startswith("reclassified: ") else ""
+        out.append("| %s | %s | %s%s |" % (label, where, name.replace("|", "\\|"), why))
     out.append("")
 with open(os.path.join(root, "docs/compatibility/sh-corpora-failures.md"), "w") as f:
     f.write("\n".join(out))
@@ -79,6 +98,6 @@ with open(os.path.join(root, "docs/compatibility/sh-corpora-failures.md"), "w") 
 with open(os.path.join(root, "test/sh_corpora/known-bugs.txt"), "w") as f:
     for line in open(report, encoding="utf-8", errors="replace"):
         p = line.rstrip("\n").split("\t")
-        if p and p[0] == "BUG":
+        if p and p[0] == "BUG" and (p[1], p[2], p[3] if p[1] != "freebsd" else "") not in reclass:
             f.write("\t".join(p[:3] if p[1] == "freebsd" else p[:4]) + "\n")
 print(dict(counts))

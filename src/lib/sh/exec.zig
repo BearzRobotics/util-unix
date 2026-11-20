@@ -1013,8 +1013,8 @@ pub fn resolve(sh: *Shell, a: Allocator, name: []const u8) Resolved {
         }
     }
     if (pathFind(sh, a, name, true)) |p| {
-        // remember the location (`hash` lists it); a path that is not absolute is not cached
-        if (p.len > 0 and p[0] == '/') {
+        // remember the location (`hash` lists it); `cd` forgets the relative ones
+        {
             const key = sh.gpa.dupe(u8, name) catch return .{ .external = p };
             const val = sh.gpa.dupe(u8, p) catch {
                 sh.gpa.free(key);
