@@ -139,6 +139,11 @@ pub const Shell = struct {
     /// Number of the command being read by the interactive loop, and the one
     /// at which `exit` last warned about stopped jobs.
     cmd_seq: u64 = 0,
+    /// Simple commands started so far, and the `return N` (N above 255) that
+    /// `$?` still reports: its value and the count at which it was set.
+    simple_seq: u64 = 0,
+    wide_status: u32 = 0,
+    wide_seq: u64 = 0,
     exit_warned: u64 = 0,
     /// Interactive-shell services supplied by `interactive.zig`.
     history: ?*@import("history.zig").History = null,

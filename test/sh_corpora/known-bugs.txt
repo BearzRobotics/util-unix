@@ -9,9 +9,6 @@ BUG	oils	builtin-bracket.test.sh	== and = does not do glob
 BUG	oils	builtin-getopts.test.sh	OPTARG is empty (not unset) after parsing a flag doesn't take an arg
 BUG	oils	builtin-getopts.test.sh	OPTIND should be >= 1 (regression)
 BUG	oils	builtin-meta-assign.test.sh	command local
-BUG	oils	builtin-printf.test.sh	printf -v %s
-BUG	oils	builtin-printf.test.sh	printf -v %q
-BUG	oils	builtin-printf.test.sh	printf -v syntax error
 BUG	oils	builtin-set.test.sh	'set' and 'eval' round trip
 BUG	oils	builtin-umask.test.sh	usage: empty input, space input
 BUG	oils	builtin-umask.test.sh	umask with too many arguments (i.e. extra spaces)
@@ -19,9 +16,7 @@ BUG	oils	builtin-umask.test.sh	umask t perm
 BUG	oils	builtin-umask.test.sh	umask permcopy running value
 BUG	oils	builtin-vars.test.sh	local after readonly
 BUG	oils	command-parsing.test.sh	Prefix env on assignment
-BUG	oils	exit-status.test.sh	Truncating 'return' status
 BUG	oils	glob.test.sh	Glob of negated unescaped [[] and []]
-BUG	oils	glob.test.sh	pattern starting with . does not return . and ..
 BUG	oils	here-doc.test.sh	Here doc with bad var delimiter
 BUG	oils	nul-bytes.test.sh	Compare \x00 byte versus \x01 byte - read builtin
 BUG	oils	quote.test.sh	$''

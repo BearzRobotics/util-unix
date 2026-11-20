@@ -194,6 +194,11 @@ fn returnCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             return die(sh, 2);
         }
         st = @truncate(@as(u64, @bitCast(n)));
+        // dash and FreeBSD sh keep the whole value in `$?` after the return
+        if (n > 255) {
+            sh.wide_status = @intCast(n);
+            sh.wide_seq = sh.simple_seq;
+        }
     }
     sh.status = st;
     sh.flow = .return_func;
@@ -202,6 +207,8 @@ fn returnCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
 
 fn exitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
     var st: u8 = if (args.len <= 1) (sh.trap_status orelse sh.status) else sh.status;
+    // a bare `exit` after `return 300` passes the whole value on to the EXIT trap
+    if (args.len <= 1 and sh.trap_status == null and sh.wide_seq != 0 and sh.wide_seq + 1 == sh.simple_seq and (sh.wide_status & 255) == sh.status) sh.wide_seq = sh.simple_seq;
     if (args.len > 1) {
         const n = parseNum(args[1]) orelse {
             sh.diagCmdK(.illegal_number, args[1], "exit", "Illegal number: {s}", .{args[1]});
@@ -212,6 +219,10 @@ fn exitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             return die(sh, 2);
         }
         st = @truncate(@as(u64, @bitCast(n)));
+        if (n > 255) {
+            sh.wide_status = @intCast(n); // an EXIT trap sees the whole value
+            sh.wide_seq = sh.simple_seq;
+        }
     }
     return leave(sh, st);
 }
@@ -530,7 +541,7 @@ fn namedFlag(sh: *Shell, name: []const u8) ?*bool {
     return null;
 }
 
-fn knownOptName(name: []const u8) bool {
+pub fn knownOptName(name: []const u8) bool {
     for (opt_names) |e| if (std.mem.eql(u8, e[0], name)) return true;
     return false;
 }
@@ -807,9 +818,14 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             return 2;
         };
     }
-    if (dir.len == 0) {
-        sh.diagCmdK(.cannot_cd, dir, "cd", "can't cd to {s}", .{dir});
-        return 2;
+    // an empty operand is not an error (dash, FreeBSD sh): the directory stays
+    if (dir.len == 0) return 0;
+    // PWD and OLDPWD are assigned by `cd`: a read-only one makes it fail before it moves (dash)
+    for ([_][]const u8{ "PWD", "OLDPWD" }) |nm| {
+        if (sh.vars.get(nm)) |v| if (v.readonly) {
+            sh.diagCmdK(.readonly_assignment, nm, "cd", "{s}: is read only", .{nm});
+            return 2;
+        };
     }
     var target = dir;
     // CDPATH
@@ -1050,7 +1066,11 @@ fn printfFloat(sh: *Shell, s: []const u8, st: *u8) f64 {
 
 fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
-    if (i < args.len and std.mem.eql(u8, args[i], "--")) i += 1;
+    if (i < args.len and std.mem.eql(u8, args[i], "--")) i += 1 else if (i < args.len and args[i].len > 1 and args[i][0] == '-') {
+        // no options (POSIX utility syntax guidelines aside): `printf -v x` is an error as in dash and FreeBSD sh
+        sh.diagCmdK(.illegal_option, args[i], "printf", "Illegal option {s}", .{args[i][0..2]});
+        return 2;
+    }
     if (i >= args.len) {
         sh.diagCmdK(.usage, null, "printf", "usage: printf format [arg ...]", .{});
         return 2;
@@ -2005,16 +2025,23 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var all = false;
     while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
         for (args[i][1..]) |c| switch (c) {
-            'H' => hard = true,
-            'S' => soft_set = true,
+            // the last of -H and -S wins (dash, FreeBSD sh)
+            'H' => {
+                hard = true;
+                soft_set = false;
+            },
+            'S' => {
+                soft_set = true;
+                hard = false;
+            },
             'a' => all = true,
             'f' => {
                 res = 1;
-                scale = 1024;
+                scale = 512;
             },
             'c' => {
                 res = 4;
-                scale = 1024;
+                scale = 512;
             },
             'd' => {
                 res = 2;
@@ -2055,10 +2082,10 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         const Row = struct { label: []const u8, opt: u8, res: u32, scale: u64 };
         const rows = [_]Row{
             .{ .label = "time(seconds)", .opt = 't', .res = 0, .scale = 1 },
-            .{ .label = "file(blocks)", .opt = 'f', .res = 1, .scale = 1024 },
+            .{ .label = "file(blocks)", .opt = 'f', .res = 1, .scale = 512 },
             .{ .label = "data(kbytes)", .opt = 'd', .res = 2, .scale = 1024 },
             .{ .label = "stack(kbytes)", .opt = 's', .res = 3, .scale = 1024 },
-            .{ .label = "coredump(blocks)", .opt = 'c', .res = 4, .scale = 1024 },
+            .{ .label = "coredump(blocks)", .opt = 'c', .res = 4, .scale = 512 },
             .{ .label = "memory(kbytes)", .opt = 'm', .res = 5, .scale = 1024 },
             .{ .label = "nofiles(descriptors)", .opt = 'n', .res = 7, .scale = 1 },
             .{ .label = "vmemory(kbytes)", .opt = 'v', .res = 9, .scale = 1024 },
@@ -2099,7 +2126,6 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     if (hard or !soft_set) cur.hard = v;
     if (!hard or soft_set) cur.soft = v;
-    if (hard and !soft_set) cur.soft = @min(cur.soft, v);
     sys.setrlimit(res, cur) catch {
         sh.diagCmdK(.bad_limit, null, "ulimit", "error setting limit ({s})", .{sys.strerror(sys.errno())});
         return 2;

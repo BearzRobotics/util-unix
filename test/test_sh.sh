@@ -219,6 +219,11 @@ c "glob in assignment not expanded" 'touch a; v=*; echo $v' B
 c "glob escaped bracket" 'touch a b "[a]"; echo \[a\]' B
 c "glob in case not filename" 'touch x; case x in *) echo any;; esac' B
 c "glob dotdot" 'mkdir d; cd d; touch ../f; echo ../f*' B
+c "glob dot-star matches dot and dotdot" 'touch .h v; echo .*' B
+c "glob dot-question-star matches dotdot" 'touch .h v; echo .?*' B
+c "glob dot bracket" 'touch .h v; echo .[.]*' B
+c "glob dot-star in a subdirectory" 'mkdir d; touch d/.h; echo d/.*' B
+c "glob star still hides dot and dotdot" 'touch .h v; echo *' B
 c "glob absolute" 'echo /de*' B
 
 # ---- redirections ----
@@ -423,6 +428,12 @@ c "function call" 'f() { echo hi; }; f' B
 c "function args" 'f() { echo $1 $2 $#; }; f a b c' B
 c "function positional restored" 'set -- x; f() { echo $1; }; f y; echo $1' B
 c "function return status" 'f() { return 3; }; f; echo $?' B
+c "return 256 keeps 256 in the status" 'f() { return 256; }; f; echo $?' B
+c "return 300 keeps 300 in the status" 'f() { return 300; }; f; echo $?; [ $? -eq 300 ] && echo big; true; echo $?' B
+c "return above 255 masks in a subshell" 'f() { return 300; }; (f); echo $?' B
+c "return above 255 masks in exit" 'f() { return 300; }; f; exit' B
+c "return above 255 is seen by the EXIT trap" 'trap "echo T\$?" EXIT; f() { return 300; }; f; exit' B
+c "return above 255 in dot" 'echo "return 300" > s; . ./s; echo $?' B
 c "function default status is last" 'f() { false; }; f; echo $?' B
 c "function return no arg" 'f() { false; return; }; f; echo $?' B
 c "function recursion" 'f() { if [ $1 -gt 0 ]; then echo $1; f $(($1-1)); fi; }; f 3' B
@@ -448,6 +459,9 @@ c "function local-like via subshell" 'f() ( x=2; echo $x ); x=1; f; echo $x' B
 # ---- set -e ----
 c "errexit basic" 'set -e; false; echo not reached' B
 c "errexit true" 'set -e; true; echo reached' B
+c "errexit: a failed redirection of a subshell" 'set -e; (:) > /; echo not reached' B
+c "errexit: a failed redirection of a group" 'set -e; { :; } > /; echo not reached' B
+c "an unknown -o name is reported before the script is opened" 'sh -o nosuchoption nosuchfile 2>/dev/null; echo $?' B
 c "errexit in if cond" 'set -e; if false; then :; fi; echo reached' B
 c "errexit and list left" 'set -e; false && echo x; echo reached' B
 c "errexit and list right" 'set -e; true && false; echo not reached' B
@@ -627,6 +641,8 @@ c "echo escapes" 'echo "a\tb\\c"' e
 cx "echo dash e is literal" 'echo -e a' e
 c "echo dollar paren" 'echo "$(echo a)b"' B
 c "printf string" 'printf "%s\n" hello' B
+cx "printf has no options" 'printf -v x %s 1 2>/dev/null; echo $?; printf -- "%s\n" y' B
+cx "printf -5 is an illegal option" 'printf -5 x 2>/dev/null; echo $?' B
 c "printf multiple args reuse format" 'printf "%s\n" a b c' B
 c "printf int" 'printf "%d\n" 42 -7 0' B
 c "printf hex octal" 'printf "%x %X %o\n" 255 255 8' B
@@ -701,6 +717,10 @@ c "getopts status end" 'set -- a; getopts a o; echo $?' B
 c "getopts OPTIND reset" 'set -- -a; getopts a o; OPTIND=1; getopts a o; echo $o' B
 c "cd and pwd" 'mkdir d; cd d; pwd | sed "s#.*/##"' B
 c "cd dot dot" 'mkdir -p a/b; cd a/b; cd ../..; pwd | sed "s#.*/##" | grep -c .' B
+c "cd empty operand is a no-op" 'mkdir d; cd d; cd ""; echo $?; pwd | sed "s#.*/##"' B
+c "cd with a read-only OLDPWD fails" 'mkdir d; readonly OLDPWD; cd d 2>/dev/null; echo $?; pwd | sed "s#.*/##" | grep -c d' B
+c "glob directory order uses the slash" 'mkdir a a.b a-b; touch a/f a.b/f a-b/f; echo */f; echo */' B
+c "glob dot-star slash order" 'mkdir .h; echo .*/' B
 c "cd dash prints" 'mkdir d; cd d; cd - >/dev/null; echo $?' B
 c "cd nonexistent" 'cd /nonexistent; echo "rc=$?"' B
 c "cd file" 'touch f; cd f; echo "rc=$?"' e
@@ -733,6 +753,9 @@ c "unalias" 'alias x=y; unalias x; alias x; echo $?' e
 c "alias not defined" 'alias nosuch; echo $?' e
 c "times" 'times | wc -l' B
 c "ulimit -n" 'ulimit -n | grep -c "^[0-9]"' B
+c "ulimit -f counts 512-byte blocks" '(ulimit -f 7; grep "file size" /proc/self/limits | tr -s " " | cut -d" " -f4)' B
+c "ulimit -S -H: the last one wins" '(ulimit -S -H -t 100 2>/dev/null; echo $?; ulimit -H -S -t 100; echo $?; ulimit -t; ulimit -H -t)' B
+c "ulimit -H below the soft limit fails" '(ulimit -H -t 100 2>/dev/null; echo $?; ulimit -t)' B
 c "ulimit -f unlimited or number" 'ulimit -f | grep -c .' B
 c "umask bad" 'umask 999; echo "rc=$?"' e
 c "umask symbolic assignment" 'umask 022; umask u=rwx,g=rx,o=; umask; umask -S' BP

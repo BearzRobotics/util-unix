@@ -242,7 +242,12 @@ fn lookup(x: *X, name: []const u8) Error!PV {
             const v = sh.getVar(name) orelse return .unset;
             return .{ .one = v };
         },
-        '?' => return .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.status}) },
+        '?' => {
+            // `return N` with N above 255 leaves N in `$?` until the next command starts (dash, FreeBSD sh)
+            if (sh.wide_seq != 0 and sh.wide_seq + 1 == sh.simple_seq and (sh.wide_status & 255) == sh.status)
+                return .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.wide_status}) };
+            return .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.status}) };
+        },
         '$' => return .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.pid}) },
         '!' => return if (sh.bg_pid == 0) .unset else .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.bg_pid}) },
         '-' => return .{ .one = try optionLetters(x.a, sh) },
@@ -608,6 +613,17 @@ fn lessThan(_: void, l: []u8, r: []u8) bool {
     return std.mem.lessThan(u8, l, r);
 }
 
+/// Order of the directory names that a pattern continues below: dash and
+/// FreeBSD sh compare them with the `/` that follows (`a-b/f a.b/f a/f`).
+fn lessThanDir(_: void, l: []u8, r: []u8) bool {
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        const lc: u8 = if (i < l.len) l[i] else if (i == l.len) '/' else return true;
+        const rc: u8 = if (i < r.len) r[i] else if (i == r.len) '/' else return false;
+        if (lc != rc) return lc < rc;
+    }
+}
+
 fn globWalk(a: Allocator, pat: []const u8, out: *std.ArrayList([]const u8)) Error!void {
     var segs: std.ArrayList([]const u8) = .empty;
     var it = std.mem.splitScalar(u8, pat, '/');
@@ -652,8 +668,18 @@ fn walk(a: Allocator, prefix: []const u8, lead: usize, segs: []const []const u8,
     }
     var names: std.ArrayList([]u8) = .empty;
     sys.listDir(a, prefix, &names) catch return;
-    std.mem.sort([]u8, names.items, {}, lessThan);
     const dot_ok = seg[0] == '.' or (seg.len > 1 and seg[0] == '\\' and seg[1] == '.');
+    // `.*` also matches `.` and `..` (dash and FreeBSD sh; decision 0009)
+    if (dot_ok) {
+        for ([_][]const u8{ ".", ".." }) |d| {
+            var have = false;
+            for (names.items) |nm| {
+                if (std.mem.eql(u8, nm, d)) have = true;
+            }
+            if (!have) try names.append(a, try a.dupe(u8, d));
+        }
+    }
+    if (last) std.mem.sort([]u8, names.items, {}, lessThan) else std.mem.sort([]u8, names.items, {}, lessThanDir);
     for (names.items) |nm| {
         if (nm[0] == '.' and !dot_ok) continue;
         if (!pattern.match(seg, nm)) continue;

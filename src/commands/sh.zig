@@ -265,6 +265,13 @@ pub fn main(ctx: cli.Context) u8 {
         i += 1;
     }
     if (list_diag or explain_arg != null) return listOrExplain(ctx, list_diag, explain_arg, style_opt == .json);
+    // an unknown option name is reported before a script is opened (dash, FreeBSD sh)
+    for (pending_opts.items) |o| {
+        if (!sh.builtins.knownOptName(o.name)) {
+            cli.warn(ctx, "Illegal option {s}o {s}", .{ if (o.on) "-" else "+", o.name });
+            return 2;
+        }
+    }
     var rest = args[i..];
     // $0 of a script read from standard input is the name the shell was invoked by
     var argv0_buf: [512]u8 = undefined;

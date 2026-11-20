@@ -944,3 +944,9 @@ a-b() { echo dash; }; a-b
 #---
 # function: quoted function name
 'f'() { echo q; }; f
+#---
+# glob: dot-star matches dot and dotdot
+touch .h v; echo .* .?*
+#---
+# glob: directory order uses the slash
+mkdir a a.b a-b; touch a/f a.b/f a-b/f; echo */f

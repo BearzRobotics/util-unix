@@ -904,6 +904,7 @@ fn execRedirected(sh: *Shell, body: *const Node, redirs: []const *ast.Redirect) 
     var saved: Redirs = .{};
     if (!applyRedirs(sh, arena.allocator(), redirs, &saved)) {
         saved.restore(sh.gpa);
+        errexitCheck(sh, 2, "redirection"); // set -e: a failed redirection of a compound command ends the shell (dash)
         return 2;
     }
     defer saved.restore(sh.gpa);
@@ -1052,6 +1053,7 @@ fn assignError(sh: *Shell, name: []const u8) u8 {
 }
 
 fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8 {
+    sh.simple_seq += 1;
     var s = s_in;
     sh.cur_col = node.col;
     sh.cur_end_col = node.end_col;

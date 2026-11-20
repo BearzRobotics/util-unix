@@ -641,3 +641,15 @@ echo hi 2 > f; cat f
 #---
 # misc: $? after pipeline with ! 
 ! true | false; echo $?
+#---
+# return: above 255 stays in $?
+f() { return 300; }; f; echo $?; true; echo $?
+#---
+# return: above 255 in a subshell
+f() { return 300; }; (f); echo $?
+#---
+# cd: empty operand
+mkdir d; cd d; cd ""; echo $?
+#---
+# ulimit: -f counts 512-byte blocks
+(ulimit -f 7; grep "file size" /proc/self/limits | tr -s " " | cut -d" " -f4)

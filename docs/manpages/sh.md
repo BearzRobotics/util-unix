@@ -293,13 +293,11 @@ Each row is an improvement of a message or a deliberate choice; stdout and the e
 | Descriptor numbers of two or more digits (`exec 10>f`) | rejected (`exec: 10: not found`) | accepted, per POSIX 2.7 |
 | `$((` without a matching `))` | `Missing '))'` | same |
 | Here-document ended by end of input | no warning | warning SH1003 in rich and json styles; posix style is silent |
-| `*` and `.*` as filename patterns | `.*` matches `.` and `..` | `.*` does not match `.` or `..` (POSIX XCU 2.14.3: they may be ignored); `../` and `./` still work as literal names |
 | `kill -n 9 pid` | error | sends the signal (POSIX.1-2024 kill) |
 | `$'a\tb'` | literal text | C-style escapes (POSIX.1-2024 XCU 2.2.4) |
 | `set -o pipefail` | no effect | works (POSIX.1-2024) |
 | `trap` with no operands in a subshell or `$(...)` | prints nothing | prints the parent's traps (POSIX XCU trap) |
 | `f() g() { :; }` | accepted | syntax error: a function body is a compound command (XCU 2.10.2) |
-| `return 256`, `exit 256` | `$?` keeps 256 after `return` | statuses are 0 to 255 (POSIX leaves larger ones unspecified) |
 | `trap -l` | error | lists the signals (POSIX.1-2024) |
 
 Every other difference from dash that is not a message is a bug of ours: `tools/sh-gold.sh` compares our stdout and status with dash and FreeBSD sh on 6800 snippets (the test suite, the yash, FreeBSD and Oils corpora and the lists in `test/sh_gold`), and docs/posix-shell-differences.md records where the shells disagree and which rule decided.
