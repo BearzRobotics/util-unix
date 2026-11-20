@@ -49,6 +49,19 @@ interactive included.
    captured output, completion callbacks), and login-shell use (`-l`, `/etc/profile`,
    full `ulimit`, `times`).
 
+## Strict POSIX (decision, 2026-11-19)
+
+`sh` implements POSIX and nothing else by default; there is no `[[ ... ]]`, `=~`, arrays
+or `local` outside what POSIX.1-2024 specifies. Checked on 2026-11-19 against the other
+shells with `[[ abc =~ ^a.c$ ]]`: dash and FreeBSD sh answer `[[: not found`; yash
+refuses it in `--posix` mode with an explicit "syntax is not supported in the
+POSIXly-correct mode" error (and accepts it otherwise); busybox ash and bash --posix
+accept it. We follow dash and FreeBSD sh, and where an unsupported construct is
+recognisable (`[[`, `function`, `source`, `local`) the diagnostic says it is not POSIX
+and what to use instead (decision 0008; `sh --check` flags the same constructs). If an
+extension is ever added it follows yash's model: off in strict mode with an explicit
+error naming the reason, on only behind an explicit option.
+
 ## Process model
 
 Subshells and command substitution need `fork`; `Io.Threaded` is not fork-safe
