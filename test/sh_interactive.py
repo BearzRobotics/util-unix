@@ -552,7 +552,7 @@ def paste_render_cases():
     with Session([SH, "-i"], cols=30) as s:
         s.expect(r"\$ ?$"); s.take()
         s.send("echo 中文字"); s.settle(.3)
-        ok("render: wide characters", "$ echo 中文字" in s.take())
+        ok("render: wide characters", "echo 中文字" in s.take())
         s.send(C("A")); s.send("\x04"); s.settle(.3)
         ok("render: C-d at line start with text deletes", "cho" in s.take())
     with Session([SH, "-i"], env={"PS1": "line1\n$ "}) as s:

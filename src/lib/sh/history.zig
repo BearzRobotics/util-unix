@@ -343,7 +343,7 @@ test "history numbering and limit" {
     h.setMax(3);
     for ([_][]const u8{ "a", "b", "c", "d" }) |l| try h.add(l);
     try std.testing.expectEqual(@as(u64, 2), h.first);
-    try std.testing.expectEqualStrings("d", h.get(5).?);
+    try std.testing.expectEqualStrings("d", h.get(4).?);
     try std.testing.expect(h.get(1) == null);
     try h.add("d");
     try std.testing.expectEqual(@as(usize, 3), h.entries.items.len);

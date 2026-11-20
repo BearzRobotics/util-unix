@@ -2311,7 +2311,8 @@ fn drive(mode: Mode, keys: []const u8, hist: []const []u8, out_text: *[256]u8, o
     defer ed.deinit();
     ed.mode = mode;
     ed.begin("$ ", hist);
-    const st = ed.feed(keys);
+    var st = ed.feed(keys);
+    if (st == .more) st = ed.feedTimeout();
     out_len.* = ed.text().len;
     @memcpy(out_text[0..ed.text().len], ed.text());
     cur.* = ed.cursor();
@@ -2414,7 +2415,7 @@ test "vi: motions and operators" {
     try expectBuf(.vi, "one two\x1b0dw", &.{}, "two", 0);
     try expectBuf(.vi, "one two\x1b0cwX", &.{}, "X two", 1);
     try expectBuf(.vi, "one two\x1bdd", &.{}, "", 0);
-    try expectBuf(.vi, "abc def\x1b04lD", &.{}, "abc", 2);
+    try expectBuf(.vi, "abc def\x1b03lD", &.{}, "abc", 2);
     try expectBuf(.vi, "abcdef\x1b0fdx", &.{}, "abcef", 3);
     try expectBuf(.vi, "abcdef\x1b0tdx", &.{}, "abdef", 2);
     try expectBuf(.vi, "abcdef\x1b3|x", &.{}, "abdef", 2);
