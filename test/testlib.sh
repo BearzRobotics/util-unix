@@ -123,7 +123,11 @@ run_test_file() {
 # named by $CMP_STDIN (default /dev/null). GNU runs with LC_ALL=C so its quotes
 # are ASCII; the "Try '<program> --help'" program path is normalised because GNU
 # prints the path it was invoked with.
-norm_err() { sed -e "s#^[^ ]*/\\([a-z0-9]*\\): #\\1: #" -e "s#Try '[^']*'#Try 'PROG'#"; }
+# Documented difference (decision 0008, "DIFFERENCES FROM GNU" in id(1)): GNU id
+# 9.7 appends ": No such file or directory" (a stale errno) when a numeric
+# user ID does not exist; we print only "no such user". Only that suffix is
+# stripped before comparing.
+norm_err() { sed -e "s#^[^ ]*/\\([a-z0-9]*\\): #\\1: #" -e "s#Try '[^']*'#Try 'PROG'#" -e "s#: no such user: No such file or directory\$#: no such user#"; }
 run_cmp() {
     description="$1"
     shift

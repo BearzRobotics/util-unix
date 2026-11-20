@@ -30,6 +30,10 @@ All options of GNU id 9.7 except a working `-Z`. Differential-tested for the inv
 3a. **Real and effective ids that differ** (a set-user-ID process) are covered only by a unit test of the output format; the VM test could not create such a process with busybox alone.
 4. For a named USER, the group list is the primary group plus every group whose member list names the user, in file order (as getgrouplist does for the files backend).
 
+## Extensions
+
+- Diagnostic (decision 0008): an unknown numeric user ID reports `no such user` without GNU's stale-errno suffix `: No such file or directory`. stdout and exit status are unchanged. Covered by the normalisation in `norm_err` (test/testlib.sh), which strips only that suffix, and by the man page section DIFFERENCES FROM GNU.
+
 ## Platforms
 
 Linux only so far (tested on 6.18, WSL2, against the reference binary named

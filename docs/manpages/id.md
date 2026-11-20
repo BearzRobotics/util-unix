@@ -76,6 +76,9 @@ Dominated by process start-up. Measured on 2026-11-07 against GNU id 9.7 (docs/b
 SEE ALSO
 groups(1), passwd(5), group(5), getgroups(2)
 
+DIFFERENCES FROM GNU
+For a numeric user ID that does not exist, GNU id 9.7 prints "id: 'N': no such user: No such file or directory" (the second part is a stale errno, not information). This id prints "id: 'N': no such user". Standard output and the exit status (1) are the same. See decision 0008.
+
 COPYRIGHT
 Copyright (c) 2026 Dakota Keeler and the util-unix contributors. SPDX-License-Identifier: GPL-2.0-or-later.
 

@@ -159,6 +159,7 @@ const help_text = "Usage: id [OPTION]... [USER]...\n" ++
     "  -u, --user     print only the effective user ID\n" ++
     "  -z, --zero     delimit entries with NUL characters, not whitespace;\n" ++
     "                   not permitted in default format\n" ++
+    "      --json        print the result as JSON (not in GNU)\n" ++
     "      --help        display this help and exit\n" ++
     "      --version     output version information and exit\n\n" ++
     "Without any OPTION, print some useful set of identified information.\n";
