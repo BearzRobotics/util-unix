@@ -758,6 +758,76 @@ c "alias blank reaches only the next word" 'alias a="echo "
 alias b=B
 alias c=C
 a b c' B
+c "alias to nothing on a line of its own" 'alias a=
+a
+echo y' B
+c "alias to nothing ends a pipeline into the next line" 'alias a=
+echo foo | a
+cat' B
+c "alias to a blank before a newline in a pipeline" 'alias b=" "
+echo ok | b
+cat' B
+c "alias value starting with a redirection after a redirection" 'alias e=" >&- c >/dev/null " c=" echo "
+</dev/null e not_printed; echo done' B
+c "alias to a here-document operand" 'alias c=" cat << " e=" \END "
+c e
+here
+END' B
+c "alias to parentheses on separate lines" "alias l='
+(
+' r='
+)
+'
+a=A
+l echo subshell; a=B; r
+echo \$a" B
+c "alias to case keywords and ;;" "alias c='case a in a) :' e='
+ esac </dev/null | cat -' eb='
+ echo B;; '
+c X; echo A; e
+c X; eb e" B
+c "alias in a case pattern only after a blank" "alias a=b c='case a in '
+c a) echo 1-1;; a) echo 1-2;; esac" B
+c "alias to ( of a case pattern" "alias c='case a in ' p=' #comment
+
+ (a) echo A; esac'
+c p" B
+c "alias to | and ) of a case pattern" "alias c='case a in x ' p=' |a) echo A; esac'
+c p
+alias c='case a in a ' p=' ) echo A; esac'
+c p" B
+c "alias to ;;" "alias s=';;'
+case a in
+    (b) s
+    (a) echo A
+esac" B
+c "alias to the parentheses of a function definition" "alias f='f ' p='()'
+f p
+{ echo F; }
+f
+alias g='g( ' q=')'
+g q
+{ echo G; }
+\\g" B
+c "alias to the command of a function definition" "alias f='f() ' g=
+f g
+{ echo F; }
+\\f" B
+c "alias ending with a blank, nested" "alias c=cat e='echo '
+e c c cat
+alias c='cat '
+e c c cat
+alias echo='e x x ' x=.
+echo echo
+alias x='x . '
+echo echo" B
+c "alias names joined by line continuations" "alias echo='\\
+echo\\
+ ' foo='\\
+bar\\
+' bar=X
+echo           \\
+foo" B
 cx "heredoc ended by end of input" 'cat <<EOF
 abc' B
 cx "heredoc ended by end of input after newline" 'cat <<EOF

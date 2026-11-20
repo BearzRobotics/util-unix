@@ -867,21 +867,25 @@ pub const Parser = struct {
     /// end of the input.
     pub fn nextCommand(self: *Parser) Error!?*const Node {
         while (true) {
+            while (true) {
+                const t = try self.peek();
+                switch (t.tag) {
+                    .newline => _ = try self.next(),
+                    .eof => return null,
+                    else => break,
+                }
+            }
+            const n = try self.parseList(.top);
             const t = try self.peek();
             switch (t.tag) {
                 .newline => _ = try self.next(),
-                .eof => return null,
-                else => break,
+                .eof => {},
+                else => return self.unexpected(t, null),
             }
+            // a line holding only an alias that expands to nothing is an empty line
+            if (n == null and t.tag == .newline) continue;
+            return n;
         }
-        const n = try self.parseList(.top);
-        const t = try self.peek();
-        switch (t.tag) {
-            .newline => _ = try self.next(),
-            .eof => {},
-            else => return self.unexpected(t, null),
-        }
-        return n;
     }
 
     const ListCtx = enum { top, compound };
@@ -904,6 +908,34 @@ pub const Parser = struct {
         while ((try self.peek()).tag == .newline) _ = try self.next();
     }
 
+    /// Skip newlines after `|`, `&&` or `||`; an alias that expands to nothing
+    /// (or to blanks) there exposes the newline after it, which is skipped too.
+    fn skipNewlinesAlias(self: *Parser) Error!void {
+        while (true) {
+            try self.skipNewlines();
+            try self.aliasAt();
+            if ((try self.peek()).tag != .newline) return;
+        }
+    }
+
+    /// Like `skipNewlinesAlias` but only a value that ended in a blank applies.
+    fn skipNewlinesPending(self: *Parser) Error!void {
+        while (true) {
+            try self.skipNewlines();
+            try self.aliasPending();
+            if ((try self.peek()).tag != .newline) return;
+        }
+    }
+
+    fn peekIsPending(self: *Parser, want: Reserved) Error!bool {
+        try self.aliasPending();
+        const t = try self.peek();
+        return switch (t.tag) {
+            .word => |w| lexer.reservedOf(w) == want,
+            else => false,
+        };
+    }
+
     fn mkSimple(self: *Parser, line: u32, s: usize, e: usize, kind: ast.Kind) Error!*const Node {
         const n = try self.a.create(Node);
         n.* = .{ .line = line, .kind = kind, .col = if (e > s) self.colOf(s) else 0, .end_col = if (e > s) self.colOf(e) else 0 };
@@ -924,6 +956,11 @@ pub const Parser = struct {
         if (ctx == .compound) try self.skipNewlines();
         while (true) {
             try self.aliasAt();
+            if (ctx == .compound and (try self.peek()).tag == .newline) {
+                // an alias value that starts with a newline
+                try self.skipNewlines();
+                continue;
+            }
             const t = try self.peek();
             if (ctx == .compound) {
                 if (t.tag == .eof or isTerminator(t)) break;
@@ -972,7 +1009,7 @@ pub const Parser = struct {
                 else => return left,
             };
             _ = try self.next();
-            try self.skipNewlines();
+            try self.skipNewlinesAlias();
             const right = try self.parsePipeline();
             left = try self.mk(t.line, .{ .and_or = .{ .left = left, .op = op, .right = right } });
         }
@@ -1004,7 +1041,7 @@ pub const Parser = struct {
                 else => break,
             }
             _ = try self.next();
-            try self.skipNewlines();
+            try self.skipNewlinesAlias();
             try cmds.append(self.a, try self.parseCommand());
         }
         if (cmds.items.len == 1 and !negate) return first;
@@ -1075,6 +1112,8 @@ pub const Parser = struct {
             }
             if (!due) return;
             if (!(try self.aliasStep(true))) return;
+            // the first word of the value is checked again, as in command position
+            while (try self.aliasStep(true)) {}
         }
     }
 
@@ -1256,11 +1295,13 @@ pub const Parser = struct {
         try self.skipNewlines();
         var items: std.ArrayList(ast.CaseItem) = .empty;
         while (true) {
-            if (try self.peekIs(.kw_esac)) break;
-            try self.aliasAt();
+            // Pattern words are alias-expanded only after an alias value that ended in a
+            // blank (dash and FreeBSD sh; POSIX 2.3.1), never as command names.
+            try self.skipNewlinesPending();
+            if (try self.peekIsPending(.kw_esac)) break;
             var t = try self.next();
             if (t.tag == .op and t.tag.op == .lparen) {
-                try self.aliasAt();
+                try self.aliasPending();
                 t = try self.next();
             }
             var pats: std.ArrayList(ast.Word) = .empty;
@@ -1269,10 +1310,10 @@ pub const Parser = struct {
                     .word => |w| try pats.append(self.a, w),
                     else => return self.unexpected(t, if (pats.items.len == 0) "esac" else ")"),
                 }
-                try self.aliasAt();
+                try self.aliasPending();
                 t = try self.next();
                 if (t.tag == .op and t.tag.op == .pipe) {
-                    try self.aliasAt();
+                    try self.aliasPending();
                     t = try self.next();
                     continue;
                 }
@@ -1285,7 +1326,6 @@ pub const Parser = struct {
             const e = try self.peek();
             if (e.tag == .op and e.tag.op == .dsemi) {
                 _ = try self.next();
-                try self.skipNewlines();
                 continue;
             }
             if (!(try self.peekIs(.kw_esac))) return self.unexpected(e, ";;");
@@ -1322,6 +1362,8 @@ pub const Parser = struct {
             else => return null,
         };
         _ = try self.next();
+        // an alias value ending in a blank also applies to the redirection operand
+        try self.aliasPending();
         const wt = try self.next();
         const target = switch (wt.tag) {
             .word => |w| w,
@@ -1375,7 +1417,12 @@ pub const Parser = struct {
             }
             try self.aliasPending();
             // the command name after assignments or redirections is in command position
-            if (words.items.len == 0 and (assigns.items.len > 0 or redirs.items.len > 0)) try self.maybeAlias();
+            if (words.items.len == 0 and (assigns.items.len > 0 or redirs.items.len > 0)) {
+                var changed = false;
+                while (try self.aliasStep(false)) changed = true;
+                // the value may start with a redirection operator
+                if (changed) continue;
+            }
             const t = try self.peek();
             const w = switch (t.tag) {
                 .word => |w| w,
@@ -1400,6 +1447,7 @@ pub const Parser = struct {
             try words.append(a, w);
             // function definition: name ( ) body
             if (words.items.len == 1 and assigns.items.len == 0 and redirs.items.len == 0) {
+                try self.aliasPending();
                 const p = try self.peek();
                 if (p.tag == .op and p.tag.op == .lparen) {
                     const fname = if (w.len == 1 and w[0] == .text and lexer.isName(w[0].text)) w[0].text else return self.unexpected(p, null);
@@ -1412,9 +1460,10 @@ pub const Parser = struct {
                         return e;
                     }
                     _ = try self.next();
+                    try self.aliasPending();
                     const c = try self.next();
                     if (!(c.tag == .op and c.tag.op == .rparen)) return self.unexpected(c, ")");
-                    try self.skipNewlines();
+                    try self.skipNewlinesAlias();
                     const bt = try self.peek();
                     const body = switch (bt.tag) {
                         .word => |bw| if (lexer.reservedOf(bw) != null) try self.parseCommand() else return self.unexpected(bt, null),
@@ -1425,7 +1474,6 @@ pub const Parser = struct {
                 }
             }
         }
-        self.blank_marks.clearRetainingCapacity();
         if (assigns.items.len == 0 and words.items.len == 0 and redirs.items.len == 0) return self.unexpected(try self.peek(), null);
         return self.mkSimple(line, cmd_start, cmd_end, .{ .simple = .{
             .assigns = try assigns.toOwnedSlice(a),
