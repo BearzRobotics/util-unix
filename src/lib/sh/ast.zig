@@ -19,6 +19,9 @@ pub const Part = union(enum) {
     /// `~` or `~user` at the start of a word (or after `=`/`:` in an
     /// assignment). The text is the user name, possibly empty.
     tilde: []const u8,
+    /// A tilde-prefix after `=` or `:` of an assignment-looking word; only
+    /// expanded in real assignments and `export`/`readonly` operands.
+    atilde: []const u8,
     param: *const Param,
     cmdsub: CmdSub,
     arith: Arith,

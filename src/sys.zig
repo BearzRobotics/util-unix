@@ -90,7 +90,7 @@ fn check(r: usize) Error!usize {
     }
     const e = linux.errno(r);
     if (e != .SUCCESS) {
-        last_errno = @intFromEnum(e);
+        last_errno = @backingInt(e);
         return error.Sys;
     }
     return r;
@@ -278,6 +278,14 @@ pub fn getpid() i32 {
     return if (comptime is_linux) @intCast(linux.getpid()) else 0;
 }
 
+pub fn geteuid() u32 {
+    return if (comptime is_linux) linux.geteuid() else 0;
+}
+
+pub fn getegid() u32 {
+    return if (comptime is_linux) linux.getegid() else 0;
+}
+
 pub fn getppid() i32 {
     return if (comptime is_linux) @intCast(linux.getppid()) else 0;
 }
@@ -293,12 +301,12 @@ pub fn execve(gpa: std.mem.Allocator, path: []const u8, argv: []const []const u8
             return error.Sys;
         }
     }.f;
-    const pz = gpa.dupeZ(u8, path) catch return oom();
+    const pz = gpa.dupeSentinel(u8, path, 0) catch return oom();
     const av = gpa.alloc(?[*:0]const u8, argv.len + 1) catch return oom();
     const ev = gpa.alloc(?[*:0]const u8, envp.len + 1) catch return oom();
-    for (argv, 0..) |a, i| av[i] = (gpa.dupeZ(u8, a) catch return oom()).ptr;
+    for (argv, 0..) |a, i| av[i] = (gpa.dupeSentinel(u8, a, 0) catch return oom()).ptr;
     av[argv.len] = null;
-    for (envp, 0..) |a, i| ev[i] = (gpa.dupeZ(u8, a) catch return oom()).ptr;
+    for (envp, 0..) |a, i| ev[i] = (gpa.dupeSentinel(u8, a, 0) catch return oom()).ptr;
     ev[envp.len] = null;
     _ = try check(linux.execve(pz.ptr, @ptrCast(av.ptr), @ptrCast(ev.ptr)));
 }
@@ -347,7 +355,7 @@ pub fn getcwd(buf: []u8) Error![]const u8 {
 
 pub fn kill(pid: i32, sig: u8) Error!void {
     if (comptime !is_linux) return nosys();
-    _ = try check(linux.kill(pid, @enumFromInt(sig)));
+    _ = try check(linux.kill(pid, @fromBackingInt(@intCast(sig))));
 }
 
 pub const FileKind = enum { none, file, dir, symlink, fifo, socket, block, char };
@@ -478,14 +486,14 @@ pub const infinity: u64 = std.math.maxInt(u64);
 pub fn getrlimit(resource: u32) Error!Rlimit {
     if (comptime !is_linux) return nosys();
     var rl: linux.rlimit = undefined;
-    _ = try check(linux.getrlimit(@enumFromInt(resource), &rl));
+    _ = try check(linux.getrlimit(@fromBackingInt(@intCast(resource)), &rl));
     return .{ .soft = rl.cur, .hard = rl.max };
 }
 
 pub fn setrlimit(resource: u32, l: Rlimit) Error!void {
     if (comptime !is_linux) return nosys();
     const rl: linux.rlimit = .{ .cur = l.soft, .max = l.hard };
-    _ = try check(linux.setrlimit(@enumFromInt(resource), &rl));
+    _ = try check(linux.setrlimit(@fromBackingInt(@intCast(resource)), &rl));
 }
 
 // --- signals for the shell's traps -----------------------------------------
@@ -495,7 +503,7 @@ var pending_flags: [nsig]bool = @splat(false);
 var any_pending: bool = false;
 
 fn trapHandler(sig: linux.SIG) callconv(.c) void {
-    const n: usize = @intFromEnum(sig);
+    const n: usize = @backingInt(sig);
     if (n < nsig) {
         pending_flags[n] = true;
         any_pending = true;
@@ -520,15 +528,15 @@ pub fn setSignal(sig: u8, action: SignalAction) bool {
         .mask = linux.sigemptyset(),
         .flags = 0,
     };
-    return linux.errno(linux.sigaction(@enumFromInt(sig), &act, null)) == .SUCCESS;
+    return linux.errno(linux.sigaction(@fromBackingInt(@intCast(sig)), &act, null)) == .SUCCESS;
 }
 
 /// The current disposition of `sig` (default when unknown).
 pub fn getSignal(sig: u8) SignalAction {
     if (comptime !is_linux) return .default;
-    if (sig == 0 or sig >= nsig) return .default;
+    if (sig == 0 or sig >= nsig or sig == 9 or sig == 19) return .default;
     var old: linux.Sigaction = undefined;
-    if (linux.errno(linux.sigaction(@enumFromInt(sig), null, &old)) != .SUCCESS) return .default;
+    if (linux.errno(linux.sigaction(@fromBackingInt(@intCast(sig)), null, &old)) != .SUCCESS) return .default;
     const h = @intFromPtr(old.handler.handler);
     if (h == 0) return .default;
     if (h == 1) return .ignore;
@@ -552,9 +560,9 @@ pub fn clearPendingAny() void {
 }
 
 pub const signal_names = [_][]const u8{
-    "EXIT",   "HUP",  "INT",  "QUIT",  "ILL",   "TRAP", "ABRT", "BUS",
-    "FPE",    "KILL", "USR1", "SEGV",  "USR2",  "PIPE", "ALRM", "TERM",
-    "STKFLT", "CHLD", "CONT", "STOP",  "TSTP",  "TTIN", "TTOU", "URG",
+    "EXIT",   "HUP",  "INT",    "QUIT", "ILL",   "TRAP", "ABRT", "BUS",
+    "FPE",    "KILL", "USR1",   "SEGV", "USR2",  "PIPE", "ALRM", "TERM",
+    "STKFLT", "CHLD", "CONT",   "STOP", "TSTP",  "TTIN", "TTOU", "URG",
     "XCPU",   "XFSZ", "VTALRM", "PROF", "WINCH", "IO",   "PWR",  "SYS",
 };
 

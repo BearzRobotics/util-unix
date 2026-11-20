@@ -6,7 +6,7 @@ const commands = @import("commands.zig");
 
 test {
     _ = @import("cli.zig");
-    _ = @import("sys.zig");
+    _ = @import("util_unix").sys;
     inline for (commands.all) |name| {
         _ = commands.get(name);
         std.testing.refAllDecls(@field(commands.modules, name));

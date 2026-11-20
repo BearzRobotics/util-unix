@@ -309,7 +309,7 @@ pub const Parser = struct {
                 '~' => {
                     if (!in_dq and ctx != .text and (b.atStart() or b.after_sep)) {
                         if (self.tryTilde(b, ctx)) |t| {
-                            try b.push(a, .{ .tilde = t });
+                            try b.push(a, if (b.atStart()) .{ .tilde = t } else .{ .atilde = t });
                             continue;
                         }
                     }

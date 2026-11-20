@@ -10,7 +10,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const options = @import("build_options");
 const cli = @import("cli.zig");
-const sys = @import("sys.zig");
+const sys = @import("util_unix").sys;
 const commands = @import("commands.zig");
 
 const enabled = options.commands;
