@@ -14,7 +14,7 @@ sh - POSIX shell command language interpreter
 
 **sh** reads commands from a string (**-c**), from standard input (**-s**, or when no file is given) or from a script file, and runs them as defined by the Shell Command Language of POSIX.1-2024 (XCU chapter 2). It is written from that specification; the reference implementations used to check behaviour are dash 0.5.12 (the differential oracle), the FreeBSD sh, bash in POSIX mode, busybox ash and yash. Where those disagree, POSIX decides and the choice is recorded in docs/compatibility/sh.md and docs/posix-shell-differences.md.
 
-This is milestone 1 of decision 0009: the non-interactive core. Prompts, line editing, history and job control (milestone 2) are not implemented; **-i** and **-m** are accepted and have no effect beyond the diagnostics wording.
+Milestones 1 and 2 of decision 0009 are implemented: the whole non-interactive language, and interactive use with prompts, line editing (emacs and vi modes), history and **fc**, tab completion and job control. See INTERACTIVE USE, LINE EDITING, HISTORY and JOB CONTROL.
 
 The shell is also the library `util_unix.sh` (`Shell`, `parse`, `runString`, `registerBuiltin`, `getVar`, `setVar`); this page describes the executable.
 
@@ -45,8 +45,14 @@ Bold type is literal text. Italic or uppercase names are values you supply. A di
 -h
 : Accepted (hashall).
 
--i, -m
-: Accepted; interactive mode and job control are not implemented.
+-i
+: Interactive shell (see INTERACTIVE USE). Also the default when neither **-c** nor a file is given and standard input and standard error are terminals.
+
+-l
+: Login shell: run **/etc/profile** and then **$HOME/.profile** before the first command.
+
+-m
+: Job control (monitor): each pipeline runs in its own process group (see JOB CONTROL). On by default in an interactive shell; allowed in scripts with **set -m**.
 
 -n
 : Read and parse but do not run (noexec). A syntax error still gives status 2.
@@ -90,6 +96,57 @@ file
 
 Quoting (backslash, single and double quotes), comments, simple commands with assignments and redirections, pipelines with **!**, the lists **;**, **&**, **&&**, **||**, and the compound commands **if**/**elif**/**else**, **while**, **until**, **for**, **case**, brace groups, subshells and function definitions. Expansions in the POSIX order: tilde, parameter (all of `-` `=` `?` `+` with and without `:`, `#` `##` `%` `%%` and `${#name}`), command substitution (`$(...)` and backquotes), arithmetic (`$((...))`, signed 64-bit, C operators without `,` `**` `++` `--`), field splitting by IFS, pathname expansion, quote removal. Redirections: `<` `>` `>>` `>|` `<>`, `n>&m`, `n<&m`, `>&-`, here-documents `<<` and `<<-` (quoted and unquoted delimiters), with any descriptor number. Not implemented: `$'...'`, aliases that end in a blank expanding the next word, `fc`, `jobs`, `fg`, `bg`, and `printf` floating-point conversions.
 
+# INTERACTIVE USE
+
+An interactive shell writes its prompts to standard error. Before reading a command it reports jobs that finished or stopped, then expands **PS1** (parameter expansion, command substitution and arithmetic; **!** is replaced by the history number of the command and **!!** by a literal **!**) and shows it. While a command is incomplete (an open quote, **if** without **fi**, a here-document, a trailing backslash) it asks for more with **PS2**. **PS4** is the **-x** trace prefix. At start-up the file named by **ENV**, after parameter expansion and when the result is an absolute path, is read; a login shell (**-l**) reads **/etc/profile** and **~/.profile** first.
+
+An interactive shell ignores SIGTERM and SIGQUIT, catches SIGINT (it interrupts **wait** and **read** and abandons the line being edited) and, with job control, ignores SIGTSTP, SIGTTIN and SIGTTOU. Commands it starts get the default dispositions. Errors that would end a non-interactive shell (a syntax error, a failing special builtin, a read-only assignment, an expansion error) only set the status.
+
+End of input at the prompt leaves the shell; with **set -o ignoreeof** the shell says **Use "exit" to leave shell.** up to ten times first. **exit** (or end of input) with stopped jobs prints **You have stopped jobs.** and does not leave; the next **exit** leaves and hangs the stopped jobs up. Standard input that is not a terminal is read a byte at a time without line editing, so commands that read it see the rest of the input.
+
+# LINE EDITING
+
+When standard input and standard error are terminals (and TERM is not **dumb**), commands are edited. **set -o emacs** (the default) gives the emacs-style mode; **set -o vi** gives the vi mode of POSIX sh (Command Line Editing (vi-mode)), starting in insert mode; **set +o emacs** (with vi off) leaves editing to the terminal driver.
+
+Emacs mode: C-a C-e C-b C-f and the arrow, Home, End keys move; M-b M-f and C-Left C-Right move by words; C-d, Delete and Backspace delete; C-k C-u C-w M-d M-Backspace kill (killed text accumulates), C-y and M-y yank; C-t M-t transpose; M-u M-l M-c change case; C-_ undoes; C-p C-n and Up Down move through the history; M-< and M-> jump to its ends; M-. inserts the last word of the previous command; C-r and C-s search incrementally (C-g aborts); C-v and C-q insert the next key literally; C-l redraws; M-digits give a repeat count; Tab completes (a second Tab lists the candidates); M-? lists them; M-# comments the line and enters it; C-c abandons the line; C-d on an empty line ends input.
+
+vi mode: insert mode takes characters, Backspace, C-w, C-u (clear the line), C-v, Tab and ESC; command mode has the commands of POSIX: counts; h l w W b B e E 0 ^ $ | f F t T ; , motions; a A i I R c d y with motions, cc dd yy, C D S s x X r ~ p P u U .; k j - + G / ? n N history commands (**^** anchors a search); **_**, **#**, **v** (edit the line with $VISUAL, $EDITOR or vi and run the result), **@**letter (perform the alias named letter), **=** (list completions), **\\** (complete), **\***(expand all) and C-l.
+
+Bracketed paste is enabled while editing, so pasted text (including newlines and tabs) is inserted literally. Widths are computed from UTF-8 (combining marks take no column, East Asian wide characters two); a change of the window size (SIGWINCH) redraws the line. Multi-line buffers and lines longer than the screen are redrawn correctly.
+
+Tab completion completes, at the cursor: a word starting with **$** as a variable name; the first word of a command (no slash) as a builtin, function, alias or executable in PATH; anything else as a file name (directories get a slash, hidden files only when the word starts with a dot, special characters are backslash-escaped).
+
+# HISTORY
+
+An interactive shell keeps the commands it ran (as typed, a multi-line command as one entry) in a list of **HISTSIZE** entries (default 128) numbered upwards. If **HISTFILE** is set the list is read from that file at start-up and written back at exit (no default file). **fc** lists, edits and re-runs entries:
+
+    fc [-r] [-e editor] [first [last]]
+    fc -l [-nr] [first [last]]
+    fc -s [old=new] [first]
+
+An operand is a number, a negative number counting back from the most recent command, or text that a command starts with. With **-l** the default is the last 16 commands; without it, the previous command. **-n** omits numbers, **-r** reverses. **-s** (or **-e -**) re-runs a command after replacing the first **old** by **new**. Editing writes the commands to a temporary file, runs **editor** (**-e**, then **FCEDIT**, then **ed**) and runs what the file then contains; the commands that run are shown on standard error and entered in the history. The command being run is entered after it finishes, so **fc -l** does not list itself. History does not exist in a non-interactive shell (**fc: history not active**). There is no **history** utility and no **!** expansion: both are outside POSIX.
+
+# JOB CONTROL
+
+With job control (**-m**, automatic when interactive) every pipeline runs in its own process group, the terminal is given to the foreground group and taken back when it ends or stops, and SIGTSTP (typically ^Z) stops the foreground job. A command ending in **&** starts a background job; a stopped or finished job is reported before the next prompt as **[1] + Stopped** or **[1] + Done**. Without job control a background command is still a job (it can be named by **wait**, **kill** and **jobs**) but runs in the shell's process group with SIGINT and SIGQUIT ignored and standard input from /dev/null.
+
+A job is named by **%%** or **%+** (current: the most recently stopped job, else the newest), **%-** (previous), **%n**, **%string** (a job whose command starts with it) or **%?string** (contains it); a specification that matches several jobs is an error.
+
+jobs [-lp] [job ...]
+: List jobs, newest first, as **[n] c state command** where **c** is **+** for the current job and **-** for the previous one. **-l** adds process ids (one line per process of a pipeline); **-p** prints only the process ids. The column of the command is dash's.
+
+fg [job]
+: Print the command, continue the job (default: current) in the foreground and wait; the status is the job's, or 128 plus the signal when it stops again.
+
+bg [job]
+: Continue a stopped job in the background and print **[n] command**.
+
+wait [job|pid ...]
+: Wait for the named jobs or processes (all background jobs when none are named). The status is that of the last one; 127 for an unknown pid; an interactive shell interrupted by SIGINT returns 130.
+
+kill [-s signal | -signal] job|pid ...
+: A job specification signals the whole process group.
+
 # BUILTINS
 
 Special builtins (an error in one exits a non-interactive shell; their variable assignments persist):
@@ -111,12 +168,12 @@ Regular builtins:
 | command type hash | `command -v -V -p` |
 | echo printf | `echo` is dash's (XSI escapes, only `-n`); `printf` supports `d i u o x X c s b %`, flags, width, precision |
 | getopts read test [ | the POSIX argument-count rules for `test` |
-| kill wait umask ulimit | `ulimit` supports -c -d -f -n -s -t -v -m, -S, -H |
+| kill wait umask ulimit jobs fg bg fc | `ulimit` supports -c -d -f -n -s -t -v -m, -S, -H |
 | true false local | `local` is not POSIX; see CHECK MODE |
 
 # ENVIRONMENT
 
-HOME, PATH, IFS, PWD, OLDPWD, PS1, PS2, PS4, OPTIND, OPTARG, CDPATH and PPID are used or set as POSIX describes. SH_DIAGNOSTICS and NO_COLOR affect only the diagnostics style.
+HOME, PATH, IFS, PWD, OLDPWD, PS1, PS2, PS4, OPTIND, OPTARG, CDPATH, PPID, ENV, HISTFILE, HISTSIZE and FCEDIT are used or set as POSIX describes (TMOUT and MAIL are not implemented). SH_DIAGNOSTICS and NO_COLOR affect only the diagnostics style.
 
 # EXIT STATUS
 

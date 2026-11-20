@@ -13,7 +13,8 @@ Invocation:
                  become $1, $2, ...
   -s             read commands from standard input (the default with no FILE);
                  operands become the positional parameters
-  -i             interactive shell: prompts (PS1, PS2), line editing, history
+  -i             interactive shell: prompts (PS1, PS2), line editing, history, job
+                 control; the default when standard input and error are terminals
   -l             login shell: run /etc/profile and ~/.profile first
   FILE [ARG]...  run the script FILE; ARG become $1, $2, ...
 
@@ -24,13 +25,14 @@ Shell options (as with `set`; -x turns an option on, +x turns it off):
   -e  errexit        exit when a command fails (with the usual exceptions)
   -f  noglob         disable pathname expansion
   -h  hashall        remember command locations
-  -m  monitor        job control
+  -m  monitor        job control: process groups, jobs, fg, bg (on when interactive)
   -n  noexec         read and check commands but do not run them
   -u  nounset        expanding an unset variable is an error
   -v  verbose        print input lines as they are read
   -x  xtrace         print each command, after expansion, before running it
   -o NAME            set the option NAME (+o NAME clears it); with no NAME,
-                     print the current settings; `pipefail` is also accepted
+                     print the current settings; `vi` and `emacs` choose the
+                     line editor (emacs by default), `pipefail` is also accepted
 
 Diagnostics (these change only what is written to standard error):
   --diagnostics=STYLE  posix: dash-style one-line messages (the default when
@@ -61,7 +63,8 @@ Environment:
   HOME PATH IFS PWD OLDPWD  as POSIX defines
   ENV                       file run by an interactive shell at start-up
   PS1 PS2 PS4               prompts (PS4 is printed before each -x trace line)
-  HISTFILE HISTSIZE         where the history is kept, and how much of it
+  HISTFILE HISTSIZE FCEDIT  where the history is kept, how much of it, and the
+                            editor of `fc` (history is saved only if HISTFILE is set)
   SH_DIAGNOSTICS            default for --diagnostics (inherited by child shells)
   NO_COLOR                  never colour diagnostics
 
