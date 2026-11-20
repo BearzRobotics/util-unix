@@ -230,6 +230,29 @@ Hand-maintained (the table above is generated). Gold standard: dash and FreeBSD 
 | default editing mode | none (no libedit) | emacs-style (libedit) | emacs; `set -o vi` is POSIX vi mode | POSIX `set -o vi`; FreeBSD for the default |
 | ESC followed at once by a key in vi mode | n/a | libedit | ESC then the key | terminals cannot tell Alt from a fast typist |
 
+# Choices made when dash and FreeBSD sh disagree (corpus work)
+
+Where dash and FreeBSD sh agree we agree (the gold standard rule). These are the places the third-party corpora showed them disagreeing, with what `sh` does and why (POSIX decides; where POSIX is silent we follow dash, and say so).
+
+| Case | dash | FreeBSD sh | `sh` | Reason |
+|------|------|------------|------|--------|
+| `cd BAD/..` | succeeds (normalises the path) | fails | fails | POSIX.1-2024 cd step 8: a dot-dot after a component that is not a directory is an error |
+| `cd -` with `OLDPWD` unset | stays in the current directory, status 0 | fails, status 2 | as dash | POSIX leaves it unspecified: dash |
+| `exec -- cmd` | `--: not found` | runs cmd | runs cmd | utility syntax guideline 10: `--` ends the options |
+| `trap - SIGINT`, `trap cmd SIGHUP` | bad trap | accepted | accepted | the `SIG` prefix is common practice (POSIX.1-2024 allows it for `kill -s`) |
+| `trap term TERM` where `term` is a function name | action `term` | action `term` | action `term` | only an unsigned integer (or `-`, or a lone condition name such as `trap EXIT`) makes every operand a condition (POSIX trap) |
+| `command -v ./file` / `type ./file` for a non-executable file | reports it | refuses | refuses | `command -v` names what the shell would run |
+| a hashed command whose file disappeared | stale entry, status 127 | searches `PATH` again | searches again | POSIX leaves the cache unspecified; the stale entry only produces confusing failures |
+| `ulimit -f` with a value that overflows once scaled | wraps silently | `bad number` | `bad number`, status 2 | a wrapped limit is wrong |
+| `printf '%z'` (invalid directive) | status 2 | status 1 | status 2 | POSIX: non-zero; dash |
+| a builtin whose output cannot be written (`type x > /dev/full`) | status 1 | status 2 | status 1 | POSIX: non-zero; dash |
+| `99>file`, `>&99` (descriptors above 9) | `99` is a word; `>&99` is "Bad fd number" and ends the shell | same | same | POSIX leaves descriptors above 9 unspecified; both shells agree |
+| `3>&3` with 3 closed | no-op | no-op | no-op | agree; the old code refused it |
+| `sh +c cmd` | runs cmd | runs cmd | runs cmd | agree; POSIX does not define `+c` |
+| `kill %%`, `wait %%` in a non-interactive shell | not supported | supported | supported | job specifiers need only the job table |
+| `kill -n 9 pid` | not supported | not supported | supported | POSIX.1-2024 adds `kill -n signum` |
+| a signal ignored on entry (`trap '' INT` in the parent) then `trap - INT` or `trap cmd INT` | silently has no effect | silently has no effect | silently has no effect (also for SIGPIPE, which the Zig runtime used to reset) | POSIX 2.15 trap: "cannot be trapped or reset", no error need be reported; an interactive shell keeps the ignore too |
+
 # REPRODUCING
 
     sh test/test_sh.sh                       # run the suite (zig build -Dcommands=sh first)
