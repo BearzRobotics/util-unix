@@ -853,6 +853,44 @@ c "background subshell of one command is that command" '(sleep 1)& sleep 0.2; ca
 c "NUL bytes in a script are ignored" 'printf "echo a\0b\n\0echo c\n" > f; . ./f' B
 c "a redirection that opens the fd it names is undone" 'touch f; { :; } 3<f; echo x >&3 2>/dev/null; echo $?' B
 c "slashes in a globbed path are kept" 'cd /; set -- /etc//pa[s]swd /./et[c]//; echo "$@"' B
+c "alias chain through the for variable and the word list" "alias FOR1='for '
+alias FOR2='FOR1 '
+alias eye1='i '
+alias eye2='eye1 '
+alias IN='in '
+alias onetwo='\$one \"2\" '
+one=1
+FOR2 eye2 IN onetwo 3; do echo \$i; done" B
+c "alias for do after the for variable is not applied" "alias forx='for x ' do=';'
+set 1
+forx do echo \$x; done" B
+c "alias in a command substitution in a here-document" 'alias echo_="echo [ "
+cat <<EOF
+$(echo_ ])
+`echo_ ]`
+EOF' B
+c "trap with a lone condition name resets it" 'trap "echo hi" EXIT; trap EXIT; echo done' B
+c "printf %u and %d at the integer limits" 'for fmt in "%u\n" "%d\n"; do
+  printf "$fmt" 18446744073709551615 2>/dev/null; echo status=$?
+  printf "$fmt" 18446744073709551616 2>/dev/null; echo status=$?
+  printf "$fmt" -18446744073709551615 2>/dev/null; echo status=$?
+  printf "$fmt" -18446744073709551616 2>/dev/null; echo status=$?
+done' B
+c "printf with an invalid directive fails" 'printf "%z" 42 2>/dev/null; [ $? -ne 0 ] && echo failed' B
+c "a number above 9 before a redirection is a word" 'echo hi 99>&1; echo hi 100>/dev/null; echo ok' B
+c "duplicating a descriptor onto itself is a no-op" ': 3>&3; echo $?' B
+c "a non-digit descriptor operand ends the shell" 'echo one 1>&/nonexistent-filename__; echo not reached' B
+c "a duplicated descriptor above 9 ends the shell" 'echo a >&99; echo not reached' B
+c "jobs -p prints one process group leader per job" 'sleep 0.1 &
+sleep 0.1 | cat &
+jobs -p > tmp.txt
+wc -l < tmp.txt | tr -d " "; wait' B
+c "hash lists the commands remembered by running them" 'whoami > /dev/null; hash | sed "s,.*/,,"; hash -r; hash; echo end' B
+c "pwd after the directory was removed prints the logical name" 'mkdir pwdgone; cd pwdgone; rmdir ../pwdgone; pwd | sed "s,.*/,,"; echo status=$?' B
+c "cd - without OLDPWD stays put" 'unset OLDPWD; cd - > /dev/null; echo status=$?' E "POSIX leaves it unspecified; dash stays in the current directory, FreeBSD sh fails."
+c "OLDPWD is exported by cd" 'cd /; cd /tmp; env | grep OLDPWD' B
+c "a builtin that cannot write its output fails" 'type echo > /dev/full 2>/dev/null; echo status=$?' E "dash 1, FreeBSD sh 2; POSIX only asks for non-zero."
+c "sh +c is read as -c" 'sh +c "echo hi"' B
 cx "heredoc ended by end of input" 'cat <<EOF
 abc' B
 cx "heredoc ended by end of input after newline" 'cat <<EOF

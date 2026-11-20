@@ -806,10 +806,19 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
                     sys.close(n);
                     continue;
                 }
-                const m = std.fmt.parseInt(i32, word, 10) catch {
+                const m0 = std.fmt.parseInt(i32, word, 10) catch -1;
+                // a duplicated descriptor is one digit (POSIX leaves more unspecified; dash and FreeBSD sh refuse)
+                const m = if (m0 > 9 or word.len > 1 and word[0] == '0') -1 else m0;
+                if (m < 0) {
                     sh.diagKind(.bad_fd_number, word, "Syntax error: Bad fd number");
+                    // a non-number operand of >& or <& ends a non-interactive shell (dash, FreeBSD sh)
+                    if (!sh.flags.interactive and sh.no_die == 0) {
+                        sh.status = 2;
+                        sh.flow = .exit_shell;
+                    }
                     return false;
-                };
+                }
+                if (m == n) continue; // `3>&3` is a no-op even when 3 is closed (dash, FreeBSD sh)
                 if (!sys.fdIsOpen(m)) {
                     {
                         var fb: [16]u8 = undefined;
@@ -995,8 +1004,29 @@ pub fn resolve(sh: *Shell, a: Allocator, name: []const u8) Resolved {
     if (sh.funcs.get(name)) |f| return .{ .function = f };
     if (builtins.find(name)) |b| return .{ .builtin = b };
     if (sh.host_builtins.get(name)) |h| return .{ .host = h };
-    if (sh.hash.get(name)) |p| return .{ .external = p };
-    if (pathFind(sh, a, name, true)) |p| return .{ .external = p };
+    if (sh.hash.get(name)) |p| {
+        if (sys.access(p, 1)) return .{ .external = p };
+        // the remembered file is gone: forget it and search again (FreeBSD sh, bash)
+        if (sh.hash.fetchRemove(name)) |kv| {
+            sh.gpa.free(kv.key);
+            sh.gpa.free(kv.value);
+        }
+    }
+    if (pathFind(sh, a, name, true)) |p| {
+        // remember the location (`hash` lists it); a path that is not absolute is not cached
+        if (p.len > 0 and p[0] == '/') {
+            const key = sh.gpa.dupe(u8, name) catch return .{ .external = p };
+            const val = sh.gpa.dupe(u8, p) catch {
+                sh.gpa.free(key);
+                return .{ .external = p };
+            };
+            sh.hash.put(sh.gpa, key, val) catch {
+                sh.gpa.free(key);
+                sh.gpa.free(val);
+            };
+        }
+        return .{ .external = p };
+    }
     return .not_found;
 }
 
@@ -1226,8 +1256,19 @@ fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s
         if (!is_special or is_exec) sh.vars.getPtr(asg.name).?.exported = true;
     }
     var st: u8 = 0;
+    sh.out_failed = false;
+    defer if (r == .special or r == .builtin) {
+        sh.out_failed = false;
+    };
     switch (r) {
-        .special, .builtin => |b| st = b.run(sh, a, args),
+        .special, .builtin => |b| {
+            st = b.run(sh, a, args);
+            // output that could not be written fails the builtin (dash: status 1)
+            if (sh.out_failed and st == 0) {
+                sh.diagCmdK(.io_error, "I/O error", args[0], "I/O error", .{});
+                st = 1;
+            }
+        },
         .host => |h| st = h.run(h.ctx, sh, args),
         .function => |f| st = callFunction(sh, f, args[1..]),
         else => unreachable,

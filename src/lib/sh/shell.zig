@@ -164,6 +164,8 @@ pub const Shell = struct {
     /// Non-zero while a special builtin runs under `command` (errors do not
     /// end the shell).
     no_die: u32 = 0,
+    /// A write to standard output failed (the builtin that ran reports status 1).
+    out_failed: bool = false,
     diag_style: DiagStyle = .posix,
     diag_color: bool = false,
     label: []u8 = &.{},
@@ -302,6 +304,7 @@ pub const Shell = struct {
     /// variables such as PWD and OPTIND).
     pub fn setVarRaw(self: *Shell, name: []const u8, value: []const u8) Allocator.Error!void {
         const gpa = self.gpa;
+        if (std.mem.eql(u8, name, "PATH")) self.clearHash();
         const copy = try gpa.dupe(u8, value);
         errdefer gpa.free(copy);
         const gop = try self.vars.getOrPut(gpa, name);
@@ -315,9 +318,20 @@ pub const Shell = struct {
         }
     }
 
+    /// Forget the remembered command locations (a new PATH, `hash -r`).
+    pub fn clearHash(self: *Shell) void {
+        var it = self.hash.iterator();
+        while (it.next()) |e| {
+            self.gpa.free(e.key_ptr.*);
+            self.gpa.free(e.value_ptr.*);
+        }
+        self.hash.clearRetainingCapacity();
+    }
+
     pub fn unsetVar(self: *Shell, name: []const u8) SetError!void {
         const v = self.vars.getPtr(name) orelse return;
         if (v.readonly) return error.ReadOnly;
+        if (std.mem.eql(u8, name, "PATH")) self.clearHash();
         if (v.value) |old| self.gpa.free(old);
         v.value = null;
         if (!v.exported and !v.readonly) {
@@ -372,8 +386,10 @@ pub const Shell = struct {
 
     /// Write to standard output (descriptor 1). False on failure.
     pub fn out(self: *Shell, bytes: []const u8) bool {
-        _ = self;
-        sys.writeAll(1, bytes) catch return false;
+        sys.writeAll(1, bytes) catch {
+            self.out_failed = true;
+            return false;
+        };
         return true;
     }
 

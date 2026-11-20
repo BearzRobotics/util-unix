@@ -307,7 +307,9 @@ pub const Parser = struct {
             if (std.ascii.isDigit(c)) {
                 var i: usize = 0;
                 while (self.at(i)) |d| : (i += 1) if (!std.ascii.isDigit(d)) break;
-                if (self.at(i)) |d| if (d == '<' or d == '>') {
+                // only a single digit names a descriptor: dash and FreeBSD sh read `99>f` as the
+                // word 99 and a redirection (POSIX leaves numbers above 9 unspecified)
+                if (i == 1) if (self.at(i)) |d| if (d == '<' or d == '>') {
                     const n = std.fmt.parseInt(i32, self.src[self.pos .. self.pos + i], 10) catch return self.failK(.bad_fd_number, "Syntax error: Bad file descriptor number", .{});
                     self.pos += i;
                     return .{ .tag = .{ .io_number = n }, .line = line };
@@ -739,6 +741,7 @@ pub const Parser = struct {
         } else return self.failOpen(.unterminated_arithmetic, "$((", self.pos, self.line, "Syntax error: Missing '))'", .{});
         const text = self.src[start..i];
         var sub = Parser.init(self.a, text, self.diag);
+        sub.aliases = self.aliases;
         sub.line = self.line;
         sub.depth = self.depth + 1;
         var inner: Builder = .{};
@@ -851,6 +854,7 @@ pub const Parser = struct {
                 h.redir.body = parts;
             } else {
                 var sub = Parser.init(a, body.items, self.diag);
+                sub.aliases = self.aliases;
                 sub.line = self.line;
                 sub.depth = self.depth + 1;
                 var inner: Builder = .{};
@@ -922,13 +926,13 @@ pub const Parser = struct {
     fn skipNewlinesPending(self: *Parser) Error!void {
         while (true) {
             try self.skipNewlines();
-            try self.aliasPending();
+            try self.aliasPendingK(false);
             if ((try self.peek()).tag != .newline) return;
         }
     }
 
     fn peekIsPending(self: *Parser, want: Reserved) Error!bool {
-        try self.aliasPending();
+        try self.aliasPendingK(false);
         const t = try self.peek();
         return switch (t.tag) {
             .word => |w| lexer.reservedOf(w) == want,
@@ -1093,13 +1097,19 @@ pub const Parser = struct {
 
     /// Alias substitution at a position where a command or a reserved word can start.
     fn aliasAt(self: *Parser) Error!void {
-        try self.aliasPending();
+        try self.aliasPendingK(false);
         try self.maybeAlias();
     }
 
     /// Called before each word of a simple command: the word right after an
     /// alias value that ended in a blank is alias-expanded as well.
     fn aliasPending(self: *Parser) Error!void {
+        return self.aliasPendingK(true);
+    }
+
+    /// `reserved`: a reserved word may be replaced too (an argument or a name, not a
+    /// position where the grammar looks for a keyword: dash and FreeBSD sh keep keywords).
+    fn aliasPendingK(self: *Parser, reserved: bool) Error!void {
         while (self.blank_marks.items.len > 0) {
             const t = try self.peek();
             var due = false;
@@ -1111,9 +1121,9 @@ pub const Parser = struct {
                 } else i += 1;
             }
             if (!due) return;
-            if (!(try self.aliasStep(true))) return;
+            if (!(try self.aliasStep(reserved))) return;
             // the first word of the value is checked again, as in command position
-            while (try self.aliasStep(true)) {}
+            while (try self.aliasStep(reserved)) {}
         }
     }
 
@@ -1237,6 +1247,8 @@ pub const Parser = struct {
         const line = ot.line;
         try self.pushOpener("for", ot);
         defer self.popOpener();
+        // the name may come from an alias when the one for `for` ended in a blank
+        try self.aliasPending();
         const nt = try self.next();
         const name = switch (nt.tag) {
             .word => |w| blk: {
@@ -1256,6 +1268,7 @@ pub const Parser = struct {
             _ = try self.next();
             var list: std.ArrayList(ast.Word) = .empty;
             while (true) {
+                try self.aliasPending();
                 const t = try self.peek();
                 switch (t.tag) {
                     .word => |w| {
