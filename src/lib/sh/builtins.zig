@@ -366,6 +366,15 @@ fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             sh.diagCmdK(.bad_variable_name, name, "local", "{s}: bad variable name", .{name});
             return 2;
         }
+        // `local x` again in the same function keeps the value
+        var again = false;
+        for (sh.locals.items[sh.locals_base..]) |l| if (std.mem.eql(u8, l.name, name)) {
+            again = true;
+        };
+        if (again) {
+            if (eq) |e| sh.setVar(name, arg[e + 1 ..]) catch return 2;
+            continue;
+        }
         const old: ?shell.Var = if (sh.vars.get(name)) |ov| .{
             .value = if (ov.value) |x| sh.gpa.dupe(u8, x) catch null else null,
             .exported = ov.exported,
@@ -400,6 +409,10 @@ fn unsetCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
         if (funcs) {
             if (sh.funcs.fetchRemove(name)) |kv| sh.gpa.free(kv.key);
             continue;
+        }
+        if (!lexer.isName(name)) {
+            sh.diagCmdK(.bad_variable_name, name, "unset", "{s}: bad variable name", .{name});
+            return die(sh, 2);
         }
         sh.unsetVar(name) catch |e| switch (e) {
             error.ReadOnly => {
@@ -577,7 +590,11 @@ fn timesCmd(sh: *Shell, a: Allocator, _: []const []const u8) u8 {
 
 fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
-    if (i < args.len and std.mem.eql(u8, args[i], "--")) i += 1;
+    var had_dd = false;
+    if (i < args.len and std.mem.eql(u8, args[i], "--")) {
+        i += 1;
+        had_dd = true;
+    }
     if (i >= args.len) {
         var out: std.ArrayList(u8) = .empty;
         for (sh.traps, 0..) |own, n| {
@@ -596,10 +613,19 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         _ = sh.out(out.items);
         return 0;
     }
+    if (!had_dd and args[i].len > 1 and args[i][0] == '-' and std.mem.indexOfAny(u8, args[i], " \t\n") == null) {
+        sh.diagBareK(.illegal_option, args[i], std.fmt.allocPrint(a, "trap: Illegal option {s}", .{args[i]}) catch "");
+        return die(sh, 2);
+    }
     var action: ?[]const u8 = null;
     if (sys.signalNumber(args[i]) == null or args[i].len == 0) {
         action = args[i];
         i += 1;
+        if (i >= args.len) {
+            // an action with no condition: the operand was taken for a condition
+            sh.diagBareK(.bad_trap, action.?, std.fmt.allocPrint(a, "trap: {s}: bad trap", .{action.?}) catch "");
+            return 1;
+        }
     } else if (std.mem.eql(u8, args[i], "-")) {
         i += 1;
     } else if (parseNum(args[i]) != null) {

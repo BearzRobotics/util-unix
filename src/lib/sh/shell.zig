@@ -116,6 +116,8 @@ pub const Shell = struct {
     flow_count: u32 = 1,
     loop_depth: u32 = 0,
     func_depth: u32 = 0,
+    /// Index into `locals` where the running function's `local` entries start.
+    locals_base: usize = 0,
     source_depth: u32 = 0,
     /// Errexit is suppressed while this is non-zero.
     noerrexit: u32 = 0,

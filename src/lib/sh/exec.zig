@@ -558,7 +558,14 @@ fn execLoop(sh: *Shell, until: bool, cond: *const Node, body: ?*const Node) u8 {
         sh.noerrexit += 1;
         const c = execNode(sh, cond);
         sh.noerrexit -= 1;
-        if (sh.flow != .none) return c;
+        if (sh.flow != .none) {
+            // `break` and `continue` in the condition act on this loop
+            if (sh.flow == .break_loop or sh.flow == .continue_loop) {
+                if (loopStop(sh)) break;
+                continue;
+            }
+            return c;
+        }
         if ((c == 0) == until) break;
         if (body) |b| st = execNode(sh, b) else st = 0;
         checkTraps(sh);
@@ -1018,7 +1025,11 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     };
     errexitCheck(sh, st, name);
     // a signal that arrived while the command ran: its trap runs now (POSIX 2.11)
-    if (sh.flow == .none) checkTraps(sh);
+    if (sh.flow == .none) {
+        checkTraps(sh);
+        // a trap that exits or returns decides the status
+        if (sh.flow != .none) return sh.status;
+    }
     return st;
 }
 
@@ -1152,6 +1163,9 @@ pub fn callFunction(sh: *Shell, body: *const Node, args: []const []const u8) u8 
         return 2;
     };
     const mark = sh.locals.items.len;
+    const saved_base = sh.locals_base;
+    sh.locals_base = mark;
+    defer sh.locals_base = saved_base;
     sh.func_depth += 1;
     const saved_loops = sh.loop_depth;
     sh.loop_depth = 0;
