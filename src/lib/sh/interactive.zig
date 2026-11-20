@@ -167,6 +167,12 @@ fn tRaw(ctx: ?*anyopaque, on: bool) void {
     }
 }
 
+fn aliasLetter(ctx: ?*anyopaque, letter: u8) ?[]const u8 {
+    const sh: *Shell = @ptrCast(@alignCast(ctx.?));
+    const name = [1]u8{letter};
+    return sh.aliases.get(&name);
+}
+
 // --- the loop ---------------------------------------------------------------------------------
 
 pub const Session = struct {
@@ -213,6 +219,7 @@ pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
     var ed = readline.Editor.init(gpa, .{ .ctx = &s.term, .read = tRead, .write = tWrite, .size = tSize, .setRaw = tRaw });
     ed.complete_fn = completion.complete;
     ed.cb_ctx = sh;
+    ed.alias_fn = aliasLetter;
     if (s.use_editor) if (sys.tcgetattr(0)) |t| {
         const c = sys.termiosChars(t);
         if (c.erase != 0) ed.erase_char = c.erase;

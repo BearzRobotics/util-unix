@@ -790,6 +790,10 @@ pub const Editor = struct {
             .insert, .none, .paste_begin, .paste_end => dirty = false,
             .char => {
                 if (k.alt) {
+                    if (k.cp >= '0' and k.cp <= '9') {
+                        self.arg = (self.arg orelse 0) * 10 + (k.cp - '0');
+                        return;
+                    }
                     self.emacsMeta(k.cp, &keep_kill);
                 } else switch (k.cp) {
                     1 => self.cur = 0, // C-a
@@ -1082,9 +1086,9 @@ pub const Editor = struct {
     fn searchStep(self: *Editor, from_next: bool) void {
         const q = self.search_buf.items;
         if (q.len == 0) return;
-        var i: isize = if (self.search_match) |m| @intCast(m) else @intCast(self.history.len);
+        const hl: isize = @intCast(self.history.len);
+        var i: isize = if (self.search_match) |m| @intCast(m) else if (self.search_fwd) 0 else hl - 1;
         if (self.search_match != null and from_next) i += if (self.search_fwd) 1 else -1;
-        if (self.search_match == null and self.search_fwd) i = 0;
         // Searching stays on the current entry when the query changed.
         while (i >= 0 and i < @as(isize, @intCast(self.history.len))) : (i += if (self.search_fwd) @as(isize, 1) else -1) {
             if (std.mem.indexOf(u8, self.history[@intCast(i)], q)) |pos| {
@@ -1304,6 +1308,13 @@ pub const Editor = struct {
             return;
         }
         if (self.mode == .vi) {
+            // ESC followed at once by a character is ESC then that character
+            // (terminals cannot tell an Alt key from a fast typist).
+            if (k.kind == .char and k.alt) {
+                self.viKey(.{ .cp = 27 });
+                if (self.status == .more) self.viKey(.{ .cp = k.cp });
+                return;
+            }
             self.viKey(k);
         } else self.emacsKey(k);
     }
