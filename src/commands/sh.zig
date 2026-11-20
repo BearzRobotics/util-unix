@@ -64,6 +64,8 @@ pub fn main(ctx: cli.Context) u8 {
     var command: ?[]const u8 = null;
     var from_stdin = false;
     var check_mode = false;
+    var login = false;
+    var from_explicit_s = false;
     var style_opt: ?diag.Style = null;
     var style_auto = true;
     if (cli.getenv(ctx, "SH_DIAGNOSTICS")) |v| {
@@ -151,12 +153,14 @@ pub fn main(ctx: cli.Context) u8 {
         var j: usize = 1;
         while (j < a.len) : (j += 1) {
             switch (a[j]) {
+                'l' => login = on,
                 'c' => if (on) {
                     command = "";
                     from_stdin = false;
                 },
                 's' => if (on) {
                     from_stdin = true;
+                    from_explicit_s = true;
                 },
                 'o' => {
                     i += 1;
@@ -259,7 +263,9 @@ pub fn main(ctx: cli.Context) u8 {
         }
     } else if (from_stdin or rest.len == 0) {
         from_stdin = true;
-        script = readAll(gpa, 0);
+        // Interactive: -i, or standard input and error are terminals (POSIX sh, "Interactive").
+        if (!flags.interactive and !check_mode and sys.isatty(0) and sys.isatty(2) and !from_explicit_s) flags.interactive = true;
+        if (!flags.interactive) script = readAll(gpa, 0);
     } else {
         name = rest[0];
         label = rest[0];
@@ -296,6 +302,18 @@ pub fn main(ctx: cli.Context) u8 {
         }
     }
     shell.setParams(rest) catch return 2;
+    if (login) runProfiles(shell);
+    var session: sh.interactive.Session = undefined;
+    if (shell.flags.interactive and !check_mode) {
+        sh.interactive.setup(shell, &session, gpa);
+        defer session.deinit();
+        if (from_stdin and script == null) {
+            sh.interactive.runEnvFile(shell);
+            return sh.interactive.loop(&session);
+        }
+    } else if (shell.flags.monitor) {
+        _ = sh.jobs.enable(shell, false);
+    }
     const text: []const u8 = if (is_c) command.? else (script orelse {
         cli.warn(ctx, "cannot read input", .{});
         return 2;
@@ -303,6 +321,18 @@ pub fn main(ctx: cli.Context) u8 {
     if (check_mode) return runCheck(ctx, shell, text, label, if (style == .posix) .gcc else style);
     _ = shell.runString(text) catch return 2;
     return shell.finish();
+}
+
+/// Login shell: /etc/profile, then ~/.profile (POSIX sh -l).
+fn runProfiles(shell: *sh.Shell) void {
+    var arena = std.heap.ArenaAllocator.init(shell.gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    if (sh.exec.readFile(a, "/etc/profile")) |t| _ = sh.exec.runSource(shell, t, .{}) catch {};
+    if (shell.getVar("HOME")) |h| {
+        const p = std.fmt.allocPrint(a, "{s}/.profile", .{h}) catch return;
+        if (sh.exec.readFile(a, p)) |t| _ = sh.exec.runSource(shell, t, .{}) catch {};
+    }
 }
 
 /// `sh --check`: parse (reporting syntax errors), then run the lint checks.
