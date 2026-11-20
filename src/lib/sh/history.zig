@@ -56,6 +56,8 @@ pub const History = struct {
     pub fn add(self: *History, line: []const u8) Allocator.Error!void {
         const t = std.mem.trimEnd(u8, line, "\n");
         if (std.mem.trim(u8, t, " \t\n").len == 0) return;
+        // like FreeBSD sh (libedit unique mode): a line equal to the newest one is not repeated
+        if (self.entries.items.len > 0 and std.mem.eql(u8, self.entries.items[self.entries.items.len - 1], t)) return;
         const copy = try self.gpa.dupe(u8, t);
         errdefer self.gpa.free(copy);
         try self.entries.append(self.gpa, copy);
@@ -147,10 +149,14 @@ fn clamp(h: *const History, n: u64) u64 {
 }
 
 pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
-    const h = sh.history orelse {
+    const hreal = sh.history orelse {
         sh.diagCmd("fc", "history not active", .{});
         return 1;
     };
+    // The command line that runs `fc` is already the newest entry: hide it.
+    var hview = hreal.*;
+    if (sh.hist_pending and hview.entries.items.len > 0) hview.entries.items.len -= 1;
+    const h = &hview;
     var list = false;
     var no_num = false;
     var rev = false;
@@ -227,7 +233,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 text = std.mem.concat(a, u8, &.{ text[0..at], new, text[at + o.len ..] }) catch return 2;
             }
         };
-        return runText(sh, a, text);
+        return runText(sh, a, text, true);
     }
 
     // Selection for -l and editing.
@@ -314,17 +320,19 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         if (k == 0) break;
         data.appendSlice(a, chunk[0..k]) catch return 2;
     }
-    return runText(sh, a, data.items);
+    return runText(sh, a, data.items, false);
 }
 
-/// Echo the commands to standard error and run them as the shell's input,
+/// Run the commands (echoed to standard error for `-s`, as FreeBSD sh does)  as the shell's input,
 /// entering them in the history.
-fn runText(sh: *Shell, a: Allocator, text: []const u8) u8 {
+fn runText(sh: *Shell, a: Allocator, text: []const u8, echo: bool) u8 {
     _ = a;
     const h = sh.history.?;
     const t = std.mem.trimEnd(u8, text, "\n");
-    sh.errRaw(t);
-    sh.errRaw("\n");
+    if (echo) {
+        sh.errRaw(t);
+        sh.errRaw("\n");
+    }
     h.add(t) catch {};
     return exec.runSource(sh, t, .{}) catch 2;
 }

@@ -346,6 +346,7 @@ pub const Editor = struct {
     last_line_words: ?[]const u8 = null,
     // completion list state (second TAB)
     comp_pending: bool = false,
+    show_ctrl_c: bool = false,
     status: Status = .more,
 
     pub fn init(gpa: Allocator, term: Terminal) Editor {
@@ -483,6 +484,7 @@ pub const Editor = struct {
                     return .eof;
                 },
                 .interrupted => {
+                    self.show_ctrl_c = true;
                     self.finishLine();
                     return .interrupted;
                 },
@@ -501,6 +503,8 @@ pub const Editor = struct {
         self.cur = self.buf.items.len;
         self.searching = false;
         self.redraw();
+        if (self.show_ctrl_c) self.term.write(self.term.ctx, "^C");
+        self.show_ctrl_c = false;
         self.term.write(self.term.ctx, "\r\n");
         self.rendered = false;
         self.cur_row = 0;
@@ -1212,7 +1216,7 @@ pub const Editor = struct {
         if (common.len > word.len) {
             self.buf.replaceRange(self.gpa, comp.start, self.cur - comp.start, common) catch return;
             self.cur = comp.start + common.len;
-            self.comp_pending = false;
+            self.comp_pending = true;
             return;
         }
         if (!self.comp_pending) {
@@ -1272,6 +1276,7 @@ pub const Editor = struct {
     // --- key dispatch ---------------------------------------------------------------------------
 
     fn key(self: *Editor, k: Key) void {
+        if (!(k.kind == .char and !k.alt and k.cp == 9)) self.comp_pending = false;
         if (self.in_paste) {
             if (k.kind == .paste_end) {
                 self.in_paste = false;

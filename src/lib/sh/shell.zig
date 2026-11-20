@@ -130,6 +130,9 @@ pub const Shell = struct {
     exit_warned: u64 = 0,
     /// Interactive-shell services supplied by `interactive.zig`.
     history: ?*@import("history.zig").History = null,
+    /// The command being run was entered in the history before it ran (it is
+    /// the history's newest entry and `fc` does not see it).
+    hist_pending: bool = false,
     /// Variables saved by `local`, restored when the function returns.
     locals: std.ArrayList(Saved) = .empty,
     /// Arenas of programs that defined functions; kept for the shell's life.
@@ -186,8 +189,8 @@ pub const Shell = struct {
         if (self.getVar("PATH") == null) try self.setVarRaw("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
         try self.setVarRaw("OPTIND", "1");
         if (self.getVar("PS1") == null) try self.setVarRaw("PS1", "$ ");
-        try self.setVarRaw("PS2", "> ");
-        try self.setVarRaw("PS4", "+ ");
+        if (self.getVar("PS2") == null) try self.setVarRaw("PS2", "> ");
+        if (self.getVar("PS4") == null) try self.setVarRaw("PS4", "+ ");
         var ppid_buf: [16]u8 = undefined;
         try self.setVarRaw("PPID", std.fmt.bufPrint(&ppid_buf, "{d}", .{sys.getppid()}) catch "");
         try self.initPwd();

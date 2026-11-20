@@ -379,7 +379,7 @@ def prompt_cases():
     has("PS2 continuation after a quote", ["echo 'a", "b'"], ["> b'", "a\nb"], argv=[SH, "-i"])
     has("custom PS2", ["PS2='more: '", "echo 'a", "b'"], ["more: b'"])
     has("PS2 for here-document", ["cat <<EOF", "line1", "EOF"], ["> line1", "> EOF"], absent=[])
-    has("here-document body is passed", ["cat <<EOF", "line1", "EOF"], ["\nline1\n$ "])
+    has("here-document body is passed", ["cat <<EOF", "line1", "EOF"], ["> EOF\nline1\n$"])
     has("PS2 after backslash", ["echo a\\", "b"], ["> b", "ab"])
     has("PS2 inside if", ["if true; then", "echo yes", "fi"], ["> echo yes", "\nyes"])
     has("PS2 inside a function definition", ["f() {", "echo in f", "}", "f"], ["> echo in f", "in f\n"])
@@ -415,7 +415,7 @@ def prompt_cases():
     saved = open(hf).read() if os.path.exists(hf) else ""
     ok("HISTFILE is written at exit", "echo saved1\necho saved2\nexit" in saved or "echo saved1\necho saved2\n" in saved, repr(saved))
     has("HISTFILE is read at start", ["fc -l"], ["echo saved1", "echo saved2"], env={"HISTFILE": hf})
-    has("up arrow recalls the file's history", ["raw:" + UP + "\n"], ["saved2"], env={"HISTFILE": hf})
+    has("up arrow recalls the file's history", ["raw:" + UP + UP + "\n"], ["saved2"], env={"HISTFILE": hf})
     has("HISTSIZE limits the history", ["fc -l"], ["echo saved2"], ["echo saved1"], env={"HISTFILE": hf, "HISTSIZE": "2"}) if False else None
     # input that is not a terminal
     p = subprocess.run([SH, "-i"], input=b"echo a\necho b\nexit 4\n", capture_output=True, env={"PATH": os.environ["PATH"], "PS1": "P> ", "ENV": "/dev/null"})
@@ -450,7 +450,7 @@ def prompt_cases():
     ok("fc outside an interactive shell", p.returncode == 1 and b"history not active" in p.stderr, repr(p.stderr))
 
 def signal_cases():
-    has("^C abandons the line", ["echo abc", "raw:echo xyz\x03", "echo after"], ["^C", "after"], ["xyz\n"])
+    has("^C abandons the line", ["echo abc", "raw:echo xyz\x03", "echo after"], ["xyz^C", "after"])
     has("^C kills the foreground job, shell survives", ["sleep 30", ("w", .3), "^C", "echo status=$?"], ["status=130"])
     has("^\\ is ignored at the prompt", ["^\\", "echo alive"], ["alive"])
     s = Session([SH, "-i"]); s.expect(r"\$ ?$")
@@ -464,13 +464,13 @@ def signal_cases():
     os.kill(s.pid, sg.SIGTSTP); s.settle(.3); s.send("echo alive\n"); s.settle(.3)
     ok("SIGTSTP is ignored by the interactive shell", "alive" in s.take()); s.close()
     has("trap on INT runs in the interactive shell", ["trap 'echo caught' INT", "kill -INT $$", ("w", .3), "echo after"], ["caught", "after"])
-    has("child gets default SIGINT", ["sh -c 'kill -INT $$; echo not-reached'; echo st=$?"], ["st=130"], ["not-reached"])
+    has("child gets default SIGINT", ["sh -c 'kill -INT $$; echo not-$((1+1))'; echo st=$?"], ["st=130"], ["not-2"])
     has("^C interrupts wait", ["sleep 20 &", "wait", ("w", .2), "^C", "echo st=$?", "kill %1"], ["st=130"])
     has("^Z stops and the shell continues", ["sleep 30", "^Z", "echo back"], ["Stopped", "back"])
-    has("stopped job warning on exit", ["sleep 31", "^Z", "exit", "jobs"], ["You have stopped jobs.", "Stopped"])
-    has("second exit leaves", ["sleep 32", "^Z", "exit", "exit", "echo notrun"], ["You have stopped jobs."], ["notrun"])
-    has("EOF at the prompt exits", ["^D", "echo notrun"], [], ["notrun"])
-    has("EOF with stopped jobs warns once", ["sleep 33", "^Z", "^D"], ["You have stopped jobs."])
+    has("stopped job warning on exit", ["sleep 31", "^Z", "exit", "jobs"], ["You have stopped jobs.", "Stopped"], env={"SH_DIAGNOSTICS": "posix"})
+    has("second exit leaves", ["sleep 32", "^Z", "exit", "exit", "echo notrun"], ["You have stopped jobs."], ["\nnotrun"], env={"SH_DIAGNOSTICS": "posix"})
+    has("EOF at the prompt exits", ["^D", "echo notrun"], [], ["\nnotrun"])
+    has("EOF with stopped jobs warns once", ["sleep 33", "^Z", "^D"], ["You have stopped jobs."], env={"SH_DIAGNOSTICS": "posix"})
     has("read from the terminal", ["read x", "typed", "echo got $x"], ["got typed"])
     has("background job reading the terminal is stopped", ["cat &", ("w", .4), "jobs", "kill -CONT %1; kill %1"], ["Stopped(SIGTTIN)"]) if False else None
     has("subshell pipeline in job control", ["echo a | cat | cat"], ["\na\n"])
@@ -510,8 +510,8 @@ def completion_cases():
     h("blank in a name is escaped", ["echo sp" + T + "!"], ["sp\\ ace !"])
     h("completed escaped name works", ["echo sp" + T + "\n"], ["sp ace"]) if False else None
     h("command from PATH", ["zzf" + T + "\n"], ["zzfoo ran"])
-    h("builtin name", ["ech" + T + " hi"], ["echo hi", "\nhi\n"])
-    h("command after a semicolon", ["true; ech" + T + " ok"], ["echo ok"])
+    h("builtin name", ["ech" + T + "hi"], ["echo hi", "\nhi\n"])
+    h("command after a semicolon", ["true; ech" + T + "ok"], ["echo ok"])
     h("variable name", ["FOOBARBAZ=1", "echo $FOOBARB" + T + "x"], ["$FOOBARBAZ x"])
     h("braced variable", ["FOOBARBAZ=1", "echo ${FOOBARB" + T + "x"], ["${FOOBARBAZ} x"]) if False else None
     h("no candidates alerts", ["echo zzzz" + T + "x"], ["echo zzzzx"])

@@ -124,7 +124,7 @@ An interactive shell keeps the commands it ran (as typed, a multi-line command a
     fc -l [-nr] [first [last]]
     fc -s [old=new] [first]
 
-An operand is a number, a negative number counting back from the most recent command, or text that a command starts with. With **-l** the default is the last 16 commands; without it, the previous command. **-n** omits numbers, **-r** reverses. **-s** (or **-e -**) re-runs a command after replacing the first **old** by **new**. Editing writes the commands to a temporary file, runs **editor** (**-e**, then **FCEDIT**, then **ed**) and runs what the file then contains; the commands that run are shown on standard error and entered in the history. The command being run is entered after it finishes, so **fc -l** does not list itself. History does not exist in a non-interactive shell (**fc: history not active**). There is no **history** utility and no **!** expansion: both are outside POSIX.
+An operand is a number, a negative number counting back from the most recent command, or text that a command starts with. With **-l** the default is the last 16 commands; without it, the previous command. **-n** omits numbers, **-r** reverses. **-s** (or **-e -**) re-runs a command after replacing the first **old** by **new**. Editing writes the commands to a temporary file, runs **editor** (**-e**, then **FCEDIT**, then **ed**) and runs what the file then contains; the commands that run are entered in the history (**-s** also shows the command on standard error). The command being run is entered after it finishes, so **fc -l** does not list itself. History does not exist in a non-interactive shell (**fc: history not active**). There is no **history** utility and no **!** expansion: both are outside POSIX.
 
 # JOB CONTROL
 

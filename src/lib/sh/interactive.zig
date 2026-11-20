@@ -376,8 +376,10 @@ pub fn loop(s: *Session) u8 {
         const src = text.items;
         if (std.mem.trim(u8, src, " \t\n").len == 0) continue;
         sh.line = 0;
-        _ = exec.runSource(sh, src, .{}) catch return 2;
         s.hist.add(src) catch {};
+        sh.hist_pending = true;
+        _ = exec.runSource(sh, src, .{}) catch return 2;
+        sh.hist_pending = false;
         if (sh.flow == .exit_shell and sh.explicit_exit) return finish(s);
         sh.flow = .none;
         sh.explicit_exit = false;
