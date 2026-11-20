@@ -1191,6 +1191,11 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         }
         if (std.mem.eql(u8, args[i], "-r")) {
             raw = true;
+        } else if (std.mem.eql(u8, args[i], "-p") and i + 1 < args.len) {
+            // `read -p prompt` is not POSIX; dash and FreeBSD sh accept it and
+            // write the prompt to standard error when reading a terminal
+            i += 1;
+            if (sys.isatty(0)) sh.errRaw(args[i]);
         } else {
             sh.diagCmdK(.illegal_option, args[i], "read", "Illegal option {s}", .{args[i]});
             return 2;
@@ -1378,7 +1383,8 @@ const T = struct {
     }
 
     fn num(self: *T, s: []const u8) TestErr!i64 {
-        return parseNum(s) orelse self.fail("Illegal number: {s}", .{s});
+        // blanks around the number are allowed (strtoimax; dash, FreeBSD sh)
+        return parseNum(std.mem.trim(u8, s, " \t\n")) orelse self.fail("Illegal number: {s}", .{s});
     }
 
     fn primary(self: *T) TestErr!bool {
