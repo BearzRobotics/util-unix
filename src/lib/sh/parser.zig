@@ -1359,6 +1359,9 @@ pub const Parser = struct {
                     quoted = true;
                     try delim.appendSlice(self.a, s);
                 },
+                // a command substitution in the delimiter is an error (dash,
+                // FreeBSD sh); POSIX leaves the delimiter's expansions undefined
+                .cmdsub => return self.failK(.unexpected_token, "Syntax error: Illegal eof marker for << redirection", .{}),
                 else => quoted = quoted,
             };
             r.target = &.{};

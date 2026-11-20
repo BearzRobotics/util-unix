@@ -1,0 +1,323 @@
+# 2.8.1: special builtin with a bad option
+set -Z; echo reached
+#---
+# 2.8.1: special builtin with a bad option via command
+command set -Z; echo reached
+#---
+# 2.8.1: export with a readonly name
+readonly r=1; export r=2; echo reached $?
+#---
+# 2.8.1: readonly assignment error
+readonly r=1; r=2; echo reached $?
+#---
+# 2.8.1: readonly assignment error before a special builtin
+readonly r=1; r=2 :; echo reached $?
+#---
+# 2.8.1: readonly assignment error before a regular utility
+readonly r=1; r=2 true; echo reached $?
+#---
+# 2.8.1: readonly assignment error in a subshell
+readonly r=1; (r=2); echo reached $?
+#---
+# 2.8.1: unset of a readonly variable
+readonly r=1; unset r; echo reached $?
+#---
+# 2.8.1: shift too many
+shift 5; echo reached $?
+#---
+# 2.8.1: shift too many via command
+command shift 5; echo reached $?
+#---
+# 2.8.1: break outside a loop
+break; echo reached $?
+#---
+# 2.8.1: continue outside a loop
+continue; echo reached $?
+#---
+# 2.8.1: return outside a function
+return 3; echo reached $?
+#---
+# 2.8.1: exit with a bad number
+exit abc; echo reached $?
+#---
+# 2.8.1: exit with a negative number
+exit -1; echo reached $?
+#---
+# 2.8.1: eval syntax error
+eval 'if'; echo reached $?
+#---
+# 2.8.1: eval syntax error via command
+command eval 'if'; echo reached $?
+#---
+# 2.8.1: dot of a missing file
+. /nonexistent/file; echo reached $?
+#---
+# 2.8.1: dot of a missing file via command
+command . /nonexistent/file; echo reached $?
+#---
+# 2.8.1: exec of a missing command
+exec /nonexistent/cmd; echo reached $?
+#---
+# 2.8.1: exec of a missing command via command
+command exec /nonexistent/cmd; echo reached $?
+#---
+# 2.8.1: special builtin redirection error
+: < /nonexistent/file; echo reached $?
+#---
+# 2.8.1: special builtin redirection error via command
+command : < /nonexistent/file; echo reached $?
+#---
+# 2.8.1: regular builtin redirection error
+true < /nonexistent/file; echo reached $?
+#---
+# 2.8.1: regular builtin redirection error on echo
+echo hi > /nonexistent/dir/file; echo reached $?
+#---
+# 2.8.1: redirection error on a compound command
+{ echo in; } < /nonexistent/file; echo reached $?
+#---
+# 2.8.1: redirection error on a function call
+f() { echo in; }; f < /nonexistent/file; echo reached $?
+#---
+# 2.8.1: command not found
+nonexistent_cmd_xyz; echo reached $?
+#---
+# 2.8.1: command not executable
+: > nx; chmod -x nx; ./nx; echo reached $?
+#---
+# 2.8.1: expansion error unset ${x?}
+echo ${nosuch?msg}; echo reached $?
+#---
+# 2.8.1: expansion error unset ${x?} in a subshell
+(echo ${nosuch?msg}); echo reached $?
+#---
+# 2.8.1: expansion error in an assignment
+x=${nosuch?msg}; echo reached $?
+#---
+# 2.8.1: set -u unset variable
+set -u; echo $nosuch; echo reached $?
+#---
+# 2.8.1: set -u unset variable in a subshell
+set -u; (echo $nosuch); echo reached $?
+#---
+# 2.8.1: set -u with a special parameter
+set -u; echo "$@" "$*"; echo reached $?
+#---
+# 2.8.1: set -u with $1
+set -u; echo $1; echo reached $?
+#---
+# 2.8.1: set -u in a default word
+set -u; echo ${nosuch-ok}; echo reached $?
+#---
+# 2.8.1: arithmetic syntax error
+echo $((1 +)); echo reached $?
+#---
+# 2.8.1: arithmetic division by zero
+echo $((1/0)); echo reached $?
+#---
+# 2.8.1: arithmetic modulo by zero
+echo $((1%0)); echo reached $?
+#---
+# 2.8.1: bad substitution
+echo ${a b}; echo reached $?
+#---
+# 2.8.1: syntax error in the middle
+echo one; echo ) ; echo two
+#---
+# 2.8.1: unclosed quote
+echo 'abc
+#---
+# 2.8.1: unclosed brace group
+{ echo a
+#---
+# 2.8.1: unexpected done
+echo a; done; echo b
+#---
+# 2.8.1: unexpected fi after a list
+if true; then echo a; fi fi
+#---
+# 2.8.1: a function name that is a special builtin
+break() { echo f; }; echo reached $?
+#---
+# 2.8.1: function named like a keyword
+if() { echo f; }; echo reached $?
+#---
+# 2.8.1: for with a bad name
+for 1x in a; do :; done; echo reached $?
+#---
+# 2.8.1: case without in
+case x; echo reached
+#---
+# 2.8.1: redirection to a bad fd duplication
+echo hi >&9; echo reached $?
+#---
+# 2.8.1: redirection from a bad fd duplication
+cat <&9; echo reached $?
+#---
+# 2.8.1: closing a closed fd
+exec 9>&-; echo reached $?
+#---
+# 2.8.1: here-document in a failing command
+cat <<EOF > /nonexistent/x
+text
+EOF
+echo reached $?
+#---
+# 2.8.1: command substitution failure keeps going
+x=$(false); echo reached $?
+#---
+# 2.8.1: command substitution of a missing command
+x=$(nonexistent_cmd_xyz 2>/dev/null); echo reached $?
+#---
+# 2.8.1: errexit and a failed command
+set -e; false; echo reached
+#---
+# 2.8.1: errexit after a failed special builtin via set
+set -e; set -Z 2>/dev/null; echo reached
+#---
+# 2.8.1: errexit and a failed redirection
+set -e; : > /nonexistent/f; echo reached
+#---
+# 2.8.1: errexit and a failed assignment from cmd subst
+set -e; x=$(false); echo reached
+#---
+# 2.8.1: errexit with export of a failed substitution
+set -e; export x=$(false); echo reached
+#---
+# 2.8.1: errexit with local of a failed substitution
+set -e; f() { local x=$(false); echo in; }; f; echo reached
+#---
+# 2.8.1: errexit not applied in an && list
+set -e; false && true; echo reached
+#---
+# 2.8.1: errexit not applied in the middle of an || list
+set -e; true || false; false || false; echo not
+#---
+# 2.8.1: errexit with !
+set -e; ! true; echo reached
+#---
+# 2.8.1: errexit with a negated pipeline
+set -e; ! false | true; echo reached
+#---
+# 2.8.1: errexit in a function in a condition
+set -e; f() { false; echo inf; }; if f; then echo t; fi; echo reached
+#---
+# 2.8.1: errexit in a subshell in a condition
+set -e; if (false; echo sub); then echo t; fi; echo reached
+#---
+# 2.8.1: errexit while loop condition
+set -e; while false; do :; done; echo reached
+#---
+# 2.8.1: errexit until loop body
+set -e; i=0; until [ $i -ge 2 ]; do i=$((i+1)); false; echo not; done; echo reached
+#---
+# 2.8.1: errexit case
+set -e; case x in x) false; echo not;; esac; echo reached
+#---
+# 2.8.1: errexit in for body
+set -e; for i in 1 2; do false; echo not; done; echo reached
+#---
+# 2.8.1: errexit and a trap on EXIT
+set -e; trap 'echo trapped' EXIT; false; echo not
+#---
+# 2.8.1: errexit and a brace group with failing last
+set -e; { true; false; }; echo not
+#---
+# 2.8.1: errexit with pipeline last fails
+set -e; true | false; echo not
+#---
+# 2.8.1: errexit with pipeline first fails
+set -e; false | true; echo reached
+#---
+# 2.8.1: errexit and wait
+set -e; (exit 3) & wait $!; echo not
+#---
+# 2.8.1: errexit with command false
+set -e; command false; echo not
+#---
+# 2.8.1: errexit with eval false
+set -e; eval false; echo not
+#---
+# 2.8.1: errexit with dot returning failure
+echo 'false' > s.sh; set -e; . ./s.sh; echo not
+#---
+# 2.8.1: errexit with exit status propagation
+set -e; (exit 7); echo not
+#---
+# 2.8.1: errexit set within a function
+f() { set -e; false; echo inf; }; f; echo reached $?
+#---
+# 2.8.1: errexit toggled off
+set -e; set +e; false; echo reached
+#---
+# 2.8.1: exit status of a pipeline of subshells
+(exit 5) | (exit 6); echo $?
+#---
+# 2.8.1: exit status of command not found vs not executable
+nonexistent_cmd_xyz 2>/dev/null; echo $?; : > nx; ./nx 2>/dev/null; echo $?
+#---
+# 2.8.1: exit status of a signal
+sh -c 'kill -9 $$'; echo $?
+#---
+# 2.8.1: exit status after kill of a background job
+sleep 5 & kill $!; wait $!; echo $?
+#---
+# 2.8.1: $? after a redirection failure
+: > /nonexistent/f 2>/dev/null; echo $?
+#---
+# 2.8.1: $? after an assignment with command substitution
+x=$(exit 4); echo $?
+#---
+# 2.8.1: $? after an empty command with a substitution
+$(exit 5); echo $?
+#---
+# 2.8.1: $? after a here-document only command
+<<EOF
+x
+EOF
+echo $?
+#---
+# 2.8.1: $? preserved by a function return without argument
+f() { false; return; }; f; echo $?
+#---
+# 2.8.1: $? after if without taken branch
+if false; then :; fi; echo $?
+#---
+# 2.8.1: $? after while that never runs
+while false; do :; done; echo $?
+#---
+# 2.8.1: $? after for with an empty list
+for i in; do :; done; echo $?
+#---
+# 2.8.1: $? after case without a match
+case x in y) :;; esac; echo $?
+#---
+# 2.8.1: $? after a failing condition then else
+if false; then :; else (exit 9); fi; echo $?
+#---
+# 2.8.1: $? after unset of a missing name
+unset nosuch; echo $?
+#---
+# 2.8.1: $? after readonly listing
+readonly r=1; readonly >/dev/null; echo $?
+#---
+# 2.8.1: $? of a negation
+! (exit 3); echo $?; ! true; echo $?
+#---
+# 2.8.1: $? inside a trap
+trap '(exit 4); echo in $?' EXIT; (exit 2)
+#---
+# 2.8.1: exit with no argument in a trap uses the status before
+trap 'exit' EXIT; (exit 3)
+#---
+# 2.8.1: exit in a subshell
+(exit 3); echo $?
+#---
+# 2.8.1: exit 256
+(exit 256); echo $?
+#---
+# 2.8.1: exit 255
+(exit 255); echo $?
+#---
+# 2.8.1: exit 300
+(exit 300); echo $?

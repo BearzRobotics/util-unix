@@ -22,6 +22,8 @@ Sources (--source, repeatable):
   freebsd            freebsd bin/sh/tests/*/NAME.N (script file)
   oils               oils spec/*.test.sh (script file; argv.py helpers are POSIX sh)
   dir:PATH           every *.sh file in PATH (script file); PATH/*.c for -c mode
+  list:FILE          snippets separated by lines of exactly `#---` (run with -c);
+                     a `# name` first line of a snippet names it
 Corpora come from tools/fetch-sh-corpora.sh (SH_CORPORA_DIR).
 
 Sandbox per case: setsid, bwrap --unshare-pid --unshare-ipc --unshare-net
@@ -220,7 +222,7 @@ def sig(r):
 
 def classify(case, res):
     rec = {"id": case["id"], "source": case["source"], "name": case.get("name", ""), "mode": case["mode"],
-           "text": case["text"], "args": case.get("args", [])}
+           "text": case["text"], "args": case.get("args", []), "flags": case.get("flags", ""), "note": case.get("note", "")}
     d, b, o = res.get("dash"), res.get("freebsd"), res.get("ours")
     nd = "_dash2" in res and sig(res["_dash2"]) != sig(d)
     rec["res"] = {k: v for k, v in res.items() if k != "_dash2"}
@@ -255,11 +257,17 @@ def src_test_sh(args):
     subprocess.run(["sh", os.path.join(ROOT, "test/test_sh.sh")], env=env, stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL)
     cases = []
-    for f in sorted(os.listdir(d), key=lambda s: int(re.search(r"(\d+)", s).group(1))):
+    for f in sorted((f for f in os.listdir(d) if f.endswith(".sh")), key=lambda s: int(re.search(r"(\d+)", s).group(1))):
+        meta = ["", "", ""]
+        try:
+            meta = (open(os.path.join(d, f[:-3] + ".meta"), encoding="utf-8", errors="replace").read().rstrip("\n").split("\t") + ["", "", ""])[:3]
+        except OSError:
+            pass
         text = open(os.path.join(d, f), encoding="utf-8", errors="surrogateescape").read()
         if text.endswith("\n"):
             text = text[:-1]  # the dump adds a newline after the snippet
-        cases.append({"id": "test_sh/" + f[:-3], "source": "test_sh", "name": f[:-3], "mode": "c", "text": text})
+        cases.append({"id": "test_sh/" + f[:-3], "source": "test_sh", "name": meta[0] or f[:-3], "mode": "c", "text": text,
+                      "flags": meta[1], "note": meta[2]})
     shutil.rmtree(d, ignore_errors=True)
     return cases
 
@@ -274,6 +282,23 @@ def src_dir(path):
         elif f.endswith(".c"):
             cases.append({"id": "dir/" + f, "source": "dir", "name": f, "mode": "c",
                           "text": open(p, encoding="utf-8", errors="surrogateescape").read().rstrip("\n")})
+    return cases
+
+
+def src_list(path):
+    cases = []
+    text = open(path, encoding="utf-8", errors="surrogateescape").read()
+    base = os.path.basename(path)
+    for i, chunk in enumerate(re.split(r"(?m)^#---\n", text)):
+        chunk = chunk.strip("\n")
+        if not chunk:
+            continue
+        name = ""
+        if chunk.startswith("# "):
+            first, _, chunk = chunk.partition("\n")
+            name = first[2:]
+        cases.append({"id": "list/%s:%d" % (base, i), "source": "list:" + base, "name": name or "%s:%d" % (base, i),
+                      "mode": "c", "text": chunk})
     return cases
 
 
@@ -387,7 +412,12 @@ def main():
     srcs = a.source or ["test_sh", "yash", "freebsd", "oils"]
     cases = []
     for s in srcs:
-        cases += src_dir(s[4:]) if s.startswith("dir:") else SOURCES[s](a)
+        if s.startswith("dir:"):
+            cases += src_dir(s[4:])
+        elif s.startswith("list:"):
+            cases += src_list(s[5:])
+        else:
+            cases += SOURCES[s](a)
     if a.filter:
         cases = [c for c in cases if a.filter in c["id"] or a.filter in c.get("name", "")]
     if a.limit:

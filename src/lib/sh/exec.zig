@@ -70,7 +70,9 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
                 sh.line = d.line;
                 reportSyntax(sh, &d, o.prefix, src);
                 sh.status = 2;
-                sh.flow = .exit_shell;
+                // `command eval` loses the special-builtin treatment: the
+                // error does not end the shell (POSIX 2.14)
+                if (!(std.mem.eql(u8, o.prefix, "eval") and (sh.no_die > 0 or sh.flags.interactive))) sh.flow = .exit_shell;
                 last = 2;
                 break;
             },
@@ -192,7 +194,8 @@ fn readMore(gpa: Allocator, buf: *std.ArrayList(u8), fd: i32, chunk: *[8192]u8) 
             return true;
         };
         if (n == 0) return true;
-        buf.appendSlice(gpa, chunk[0..n]) catch return true;
+        // NUL bytes in the script are ignored (see runSource)
+        for (chunk[0..n]) |c| if (c != 0) buf.append(gpa, c) catch return true;
         return false;
     }
 }
@@ -354,6 +357,10 @@ fn childExit(sh: *Shell, st: u8) noreturn {
 }
 
 const ChildIo = struct {
+    /// A command substitution is a subshell environment of its own for `set -e`
+    /// (POSIX 2.14 set: the -e setting applies to each subshell environment
+    /// separately), so a surrounding `if` condition does not suspend it.
+    fresh_errexit: bool = false,
     stdin: ?i32 = null,
     stdout: ?i32 = null,
     close: []const i32 = &.{},
@@ -379,6 +386,7 @@ fn forkRun(sh: *Shell, node: *const Node, cio: ChildIo) ?i32 {
     };
     if (pid != 0) return pid;
     childInit(sh, cio.bg);
+    if (cio.fresh_errexit) sh.noerrexit = 0;
     if (cio.stdin) |fd| _ = sys.dup2(fd, 0) catch sys.exit(2);
     if (cio.stdout) |fd| _ = sys.dup2(fd, 1) catch sys.exit(2);
     for (cio.close) |fd| sys.close(fd);
@@ -881,7 +889,7 @@ pub fn substitute(sh: *Shell, a: Allocator, node: *const Node) expand.Error![]co
         sh.diagK(.cannot_fork, null, "Pipe call failed", .{});
         return expand.fatal(sh, .cannot_fork, null, "Pipe call failed", .{});
     };
-    const pid = forkRun(sh, node, .{ .stdout = p[1], .close = &.{ p[0], p[1] } }) orelse {
+    const pid = forkRun(sh, node, .{ .stdout = p[1], .close = &.{ p[0], p[1] }, .fresh_errexit = true }) orelse {
         sys.close(p[0]);
         sys.close(p[1]);
         return expand.fatal(sh, .cannot_fork, null, "Cannot fork", .{});
@@ -981,18 +989,13 @@ pub fn resolve(sh: *Shell, a: Allocator, name: []const u8) Resolved {
     if (sh.funcs.get(name)) |f| return .{ .function = f };
     if (builtins.find(name)) |b| return .{ .builtin = b };
     if (sh.host_builtins.get(name)) |h| return .{ .host = h };
-    if (sh.hash.get(name)) |p| {
-        if (sys.access(p, 1)) return .{ .external = p };
-        // the remembered file went away: search again
-        if (sh.hash.fetchRemove(name)) |kv| {
-            sh.gpa.free(kv.key);
-            sh.gpa.free(kv.value);
-        }
-    }
+    // a remembered location is used as it is, even if the file went away
+    // (dash, FreeBSD sh: the command is then not found until `hash -r`)
+    if (sh.hash.get(name)) |p| return .{ .external = p };
     if (pathFind(sh, a, name, true)) |p| {
         // remember the location, as dash and FreeBSD sh do (POSIX `hash`);
-        // not when it came from a relative PATH entry
-        if (p.len > 0 and p[0] == '/') {
+        // entries from a relative PATH entry are dropped again by `cd`
+        {
             const key = sh.gpa.dupe(u8, name) catch return .{ .external = p };
             const val = sh.gpa.dupe(u8, p) catch {
                 sh.gpa.free(key);

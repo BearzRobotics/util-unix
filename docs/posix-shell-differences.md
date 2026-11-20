@@ -204,9 +204,13 @@ Decision 0009: when dash and FreeBSD sh agree, so do we, unless there is a writt
 | `$'...'` | literal | literal | C-style escapes | XCU 2.2.4 (Issue 8) |
 | `set -o pipefail` | no effect | accepted | works | XCU set (Issue 8) |
 | an assignment error before an external command (`readonly a=; a=x cat`) | exits (status 2) | continues | exits (status 2) | XCU 2.8.1: a variable assignment error shall exit a non-interactive shell; dash and POSIX agree, FreeBSD sh is the odd one out |
-| an arithmetic constant outside 64 bits | saturates | error | saturates | POSIX leaves it undefined; dash followed |
+| an arithmetic constant outside 64 bits (`$((9223372036854775808))`) | saturates | wraps | saturates | POSIX leaves it undefined; dash followed (the two disagree). A variable whose value is outside 64 bits (`x=9223372036854775808; $((x))`) is an error in both and in ours |
 | `OPTARG` after an option that takes no argument | set to empty | unset | unset | XCU getopts: OPTARG is unset; POSIX decides (dash and FreeBSD sh disagree) |
 | `umask a b` | ignores `b` | error | error | XCU umask takes one operand; dash and FreeBSD sh disagree, POSIX decides |
+| `.*` and `.?*` as filename patterns | match `.` and `..` | same | do not match them | XCU 2.14.3: "if directory entries for dot and dot-dot exist, they may be ignored", and a note announces that a future version will require it. Category: POSIX-undefined; kept for safety (`rm -r .*` must not reach the parent) and forward compatibility. A pattern naming them (`./`, `../x`) still works |
+| `return 256` and `exit 256` | `$?` is 256 after `return 256` in a function; `exit 256` ends with status 0 | same | `return 256` gives 0 (256 mod 256), `exit 256` 0 | XCU return: a status above 255 is unspecified; `$?` is 0 to 255 here as in bash and yash. Values above 2147483647 are `Illegal number` in all of them |
+| `kill -n 9 pid` | error, status 2 | same | sends SIGKILL | XCU kill (Issue 8) adds `-n signum`; dash and FreeBSD sh have not caught up. Category: POSIX-defined |
+| nested function definition `f() g() { :; }` | accepted | accepted | syntax error | XCU 2.10.2 grammar: the body of a function is a compound command, and a function definition is not one. Category: bug in the other shells (accepted extension) |
 | `printf '%#g' 999999.5` | `1.e+06` | `1.00000e+06` | `1.00000e+06` | C says the exponent form keeps the precision; glibc deviates (our output is exact for every other value) |
 
 The cases marked P or recorded as varying in `test/test_sh.sh` (129 in all) carry the same classification in the table above.

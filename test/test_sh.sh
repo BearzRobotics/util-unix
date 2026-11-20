@@ -15,8 +15,10 @@ UTIL="sh"
 cx() { c "$@"; }
 if [ -n "${SHCMP_DUMP:-}" ]; then
     SHCMP_N=0
-    c() { SHCMP_N=$((SHCMP_N + 1)); printf '%s\n' "$2" > "$SHCMP_DUMP/${SHCMP_EXEMPT:+x_}case$SHCMP_N.sh"; }
-    cx() { SHCMP_N=$((SHCMP_N + 1)); printf '%s\n' "$2" > "$SHCMP_DUMP/x_case$SHCMP_N.sh"; }
+    # tools/sh-gold.py reads the snippets from here; the .meta file has the
+    # description, the flags and the note of the case (tab separated)
+    c() { SHCMP_N=$((SHCMP_N + 1)); printf '%s\n' "$2" > "$SHCMP_DUMP/${SHCMP_EXEMPT:+x_}case$SHCMP_N.sh"; printf '%s\t%s\t%s\n' "$1" "${3:-}" "${4:-}" > "$SHCMP_DUMP/${SHCMP_EXEMPT:+x_}case$SHCMP_N.meta"; }
+    cx() { SHCMP_N=$((SHCMP_N + 1)); printf '%s\n' "$2" > "$SHCMP_DUMP/x_case$SHCMP_N.sh"; printf '%s\t%s\t%s\n' "$1" "${3:-}" "${4:-}" > "$SHCMP_DUMP/x_case$SHCMP_N.meta"; }
 fi
 
 # ---- quoting ----
@@ -880,6 +882,44 @@ c "sh -c no args" 'sh -c' e
 c "sh script missing" 'sh nosuchscript; echo $?' e
 c "sh -- operand" 'echo "echo ok" > s; sh -- s' B
 c "sh -c with dollar zero" 'sh -c "echo \$0" myname' B
+
+# ---- gold-standard audit (tools/sh-gold.sh): cases found by comparing with the dash/FreeBSD agreement ----
+c "length of \$# is \${##}" 'set -- 1 2 3 4 5 6 7 8 9 10 11 12; echo ${##}' B "Both dash and FreeBSD sh read \${##} as the length of \$#; POSIX leaves it ambiguous."
+c "length of special parameters" 'set -- a; x=$-; echo ${#?} ${#-} ${#x}; [ "${#-}" = "${#x}" ] && echo same' B
+c "local without value keeps the value" 'b=g; f() { local b; echo "[$b]"; b=x; }; f; echo "$b"' B "local is not POSIX; dash and FreeBSD sh keep the value."
+c "local assignment is not split" 'w="@ @"; f() { local v=$w; echo "[$v]"; }; f' B "local is not POSIX; dash and FreeBSD sh treat v=\$w like an assignment."
+c "local - restores options" 'f() { local -; set -a; case $- in *a*) echo in;; esac; }; f; case $- in *a*) echo leaked;; esac' B "local is not POSIX; dash and FreeBSD sh restore the options."
+c "command readonly assignment not split" 'x="a b"; \command readonly d=$x; echo "$d"; command command readonly e=$x; echo "$e"' B
+c "unset drops the export attribute" 'export U; U=u; unset U; U=new; env | grep -c "^U="' B "POSIX: unset removes the variable; the later assignment creates an unexported one."
+c "dollar-at in assignment joins with IFS" 'IFS=:; set -- x "y z"; s=$@; echo "$s"; v="[$@]"; echo "$v"' B "POSIX leaves the separator unspecified (XCU 2.5.2); dash and FreeBSD sh use the first IFS character."
+c "null test of dollar-at" 'set -- ""; echo ${@:-m}; set -- "" ""; IFS=; echo "${*:-n}"' B
+cx "suffix trim on dollar-at" 'set -- 1a 2a 3a; printf "[%s]" ${@%a}; echo; set -- Q R; printf "[%s]" "${@#Q}"; echo' B "POSIX leaves \${@%pat} unspecified (XCU 2.6.2); dash, FreeBSD sh and busybox ash trim the joined string, bash and yash trim every parameter."
+c "tilde after colon in word of default" 'HOME=/h; x=~:${u-~:~}; echo $x; x=${u-a:~}; echo $x; echo ${u-a:~}' B "XCU 2.6.1: tilde expansion applies to the word of \${x-word} and, in an assignment, after colons."
+c "command hash is remembered" 'mkdir one two; echo "echo two" > two/mycmd; chmod +x two/mycmd; PATH=one:two:$PATH; mycmd; echo "echo one" > one/mycmd; chmod +x one/mycmd; mycmd; hash -r; mycmd; rm one/mycmd two/mycmd; mycmd 2>/dev/null; echo $?' B "XCU hash: the location found by the first search is remembered until PATH changes or hash -r."
+c "hash lists remembered commands" 'cat /dev/null; hash | wc -l | tr -d " "; hash -r; hash | wc -l | tr -d " "' B
+c "test -t with a huge number" 'test -t 12345678910; echo $?' B
+c "test -t with a non-number" '[ -t x ] 2>/dev/null; echo $?' Be
+cx "test with -a and -o as operands" '[ -a -a ]; echo $?; [ -a -a -a ]; echo $?; [ -o -o ]; echo $?; [ -a -a -a -a -a ]; echo $?' B "Undefined by POSIX (XCU test: -a and -o are binary primaries); dash and FreeBSD sh agree."
+c "kill -l with a number" 'kill -l 0 2>/dev/null; echo $?; kill -l 128 2>/dev/null; echo $?; kill -l 130' Be
+cx "umask numeric and bad forms" 'umask 0124; umask -rwx 2>/dev/null; echo $?; umask; umask 1234567; umask' Be "A numeric mask keeps its permission bits; a mode starting with - is an option error."
+c "ulimit extra operand" 'ulimit 1 2 2>/dev/null; echo $?' Be
+c "ulimit -a combined with -f" 'ulimit -f -a >/dev/null; echo $?' B
+c "getopts with a bad variable name" 'set -- -c foo -h; getopts "hc:" opt- 2>/dev/null; echo "$? [$OPTARG] $OPTIND"' B
+c "trap -- takes -l as action" 'trap -- -l USR1; trap' B "XCU 2.14 trap and XBD 12.2 guideline 10: -- ends the options."
+c "ENOEXEC script runs in a new shell" 'printf "echo hello \$BLAH\n" > snork; chmod +x snork; BLAH=123; ./snork; BLAH=123 ./snork; BLAH=123 exec ./snork' B "XCU 2.9.1.1: an ENOEXEC file is run by a new shell, which sees only the environment."
+c "dot of a directory" 'mkdir d; . ./d; echo $?' B
+c "PS4 expansion error is ignored" 'PS4="+ \$(( 1 / 0 )) "; set -x; echo one; echo status=$?' Be
+c "pwd of a removed directory" 'mkdir z; cd z; rmdir ../z; pwd >/dev/null 2>&1; echo $?' B
+c "glob keeps repeated slashes" 'mkdir -p d; : > d/f; echo ./d//f* .//d/f* d//[f]' B "XCU 2.14.3: slashes in the pattern are matched by slashes; the result keeps the pathname as written."
+c "arithmetic variable overflow is an error" 'x=9223372036854775808; (echo $((x))) 2>/dev/null; echo $?; y=-9223372036854775808; echo $((y))' Be "Undefined by POSIX; dash and FreeBSD sh refuse a variable whose value does not fit."
+c "command eval syntax error does not exit" 'command eval "( )" 2>/dev/null; echo a$?; command eval "echo hi; )" 2>/dev/null; echo b$?' Be "XCU 2.14: command removes the special properties of eval."
+c "errexit applies inside command substitution in a condition" 'set -e; if echo $(echo 1; false; echo 2); then echo A; fi; echo end' B "XCU 2.14 set -e: the -e setting applies to each subshell environment separately."
+
+c "empty quoted field survives an adjacent split expansion" 'set -- a ""; s=" "; set -- "$@"$s; echo $#' B "POSIX 2.6.5: a quoted empty string is a field; dash alone loses it for an empty \$e."
+c "length of dollar-at is the joined length" 'set -- abc de; echo ${#@} ${#*}' B "POSIX leaves \${#@} unspecified (XCU 2.6.2); dash and FreeBSD sh give the length of the joined parameters."
+c "null test of two empty parameters" 'set -- "" ""; echo "[${@:-m}]"; set -- ""; echo "[${@:-m}]"' B
+c "ulimit -a with an operand" 'ulimit -a 42 >/dev/null 2>&1; echo $?' Be
+c "scripts: NUL bytes are ignored" 'printf "echo a\0b\n" > s; . ./s' B "POSIX leaves a script with NUL bytes undefined; dash and FreeBSD sh ignore them."
 
 # ---- EXEMPT section: not POSIX on purpose -----------------------------------
 # These probe behaviour POSIX leaves undefined or that bash/ksh scripts rely

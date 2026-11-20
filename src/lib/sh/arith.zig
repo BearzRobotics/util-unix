@@ -143,7 +143,11 @@ pub const Evaluator = struct {
     fn varValue(self: *Evaluator, name: []const u8) Error!i64 {
         const v = self.host.get(self.host.ctx, name) orelse return 0;
         if (v.len == 0) return 0;
-        return parseNumber(v) orelse self.fail(.illegal_number, v, "Illegal number: {s}", .{v});
+        // a variable whose value does not fit is an error, unlike a literal
+        // (dash and FreeBSD sh agree; docs/posix-shell-differences.md)
+        const n = parseNumber(v) orelse return self.fail(.illegal_number, v, "Illegal number: {s}", .{v});
+        if (numberOverflows(v)) return self.fail(.illegal_number, v, "Illegal number: {s}", .{v});
+        return n;
     }
 
     // --- grammar ---
@@ -304,14 +308,20 @@ pub const Evaluator = struct {
 /// strtoimax does, which dash relies on (FreeBSD sh reports an error instead;
 /// POSIX leaves it undefined, so dash is followed, docs/posix-shell-differences.md).
 fn parseWrapping(digits: []const u8, base: u8) i64 {
+    return parseSat(digits, base, false);
+}
+
+fn parseSat(digits: []const u8, base: u8, neg: bool) i64 {
+    const limit: u64 = @as(u64, std.math.maxInt(i64)) + @intFromBool(neg);
     var v: u64 = 0;
     for (digits) |c| {
         const d = std.fmt.charToDigit(c, base) catch unreachable;
         const m = @mulWithOverflow(v, @as(u64, base));
         const a = @addWithOverflow(m[0], @as(u64, d));
-        if (m[1] != 0 or a[1] != 0 or a[0] > std.math.maxInt(i64)) return std.math.maxInt(i64);
+        if (m[1] != 0 or a[1] != 0 or a[0] > limit) return if (neg) std.math.minInt(i64) else std.math.maxInt(i64);
         v = a[0];
     }
+    if (neg) return @bitCast(0 -% v);
     return @intCast(v);
 }
 
@@ -333,8 +343,35 @@ pub fn parseNumber(s: []const u8) ?i64 {
         t = t[1..];
     }
     for (t) |c| if (std.fmt.charToDigit(c, base) == error.InvalidCharacter) return null;
-    const v = parseWrapping(t, base);
-    return if (neg) 0 -% v else v;
+    return parseSat(t, base, neg);
+}
+
+/// True when the digits of a (valid) number string do not fit in intmax_t.
+fn numberOverflows(s: []const u8) bool {
+    var t = std.mem.trimStart(u8, s, " \t\n");
+    var neg = false;
+    if (t.len > 0 and (t[0] == '-' or t[0] == '+')) {
+        neg = t[0] == '-';
+        t = t[1..];
+    }
+    var base: u8 = 10;
+    if (t.len > 2 and t[0] == '0' and (t[1] == 'x' or t[1] == 'X')) {
+        base = 16;
+        t = t[2..];
+    } else if (t.len > 1 and t[0] == '0') {
+        base = 8;
+        t = t[1..];
+    }
+    var v: u64 = 0;
+    for (t) |c| {
+        const d = std.fmt.charToDigit(c, base) catch return false;
+        const m = @mulWithOverflow(v, @as(u64, base));
+        const a = @addWithOverflow(m[0], @as(u64, d));
+        if (m[1] != 0 or a[1] != 0) return true;
+        v = a[0];
+    }
+    const limit: u64 = @as(u64, std.math.maxInt(i64)) + @intFromBool(neg);
+    return v > limit;
 }
 
 const TestHost = struct {

@@ -813,6 +813,7 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         _ = e;
         return 2;
     };
+    sh.forgetRelativeHash();
     const new_pwd: []const u8 = if (physical) (physicalCwd(a) orelse target) else curpath;
     sh.setVarRaw("OLDPWD", old_pwd) catch {};
     sh.setVarRaw("PWD", new_pwd) catch {};
@@ -1325,7 +1326,7 @@ const T = struct {
 
     fn isUnary(s: []const u8) bool {
         if (s.len != 2 or s[0] != '-') return false;
-        return std.mem.indexOfScalar(u8, "rwxefdcbpugkstznhLSOGa", s[1]) != null;
+        return std.mem.indexOfScalar(u8, "rwxefdcbpugkstznhLSOG", s[1]) != null;
     }
 
     fn binop(s: []const u8) ?enum { seq, sne, slt, sgt, eq, ne, gt, ge, lt, le, nt, ot, ef } {
@@ -1434,7 +1435,7 @@ const T = struct {
             'r' => return sys.access(s, 4),
             'w' => return sys.access(s, 2),
             'x' => return sys.access(s, 1),
-            'e', 'a' => return if (sys.stat(s, true)) |_| true else |_| false,
+            'e' => return if (sys.stat(s, true)) |_| true else |_| false,
             'h', 'L' => return if (sys.stat(s, false)) |i| i.kind == .symlink else |_| false,
             else => {},
         }
@@ -1501,6 +1502,11 @@ fn evalCounted(t: *T, args: []const []const u8) TestErr!bool {
         2 => {
             if (eq(u8, args[0], "!")) return args[1].len == 0;
             if (T.isUnary(args[0])) return t.evalUnary(args[0][1], args[1]);
+            // dash and FreeBSD sh read `[ -a -a ]` as an empty AND and `[ -o -o ]`
+            // as an empty OR: false and true, no error; any other `-a x` is an
+            // error as above.
+            if (eq(u8, args[0], "-a") and eq(u8, args[1], "-a")) return false;
+            if (eq(u8, args[0], "-o") and eq(u8, args[1], "-o")) return true;
             return t.fail("{s}: unexpected operator", .{args[0]});
         },
         3 => {
@@ -1902,8 +1908,10 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var scale: u64 = 1024;
     var hard = false;
     var soft_set = false;
+    var list_all = false;
     while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
         for (args[i][1..]) |c| switch (c) {
+            'a' => list_all = true,
             'H' => hard = true,
             'S' => soft_set = true,
             'f' => {
@@ -1943,6 +1951,30 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 return 2;
             },
         };
+    }
+    if (list_all) {
+        if (i < args.len) {
+            sh.diagCmdK(.usage, null, "ulimit", "too many arguments", .{});
+            return 2;
+        }
+        const all = [_]struct { c: u8, r: u32, scale: u64, what: []const u8 }{
+            .{ .c = 't', .r = 0, .scale = 1, .what = "time(seconds)" },
+            .{ .c = 'f', .r = 1, .scale = 1024, .what = "file(blocks)" },
+            .{ .c = 'd', .r = 2, .scale = 1024, .what = "data(kbytes)" },
+            .{ .c = 's', .r = 3, .scale = 1024, .what = "stack(kbytes)" },
+            .{ .c = 'c', .r = 4, .scale = 1024, .what = "coredump(blocks)" },
+            .{ .c = 'm', .r = 5, .scale = 1024, .what = "memory(kbytes)" },
+            .{ .c = 'n', .r = 7, .scale = 1, .what = "nofiles(descriptors)" },
+            .{ .c = 'v', .r = 9, .scale = 1024, .what = "vmemory(kbytes)" },
+        };
+        var out: std.ArrayList(u8) = .empty;
+        for (all) |e| {
+            const l = sys.getrlimit(e.r) catch continue;
+            const v = if (hard) l.hard else l.soft;
+            if (v == sys.infinity) out.print(a, "-{c}: {s: <24}unlimited\n", .{ e.c, e.what }) catch return 2 else out.print(a, "-{c}: {s: <24}{d}\n", .{ e.c, e.what, v / e.scale }) catch return 2;
+        }
+        _ = sh.out(out.items);
+        return 0;
     }
     var cur = sys.getrlimit(res) catch {
         sh.diagCmdK(.bad_limit, null, "ulimit", "error getting limit ({s})", .{sys.strerror(sys.errno())});
