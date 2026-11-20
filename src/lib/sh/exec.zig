@@ -310,16 +310,19 @@ pub fn waitFor(sh: *Shell, pid: i32, report: bool) u8 {
 }
 
 fn childInit(sh: *Shell, bg: bool) void {
+    const was_subshell = sh.in_subshell;
     sh.in_subshell = true;
     sh.trap_set = @splat(false);
     jobs.clearAll(sh);
     sys.clearPendingAny();
-    if (sh.flags.interactive) {
+    if (sh.flags.interactive and !was_subshell) {
         // The interactive shell's own dispositions must not leak into
         // commands (POSIX XCU sh "Signals").
-        for ([_]u8{ 2, 3, 15, 20, 21, 22 }) |sg| if (!sh.inherited_ignore[sg]) {
-            _ = sys.setSignal(sg, .default);
-        };
+        for ([_]u8{ 2, 3, 15, 20, 21, 22 }) |sg| {
+            // a `trap '' SIG` the user set stays in force for the child and what it runs
+            const user_ignored = if (sh.traps[sg]) |t| t.len == 0 else false;
+            if (!sh.inherited_ignore[sg] and !user_ignored) _ = sys.setSignal(sg, .default);
+        }
     }
     var i: u8 = 0;
     while (i < sys.nsig) : (i += 1) {
@@ -328,7 +331,7 @@ fn childInit(sh: *Shell, bg: bool) void {
                 if (sh.parent_traps[i]) |old| sh.gpa.free(old);
                 sh.parent_traps[i] = t;
                 sh.traps[i] = null;
-                if (i > 0) _ = sys.setSignal(i, .default);
+                if (i > 0 and !sh.inherited_ignore[i]) _ = sys.setSignal(i, .default);
             }
         }
     }

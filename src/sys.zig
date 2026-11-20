@@ -45,6 +45,19 @@ pub fn restoreSigpipe() void {
     defaultSignal(.pipe);
 }
 
+/// Put SIGPIPE and SIGIO back to what the process inherited. `std.Io.Threaded`
+/// installs a do-nothing handler for both at startup and keeps the original
+/// actions; restoring those (rather than forcing the default) keeps a signal
+/// that was ignored on entry ignored, which POSIX requires of a shell (XCU 2.15 trap:
+/// "Signals that were ignored on entry to a non-interactive shell cannot be trapped or reset").
+pub fn restoreInheritedSignals(io: std.Io) void {
+    if (comptime !is_linux) return restoreSigpipe();
+    const t: *std.Io.Threaded = @ptrCast(@alignCast(io.userdata));
+    if (!t.have_signal_handler) return restoreSigpipe();
+    if (comptime @TypeOf(t.old_sig_io) != void) std.posix.sigaction(.IO, &t.old_sig_io, null);
+    if (comptime @TypeOf(t.old_sig_pipe) != void) std.posix.sigaction(.PIPE, &t.old_sig_pipe, null);
+}
+
 // ---------------------------------------------------------------------------
 // Process and descriptor layer for the POSIX shell (decision 0009).
 //

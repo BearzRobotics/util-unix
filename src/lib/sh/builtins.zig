@@ -297,8 +297,21 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             _ = sys.setSignal(i, .default);
         };
     }
+    // an interactive shell hands over the dispositions it set up for itself as defaults
+    const own = [_]u8{ 2, 3, 15, 20, 21, 22 };
+    const interactive_main = sh.flags.interactive and !sh.in_subshell;
+    if (interactive_main) for (own) |sg| {
+        const user_ignored = if (sh.traps[sg]) |t| t.len == 0 else false;
+        if (!sh.inherited_ignore[sg] and !user_ignored) _ = sys.setSignal(sg, .default);
+    };
     sys.execve(a, path, rest, env) catch {};
     const e = sys.errno();
+    if (interactive_main) for (own) |sg| {
+        // exec failed: the shell goes on as before
+        if (sh.traps[sg]) |t| {
+            if (t.len > 0) _ = sys.setSignal(sg, .catch_flag);
+        } else if (!sh.inherited_ignore[sg]) _ = sys.setSignal(sg, shellDefault(sh, sg));
+    };
     if (e == sys.E_NOENT or e == sys.E_NOTDIR) {
         sh.diagCmdK(.not_found, name, "exec", "{s}: not found", .{name});
         return die(sh, 127);
@@ -617,6 +630,19 @@ fn timesCmd(sh: *Shell, a: Allocator, _: []const []const u8) u8 {
 
 // --- trap -----------------------------------------------------------------------------------
 
+/// What `trap - SIG` restores: the system default, except for the signals an interactive
+/// shell handles itself (POSIX XCU sh, Signals: INT caught for line editing, QUIT and TERM
+/// ignored, and the job-control stops when monitoring).
+fn shellDefault(sh: *Shell, n: u8) sys.SignalAction {
+    if (!sh.flags.interactive or sh.in_subshell) return .default;
+    return switch (n) {
+        2 => .catch_flag,
+        3, 15 => .ignore,
+        20, 21, 22 => if (sh.jc) .ignore else .default,
+        else => .default,
+    };
+}
+
 fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
     var had_dd = false;
@@ -672,13 +698,16 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             st = 1;
             continue;
         };
+        // A signal that was ignored on entry to a non-interactive shell cannot be trapped or
+        // reset; no error is reported (POSIX XCU 2.15 trap)
+        if (n > 0 and sh.inherited_ignore[n] and !sh.flags.interactive) continue;
         if (sh.traps[n]) |old| sh.gpa.free(old);
         sh.traps[n] = null;
         sh.trap_set[n] = true;
         if (action) |cmd| {
             sh.traps[n] = sh.gpa.dupe(u8, cmd) catch return 2;
             if (n > 0 and !sh.inherited_ignore[n]) _ = sys.setSignal(n, if (cmd.len == 0) .ignore else .catch_flag);
-        } else if (n > 0 and !sh.inherited_ignore[n]) _ = sys.setSignal(n, .default);
+        } else if (n > 0 and !sh.inherited_ignore[n]) _ = sys.setSignal(n, shellDefault(sh, n));
     }
     return st;
 }

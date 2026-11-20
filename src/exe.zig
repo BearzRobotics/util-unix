@@ -19,7 +19,7 @@ pub const std_options: std.Options = .{
 pub const panic = if (builtin.mode == .debug) std.debug.FullPanic(std.debug.defaultPanic) else std.debug.simple_panic;
 
 pub fn main(init: std.process.Init) !u8 {
-    sys.restoreSigpipe();
+    sys.restoreInheritedSignals(init.io);
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     return commands.get(options.command)(.{
         .name = options.command,

@@ -5,11 +5,16 @@
  * a dispositions inherited as ignored from the machine that runs the tests cannot
  * change the result. Built by test/test_sh_corpora.sh when a C compiler is available.
  *
- *   resetsig COMMAND [ARGS...]
+ *   resetsig [-t SECONDS] COMMAND [ARGS...]
+ *
+ * -t arms alarm(2) before the exec (a pending alarm survives it), so a hung run ends
+ * without a `timeout(1)` in between: timeout installs handlers for INT, QUIT, HUP and
+ * TERM, which would undo a signal the test wants to be inherited as ignored.
  */
 #define _DEFAULT_SOURCE 1
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 int main(int argc, char **argv)
@@ -18,8 +23,15 @@ int main(int argc, char **argv)
     struct sigaction dfl;
     int n;
 
-    if (argc < 2) {
-        fprintf(stderr, "resetsig: usage: resetsig COMMAND [ARGS...]\n");
+    unsigned secs = 0;
+    int first = 1;
+
+    if (argc > 3 && argv[1][0] == '-' && argv[1][1] == 't' && argv[1][2] == '\0') {
+        secs = (unsigned)atoi(argv[2]);
+        first = 3;
+    }
+    if (argc <= first) {
+        fprintf(stderr, "resetsig: usage: resetsig [-t SECONDS] COMMAND [ARGS...]\n");
         return 2;
     }
     sigemptyset(&none);
@@ -30,7 +42,9 @@ int main(int argc, char **argv)
     for (n = 1; n < NSIG; n++)
         if (n != SIGKILL && n != SIGSTOP)
             sigaction(n, &dfl, NULL);
-    execvp(argv[1], &argv[1]);
+    if (secs > 0)
+        alarm(secs);
+    execvp(argv[first], &argv[first]);
     perror("resetsig: exec failed");
     return 126;
 }

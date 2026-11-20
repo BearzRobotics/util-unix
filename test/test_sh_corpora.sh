@@ -63,11 +63,19 @@ corpus_yash() {
     if [ ! -d "$d" ]; then echo "SKIP yash: not downloaded (tools/fetch-sh-corpora.sh)"; return; fi
     if [ -z "$RUNNER_SH" ]; then echo "SKIP yash: needs bash, yash or busybox to run the runner"; return; fi
     mkdir -p "$TMP/yash/ours" "$TMP/yash/dash"
-    # Skipped: the signal-disposition files (sig*-p) start the shell through yash's
-    # compiled `resetsig` helper and the %REQUIRETTY% files need a controlling
-    # terminal (ptwrap/checkfg); neither helper is built here.
+    # The signal-disposition files (sig*-p) must start with every signal at its default
+    # (yash starts its runner through its own compiled `resetsig`): test/sh_corpora/resetsig.c
+    # is an equivalent, built here with cc or zig cc. Without a compiler those files are
+    # skipped. The %REQUIRETTY% files need a controlling terminal (ptwrap/checkfg) and are
+    # not run.
+    RESETSIG=""
+    for cc in cc gcc "zig cc"; do
+        command -v "${cc%% *}" > /dev/null 2>&1 || continue
+        $cc -O1 -o "$TMP/resetsig" "$HERE/sh_corpora/resetsig.c" > /dev/null 2>&1 && { RESETSIG="$TMP/resetsig"; break; }
+    done
+    [ -n "$RESETSIG" ] || echo "note yash: no C compiler (cc, gcc, zig cc): the sig*-p files are skipped"
     for f in "$d"/*-p.tst; do
-        case "$(basename "$f")" in sig*) continue;; esac
+        case "$(basename "$f")" in sig*) [ -n "$RESETSIG" ] || continue;; esac
         grep -q '%REQUIRETTY%' "$f" && continue
         echo "$f"
     done > "$TMP/yash/list"
@@ -75,7 +83,8 @@ corpus_yash() {
 #!/bin/sh
 # run1.sh TESTEE OUTDIR FILE
 b="\$(basename "\$3" .tst)"
-exec $SANDBOX $RUNNER_SH "$HERE/sh_corpora/yash-runner.sh" "\$1" "\$3" "\$2/\$b.res" > /dev/null 2>&1
+case "\$b" in sig*) pre="$RESETSIG -t 900"; export YASH_RUNNER_TIMEOUT="";; *) pre="";; esac
+exec $SANDBOX \$pre $RUNNER_SH "$HERE/sh_corpora/yash-runner.sh" "\$1" "\$3" "\$2/\$b.res" > /dev/null 2>&1
 RUN1
     chmod +x "$TMP/run1.sh"
     while read -r f; do printf '%s\n' "$f"; done < "$TMP/yash/list" |
