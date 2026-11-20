@@ -1,0 +1,2 @@
+-c:1:21: error: '%sl' matches more than one job [SH5017]
+rc=1

@@ -37,6 +37,7 @@ Every message of sh has a stable code `SHxxxx`. This file is generated from `src
 | SH4003 | cannot_fork | 2 | A process or pipe could not be created |
 | SH4004 | cannot_open_script | 127 | The script file named on the command line cannot be opened |
 | SH4005 | errexit_exit | 0 | `set -e` ended the shell after a failing command (note, rich and json styles only) |
+| SH4006 | stopped_jobs | 1 | `exit` was refused because jobs are stopped |
 | SH5001 | illegal_option | 2 | A builtin was given an option it does not have |
 | SH5002 | cannot_shift | 2 | `shift` was asked to drop more parameters than exist |
 | SH5003 | cannot_cd | 2 | `cd` could not change directory |
@@ -50,6 +51,10 @@ Every message of sh has a stable code `SHxxxx`. This file is generated from `src
 | SH5011 | alias_not_found | 1 | `alias` or `unalias` named an alias that is not defined |
 | SH5012 | bad_limit | 1 | `ulimit` could not read or set the limit |
 | SH5013 | not_in_function | 2 | `local` was used outside a function |
+| SH5014 | no_such_job | 1 | A job specification names no job |
+| SH5015 | no_job_control | 1 | Job control could not be enabled |
+| SH5016 | history_error | 1 | `fc` found no such history entry or history is off |
+| SH5017 | ambiguous_job | 1 | A job specification matches several jobs |
 | SH6001 | invocation_option | 2 | `sh` was started with an option it does not have |
 | SH6002 | missing_argument | 2 | `sh -c` or `-o` needs an argument |
 | SH7001 | lint_unquoted_expansion | 1 | An unquoted expansion is split into words and globbed |
@@ -470,6 +475,20 @@ Good:
 
 dash says: `(none: dash exits silently)`
 
+## SH4006 stopped_jobs
+
+An interactive shell with job control warns once when `exit` (or end of input) would abandon stopped jobs; the next `exit` leaves and hangs them up. Not reported by a non-interactive shell.
+
+Bad:
+
+    (interactive) sleep 9 ^Z; exit
+
+Good:
+
+    (interactive) sleep 9 ^Z; exit; exit
+
+dash says: `You have stopped jobs.`
+
 ## SH5001 illegal_option
 
 A special builtin that gets an invalid option makes a non-interactive shell exit (POSIX XCU 2.8.1).
@@ -651,6 +670,62 @@ Good:
     f() { local x=1; }
 
 dash says: `local: not in a function`
+
+## SH5014 no_such_job
+
+`fg`, `bg`, `kill`, `wait` and `jobs` accept job specifications (POSIX XCU 3.204 Job Control Job ID). With no argument `fg` and `bg` act on the current job, which does not exist when no job was started.
+
+Bad:
+
+    fg
+
+Good:
+
+    sleep 9 & fg
+
+dash says: `fg: No current job`
+
+## SH5015 no_job_control
+
+An interactive shell enables job control (`set -m`) only when standard input, output or error is a terminal it can control. Otherwise it runs without process groups and says so.
+
+Bad:
+
+    (sh -i < file) set -m
+
+Good:
+
+    (a terminal)
+
+dash says: `can't access tty; job control turned off`
+
+## SH5016 history_error
+
+`fc` selects commands by number (negative counts back from the most recent) or by the text a command starts with. History exists only in an interactive shell.
+
+Bad:
+
+    fc -l
+
+Good:
+
+    (interactive) fc -l
+
+dash says: `fc: not found`
+
+## SH5017 ambiguous_job
+
+`%string` and `%?string` must select exactly one job (POSIX XCU 3.204).
+
+Bad:
+
+    sleep 7 & sleep 8 & fg %sl
+
+Good:
+
+    sleep 7 & sleep 8 & fg %sleep\ 7
+
+dash says: `fg: %sl: Ambiguous`
 
 ## SH6001 invocation_option
 

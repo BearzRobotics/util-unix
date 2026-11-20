@@ -193,6 +193,25 @@ The status of a pipeline is that of its last command; the others are lost (`fals
 | `cat <<< hi` | dash, busybox-ash, yash-posix: `rc=2`; bash-posix, bash-as-sh, yash: `hi~rc=0` | POSIX-undefined | not in POSIX. Ours (`rc=2`): syntax error, as dash |
 | `echo ${RANDOM:+set}` | dash, yash-posix: `~rc=0`; bash-posix, bash-as-sh, busybox-ash, yash: `set~rc=0` | POSIX-undefined | not in POSIX. Ours (`~rc=0`): unset, as dash |
 
+# INTERACTIVE USE (milestone 2)
+
+Hand-maintained (the table above is generated). Gold standard: dash and FreeBSD sh agree, so that is what we do; where they differ POSIX, then dash, decides.
+
+| Behaviour | dash | FreeBSD sh | Ours | Why |
+|---|---|---|---|---|
+| `jobs` column of the command | 33 columns | 30 | 33 (dash) | POSIX leaves the layout open; dash |
+| `jobs` order | current job first, then newest first | oldest first | dash's | POSIX leaves it open |
+| marker of a finished job in `jobs` | `+`/`-` | blank | `+`/`-` (dash) | POSIX 2024 `jobs`: the current/previous marker is part of the format |
+| `jobs -l` for a pipeline | one line per process, text ends in `\|` | one line per process, no `\|` | dash's | open |
+| `fg`, `bg` with no job | `No current job` | same | same | agree |
+| `wait %9` for a missing job | error, status 127 | silent | error (dash) | POSIX: unspecified |
+| `set -m` without a terminal in a script | error | accepted | accepted | POSIX 2024 `set -m`: job control is enabled; no terminal is needed for process groups |
+| `fc` | not provided | provided, `%5d `-formatted | FreeBSD's | dash lacks it; POSIX requires `fc` |
+| `history`, `!` expansion | absent | absent | absent | not POSIX |
+| `kill %n` on a stopped job | SIGTERM stays pending until continued | same | same | agree |
+| default editing mode | none (no libedit) | emacs-style (libedit) | emacs; `set -o vi` is POSIX vi mode | POSIX `set -o vi`; FreeBSD for the default |
+| ESC followed at once by a key in vi mode | n/a | libedit | ESC then the key | terminals cannot tell Alt from a fast typist |
+
 # REPRODUCING
 
     sh test/test_sh.sh                       # run the suite (zig build -Dcommands=sh first)

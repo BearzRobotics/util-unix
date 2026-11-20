@@ -241,6 +241,7 @@ Catalog (what each code means, an example that triggers it, and the dash message
 | SH4003 | cannot_fork | 2 | `(ulimit -u 1; : \| :)` | `Cannot fork` |
 | SH4004 | cannot_open_script | 127 | `sh nosuch.sh` | `Can't open nosuch.sh` |
 | SH4005 | errexit_exit | - | `set -e ; false ; echo unreachable` | `(none: dash exits silently)` |
+| SH4006 | stopped_jobs | 1 | `exit` with a stopped job | `You have stopped jobs.` |
 | SH5001 | illegal_option | 2 | `set -Z` | `set: Illegal option -Z` |
 | SH5002 | cannot_shift | 2 | `set -- a; shift 2` | `shift: can't shift that many` |
 | SH5003 | cannot_cd | 2 | `cd /nonexistent` | `cd: can't cd to /nonexistent` |
@@ -254,6 +255,10 @@ Catalog (what each code means, an example that triggers it, and the dash message
 | SH5011 | alias_not_found | 1 | `unalias nosuch` | `unalias: nosuch: not found` |
 | SH5012 | bad_limit | 1 | `ulimit -n 99999999999` | `ulimit: bad limit: Operation not permitted` |
 | SH5013 | not_in_function | 2 | `local x=1` | `local: not in a function` |
+| SH5014 | no_such_job | 1 | `fg` | `fg: No current job` |
+| SH5015 | no_job_control | 1 | `sh -i < file` | `can't access tty; job control turned off` |
+| SH5016 | history_error | 1 | `fc -l` (not interactive) | `fc: history not active` |
+| SH5017 | ambiguous_job | 1 | `fg %sl` | `fg: %sl: Ambiguous` |
 | SH6001 | invocation_option | 2 | `sh -Z` | `Illegal option -Z` |
 | SH6002 | missing_argument | 2 | `sh -c` | `-c requires an argument` |
 | SH7001 | lint_unquoted_expansion | 1 | `rm $file` | `(none)` |

@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5014]: current job: no such job
+  |
+1 | fg
+  | ^^
+help: `jobs` lists the jobs; a specification is `%n`, `%%`, `%+`, `%-`, `%string` or `%?string`
+rc=1

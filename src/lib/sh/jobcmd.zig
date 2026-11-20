@@ -55,9 +55,13 @@ pub fn jobsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         }
     } else {
         for (sh.jobs.items) |j| picked.append(a, j) catch return 2;
+        // current job first, then the previous one, then the rest newest first
         std.mem.sort(*jobs.Job, picked.items, {}, struct {
             fn lt(_: void, l: *jobs.Job, r: *jobs.Job) bool {
-                return l.id > r.id;
+                const ls = l.state() == .stopped;
+                const rs = r.state() == .stopped;
+                if (ls != rs) return ls;
+                return l.stamp > r.stamp;
             }
         }.lt);
     }
@@ -217,10 +221,6 @@ pub fn killJob(sh: *Shell, spec: []const u8, sig: u8) ?u8 {
             sh.diagCmd("kill", "{s}", .{sys.strerror(sys.errno())});
             return 1;
         };
-    }
-    // A stopped job needs SIGCONT to act on a terminating signal.
-    if (sig != 18 and sig != 19 and sig != 20 and sig != 21 and sig != 22 and j.state() == .stopped) {
-        if (j.grouped and j.pgid != 0) sys.killpg(j.pgid, 18) catch {};
     }
     return 0;
 }

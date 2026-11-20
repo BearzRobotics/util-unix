@@ -1,0 +1,2 @@
+{"code":"SH5016","kind":"history_error","severity":"error","file":"-c","line":1,"column":1,"end":3,"message":"fc: history not active","help":"`fc -l` lists the entries; an operand is a number, a negative offset or the start of a command","token":"","expected":"","posix":"fc: history not active"}
+rc=1

@@ -1,0 +1,2 @@
+{"code":"SH5017","kind":"ambiguous_job","severity":"error","file":"-c","line":1,"column":21,"end":25,"message":"'%sl' matches more than one job","help":"make the string longer so that it matches only one job, or use `%n`","token":"","expected":"","posix":"kill: %sl: Ambiguous"}
+rc=1

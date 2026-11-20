@@ -368,6 +368,9 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
 }
 
 fn spawnBackground(sh: *Shell, node: *const Node) u8 {
+    if (node.kind == .pipeline and node.kind.pipeline.commands.len > 1 and !node.kind.pipeline.negate) {
+        return runStagesBg(sh, node.kind.pipeline.commands);
+    }
     const job = jobs.create(sh);
     if (job != null and !useJobs(sh)) job.?.grouped = false;
     const pid = forkRun(sh, node, .{ .devnull_stdin = !sh.jc, .bg = true, .job = if (useJobs(sh)) job else null }) orelse {
@@ -400,7 +403,16 @@ fn execPipeline(sh: *Shell, node: *const Node, negate: bool, cmds: []const *cons
     return st;
 }
 
+fn runStagesBg(sh: *Shell, cmds: []const *const Node) u8 {
+    const r = runStagesImpl(sh, cmds, true);
+    return r;
+}
+
 fn runStages(sh: *Shell, cmds: []const *const Node) u8 {
+    return runStagesImpl(sh, cmds, false);
+}
+
+fn runStagesImpl(sh: *Shell, cmds: []const *const Node, bg: bool) u8 {
     const gpa = sh.gpa;
     var pids = gpa.alloc(i32, cmds.len) catch return 2;
     defer gpa.free(pids);
@@ -408,7 +420,7 @@ fn runStages(sh: *Shell, cmds: []const *const Node) u8 {
     defer fds.deinit(gpa);
     var prev_read: ?i32 = null;
     var spawned: usize = 0;
-    const job: ?*jobs.Job = if (useJobs(sh)) jobs.create(sh) else null;
+    const job: ?*jobs.Job = if (useJobs(sh) or bg) jobs.create(sh) else null;
     for (cmds, 0..) |c, i| {
         var next_pipe: ?[2]i32 = null;
         if (i + 1 < cmds.len) {
@@ -429,6 +441,8 @@ fn runStages(sh: *Shell, cmds: []const *const Node) u8 {
             .stdout = if (next_pipe) |np| np[1] else null,
             .close = closes.items,
             .job = job,
+            .bg = bg,
+            .devnull_stdin = bg and !sh.jc and i == 0,
         }) orelse {
             if (prev_read) |r| sys.close(r);
             if (next_pipe) |np| {
@@ -444,6 +458,16 @@ fn runStages(sh: *Shell, cmds: []const *const Node) u8 {
             sys.close(np[1]);
             prev_read = np[0];
         } else prev_read = null;
+    }
+    if (bg) {
+        if (job) |j| {
+            if (spawned == 0) {
+                jobs.remove(sh, j);
+                return 1;
+            }
+            sh.bg_pid = j.lastPid();
+        }
+        return 0;
     }
     if (job) |j| {
         if (spawned == 0) {

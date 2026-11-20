@@ -1,6 +1,6 @@
 # sh: compatibility record
 
-Status: milestone 1 (non-interactive core) implemented; see the test counts at the end. Date: 2026-11-19. Design: decision 0009; diagnostics: decision 0008.
+Status: milestones 1 (non-interactive core) and 2 (interactive use, line editing, history, job control) implemented; see the test counts at the end. Date: 2026-11-19. Design: decision 0009; diagnostics: decision 0008.
 
 ## Reference
 
@@ -31,9 +31,24 @@ Lexer and parser for the complete POSIX grammar (incremental, one complete comma
 | `set -o pipefail` | POSIX 2024 option, absent from dash |
 | `local` | accepted for scripts written for dash/bash; `--check` flags it (SH7007) |
 
+## Interactive use (milestone 2)
+
+| Feature | State |
+|---|---|
+| `-i`, automatic interactive mode (stdin and stderr terminals), `$-`, PS1 (parameter expansion, command substitution, arithmetic, `!` and `!!`), PS2, PS4, ENV (expanded, absolute paths), `-l` login profiles | implemented |
+| Signals: SIGINT caught, SIGQUIT and SIGTERM ignored, SIGTSTP/SIGTTIN/SIGTTOU ignored with job control, defaults restored in children | implemented |
+| `exit` and end of input with stopped jobs warn once (dash and FreeBSD sh behaviour); `ignoreeof`; errors do not end the shell | implemented |
+| Line editing: emacs mode (default) and the POSIX vi mode (all commands of sh(1p) except that `@letter` needs an alias named by a single letter); bracketed paste, UTF-8 width, SIGWINCH redraw, multi-line and wrapped buffers, incremental search | implemented (library `readline.zig`, testable without a terminal) |
+| Tab completion: files, commands (builtins, functions, aliases, PATH), variables after `$`, vi `=` `\\` `*` | implemented behind a callback (`completion.zig`) |
+| History: HISTSIZE, HISTFILE (read at start, written at exit), `fc` with `-e -l -n -r -s`, ranges, `old=new`; format of FreeBSD sh | implemented |
+| Job control: process groups, terminal hand-off, `&`, `jobs -l -p`, `fg`, `bg`, `wait` for jobs, `kill %spec`, job specs (`%%` `%+` `%-` `%n` `%string` `%?string`), stop/continue states, finished-job notification before the prompt, `set -m` | implemented |
+| `history` utility, `!` history expansion | not provided (not POSIX; decision 0009 one mode only) |
+| TMOUT, MAIL checking, `bind`/inputrc style key customisation, vi `@` with multi-letter aliases | not implemented |
+| Not testable without a human at a terminal: window-manager-driven resizing, terminals other than xterm-compatible ones, real login scripts | verified on a pseudo-terminal only |
+
 ## Known deviations and gaps
 
-1. **Interactive use is not implemented** (milestone 2): no prompts, line editing, history, `fc`, tab completion, job control (`jobs`, `fg`, `bg`, `kill %n`, `set -m` has no effect). `-i` is accepted.
+1. **Interactive use** (milestone 2) is implemented; its own limits are listed under INTERACTIVE below.
 2. **Standard input scripts are read whole before running** (`sh < script`, `sh -s`). Commands in the script that read standard input see end of file instead of the rest of the script, which dash lets them consume.
 3. **Not implemented:** floating-point `printf` conversions (`%e %f %g`), `%b` width for multibyte, `umask` symbolic assignment (`umask u=rwx`; reading with `-S` works), `ulimit -a` and the less common limits, `trap -l`, `alias` ending in a blank expanding the next word, `$RANDOM` and the other non-POSIX variables, `read -p -t -n`.
 4. **Here-document ended by end of input** keeps the final newline of the body; dash drops it (recorded in docs/posix-shell-differences.md, case `P`).
@@ -64,4 +79,4 @@ Per decision 0008. stdout and exit status stay dash's.
 
 ## Tests
 
-Counts at the end of the milestone: `test_sh.sh` 710/710 (115 cases where the shells disagree are recorded; FreeBSD sh cross-check 606 same, 23 different, of 629), `test_sh_diag.sh` 343/343, `test_sh_lint.sh` 1530/1530 (15 shellcheck disagreements noted), `zig build test` 95 passed 2 skipped. Each script prints its own: `sh test/test_sh.sh` (differential, about 700 cases), `sh test/test_sh_diag.sh` (exact messages), `sh test/test_sh_lint.sh` (shellcheck hygiene and parser oracle), `zig build test` (unit tests of lexer, parser, arithmetic, pattern matching, diagnostics, lint, plus a fuzz target and a deterministic mutation run of the parser).
+Counts at the end of milestone 1 (unchanged by milestone 2 except where noted): `test_sh.sh` 710/710 (115 cases where the shells disagree are recorded; FreeBSD sh cross-check 606 same, 23 different, of 629), `test_sh_diag.sh` 343/343, `test_sh_lint.sh` 1530/1530 (15 shellcheck disagreements noted), `zig build test` 95 passed 2 skipped. Each script prints its own: `sh test/test_sh.sh` (differential, about 700 cases), `sh test/test_sh_diag.sh` (exact messages), `sh test/test_sh_lint.sh` (shellcheck hygiene and parser oracle), `zig build test` (unit tests of lexer, parser, arithmetic, pattern matching, diagnostics, lint, plus a fuzz target and a deterministic mutation run of the parser).

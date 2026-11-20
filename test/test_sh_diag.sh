@@ -62,7 +62,7 @@ done > "$TMP/codes"
 while read -r c k; do
     if "$OURS" --explain "$c" > "$TMP/exp" 2>&1 && grep -q "^$c:" "$TMP/exp"; then ok "explain $c"; else bad "explain $c"; fi
     if grep -q "## $c $k" "$HERE/../docs/sh-diagnostics.md"; then ok "catalog documents $c"; else bad "docs/sh-diagnostics.md lacks $c"; fi
-    case "$c" in SH9000|SH4003|SH4004|SH5012|SH5013|SH6001|SH6002) continue;; esac
+    case "$c" in SH9000|SH4003|SH4004|SH4006|SH5012|SH5013|SH5015|SH6001|SH6002) continue;; esac
     if grep -q "^$c	" "$D/cases.txt"; then ok "test covers $c"; else bad "no test case for $c"; fi
 done < "$TMP/codes"
 "$OURS" --diagnostics-catalog > "$TMP/cat.md"

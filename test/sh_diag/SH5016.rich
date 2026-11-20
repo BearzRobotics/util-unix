@@ -1,0 +1,6 @@
+sh: -c:1:1: error[SH5016]: fc: history not active
+  |
+1 | fc -l
+  | ^^
+help: `fc -l` lists the entries; an operand is a number, a negative offset or the start of a command
+rc=1

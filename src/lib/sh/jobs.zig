@@ -255,6 +255,10 @@ pub fn commandText(a: Allocator, j: *const Job) Allocator.Error![]u8 {
 pub fn forkInto(sh: *Shell, job: ?*Job, text: []const u8, foreground: bool) sys.Error!i32 {
     const pid = try sys.fork();
     if (job) |j| {
+        if (!(sh.jc and !sh.in_subshell)) {
+            if (pid != 0) addPlain(sh, j, pid, text);
+            return pid;
+        }
         const pgid = if (j.pgid == 0) (if (pid == 0) sys.getpid() else pid) else j.pgid;
         if (pid == 0) {
             sys.setpgid(0, pgid) catch {};
@@ -401,7 +405,7 @@ pub fn format(sh: *const Shell, a: Allocator, out: *std.ArrayList(u8), j: *const
         const head = if (i == 0)
             try std.fmt.allocPrint(a, "[{d}] {c} {d} {s}", .{ j.id, mk, p.pid, stateText(a, p) })
         else
-            try std.fmt.allocPrint(a, "      {d} {s}", .{ p.pid, stateText(a, p) });
+            try std.fmt.allocPrint(a, "      {d}{s}{s}", .{ p.pid, if (std.mem.eql(u8, stateText(a, p), stateText(a, j.procs.items[0]))) "" else " ", if (std.mem.eql(u8, stateText(a, p), stateText(a, j.procs.items[0]))) "" else stateText(a, p) });
         try out.appendSlice(a, head);
         try padLine(out, a, head.len, 33);
         try out.appendSlice(a, p.text);

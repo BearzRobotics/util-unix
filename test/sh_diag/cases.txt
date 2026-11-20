@@ -44,3 +44,6 @@ SH7006	source ./lib.sh
 SH7007	f() { local x=1; }
 SH7008	echo -e "a\\tb"
 SH7009	[ "$a" == b ]
+SH5014	fg
+SH5016	fc -l
+SH5017	sleep 0 & sleep 0 & kill %sl

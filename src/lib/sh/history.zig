@@ -129,8 +129,9 @@ fn resolveOperand(h: *const History, op: []const u8) Resolve {
     if (std.fmt.parseInt(i64, op, 10)) |n| {
         if (n > 0) return .{ .num = @intCast(n) };
         const back: u64 = @intCast(-n);
-        if (back >= h.entries.items.len) return .{ .num = h.first };
-        return .{ .num = last - back };
+        if (back == 0) return .{ .num = last };
+        if (back > h.entries.items.len) return .{ .num = h.first };
+        return .{ .num = last + 1 - back };
     } else |_| {}
     var i = h.entries.items.len;
     while (i > 0) {
@@ -266,7 +267,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         while (n <= last_n) : (n += 1) {
             const num = if (reverse) last_n - (n - first_n) else n;
             const t = h.get(num) orelse continue;
-            if (no_num) out.appendSlice(a, "\t") catch return 2 else out.print(a, "{d: >5} ", .{num}) catch return 2;
+            if (no_num) {} else out.print(a, "{d: >5} ", .{num}) catch return 2;
             out.appendSlice(a, t) catch return 2;
             out.append(a, '\n') catch return 2;
         }

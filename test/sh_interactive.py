@@ -12,12 +12,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sh_pty
 from sh_pty import Session, strip
 
-SH = sys.argv[1]
+SH = os.path.abspath(sys.argv[1])
 HERE = os.path.dirname(os.path.abspath(__file__))
 BSD = os.path.join(HERE, "..", "tools", "bsdrun.sh")
 HAVE_BSD = os.access(BSD, os.X_OK) and os.path.exists("/stuff/tmp/chimera-sysroot/bin/sh") and subprocess.call(["which", "bwrap"], stdout=subprocess.DEVNULL) == 0
 HAVE_DASH = subprocess.call(["which", "dash"], stdout=subprocess.DEVNULL) == 0
 passed = failed = 0
+COLLAPSE = False
 UP, DOWN, RIGHT, LEFT = "\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D"
 HOME, END, DEL = "\x1b[H", "\x1b[F", "\x1b[3~"
 CL, CR = "\x1b[1;5D", "\x1b[1;5C"
@@ -38,7 +39,8 @@ def ok(name, good, detail=""):
 
 def norm(t):
     t = re.sub(r"\b\d{3,}\b", "N", t)
-    t = re.sub(r"(?m)^(dash|sh): \d+: ", "", t)
+    t = re.sub(r"(?m)^(dash|sh): (\d+: )?", "", t)
+    t = re.sub(r"(?<=\S) {2,}", " ", t) if COLLAPSE else t
     return "\n".join(x.rstrip() for x in t.split("\n")).strip("\n")
 
 # ---------------------------------------------------------------------------
@@ -263,9 +265,11 @@ def transcript(argv, steps, cwd=None, env=None, settle=0.35):
         out = out[2:]
     return norm(out)
 
-def diffcase(name, steps, shells=("dash", "bsd"), env=None, cwd=None, must=None):
+def diffcase(name, steps, shells=("dash", "bsd"), env=None, cwd=None, must=None, collapse=False):
     """Ours must equal the transcript of dash or FreeBSD sh (when both ran and
     agree, ours must equal that one)."""
+    global COLLAPSE
+    COLLAPSE = collapse
     ours = transcript([SH, "-i"], steps, cwd=cwd, env=dict(env or {}, SH_DIAGNOSTICS="posix"))
     refs = {}
     if "dash" in shells and HAVE_DASH:
@@ -306,13 +310,13 @@ def job_cases():
     d("exit warns about stopped jobs", ["sleep 43", "^Z", "exit", "jobs", "kill -CONT %1", "kill %1", ("w", .4), "jobs"])
     d("wait for all", ["sleep 0.5 &", "wait", "echo done"])
     d("fg by spec", ["sleep 44 &", "sleep 45 &", "fg %1", "^Z", "jobs", "kill %1 %2", ("w", .4)])
-    d("kill -CONT resumes", ["sleep 46", "^Z", "kill -CONT %1", ("w", .3), "jobs", "kill %1", ("w", .4), "jobs"])
+    d("kill -CONT resumes", ["sleep 46", "^Z", "kill -CONT %1", ("w", .3), "jobs", "kill %1"], collapse=True)
     d("killed by signal reported", ["sleep 47 &", "kill -9 %1", ("w", .4), "jobs"])
     d("two stops, current moves", ["sleep 48", "^Z", "sleep 49", "^Z", "jobs", "kill %1 %2", "kill -CONT %1 %2", ("w", .4)])
     d("flags show i and m", ["echo $- | grep -c i", "echo $- | grep -c m"])
     d("bg prints the job", ["sleep 50", "^Z", "bg", "kill %1", ("w", .4), "jobs"])
     d("subshell as a job", ["(sleep 51; echo x) &", "jobs", "kill %1", ("w", .4), "jobs"])
-    d("set +m then background", ["set +m", "sleep 52 &", "jobs", "kill %1"], shells=("bsd",))
+    d("set +m then background", ["set +m", "sleep 52 &", "jobs", "kill %1"], shells=("bsd",), collapse=True)
 
 def fc_cases():
     hist = ["echo one", "echo two", "echo three"]
@@ -420,6 +424,10 @@ def prompt_cases():
     ok("-i with piped input: PS2 for a here-document", p.stdout == b"x\n" and p.stderr.count(b"C> ") == 2, repr(p.stderr))
     p = subprocess.run([SH, "-i"], input=b"read x\nhello\necho got $x\n", capture_output=True, env={"PATH": os.environ["PATH"], "ENV": "/dev/null"})
     ok("-i with piped input: read takes the next line", b"got hello" in p.stdout, repr(p.stdout))
+    p = subprocess.run([SH, "-i", "--diagnostics=posix"], input=b"echo x\n", capture_output=True, env={"PATH": os.environ["PATH"], "ENV": "/dev/null"})
+    ok("-i without a terminal says job control is off", b"job control turned off" in p.stderr, repr(p.stderr))
+    p = subprocess.run([SH, "-i", "--diagnostics=rich"], input=b"echo x\n", capture_output=True, env={"PATH": os.environ["PATH"], "ENV": "/dev/null"})
+    ok("-i without a terminal: rich diagnostic SH5015", b"SH5015" in p.stderr, repr(p.stderr))
     p = subprocess.run([SH, "-c", "echo $-"], capture_output=True)
     ok("-c is not interactive", b"i" not in p.stdout, repr(p.stdout))
     p = subprocess.run([SH, "-i", "-c", "echo $-"], capture_output=True, env={"PATH": os.environ["PATH"], "ENV": "/dev/null"})

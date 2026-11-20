@@ -1,0 +1,6 @@
+sh: -c:1:21: error[SH5017]: '%sl' matches more than one job
+  |
+1 | sleep 0 & sleep 0 & kill %sl
+  |                     ^^^^
+help: make the string longer so that it matches only one job, or use `%n`
+rc=1
