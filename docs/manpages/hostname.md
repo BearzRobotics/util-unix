@@ -1,19 +1,19 @@
-% HOSTNAME(1) Version 0.3.0 | util-unix Manual
-% util-unix contributors
-% 2026-11-07
+# NAME
 
-NAME
 hostname - show or set the system host name
 
-SYNOPSIS
-hostname [-b] [NAME | -F FILE]
+# SYNOPSIS
 
-hostname [-a | -d | -f | -i | -s | -y]
+    hostname [-b] [NAME | -F FILE]
 
-DESCRIPTION
+    hostname [-a | -d | -f | -i | -s | -y]
+
+# DESCRIPTION
+
 With no operand prints the host name. With a NAME, or the first non-comment line of FILE, sets it (needs privilege). The display options print part of the name or look it up in /etc/hosts.
 
-OPTIONS
+# OPTIONS
+
 **-s**, **--short**: the name up to the first dot.
 
 **-f**, **--fqdn**, **--long**: the first name on the /etc/hosts line that lists the host name.
@@ -34,47 +34,64 @@ OPTIONS
 
 **-A**, **-I**: not supported.
 
-EXIT STATUS
-Status	Meaning
-0	Success.
-1	The change was refused, the file could not be read, or a lookup failed.
-255	Usage error.
+# EXIT STATUS
 
-EXAMPLES
+| Status | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | The change was refused, the file could not be read, or a lookup failed. |
+| 255 | Usage error. |
+
+
+# EXAMPLES
+
     hostname
     hostname -s
     hostname -F /etc/hostname
 
-DIAGNOSTICS
+# DIAGNOSTICS
+
 `hostname: you must be root to change the host name`, `hostname: Name or service not known` (the name is not in /etc/hosts).
 
-SECURITY CONSIDERATIONS
+# SECURITY CONSIDERATIONS
+
 Changing the host name needs CAP_SYS_ADMIN in the UTS namespace.
 
-CONCURRENCY AND ATOMICITY
+# CONCURRENCY AND ATOMICITY
+
 The change is one system call.
 
-COMPATIBILITY
+# COMPATIBILITY
+
 Platforms
+
 Linux. Tested on Linux 6.18 (WSL2) against hostname 3.25.
 
 Standards and references
+
 See docs/compatibility/hostname.md. Decision 0006 records why this command is here.
 
-LIMITATIONS
+# LIMITATIONS
+
 No DNS or NSS: names are completed from /etc/hosts only.
 
-PERFORMANCE
+# PERFORMANCE
+
 Dominated by process start-up. Not benchmarked.
 
-SEE ALSO
+# SEE ALSO
+
 hostname(7), gethostname(2), sethostname(2), hosts(5)
 
-COPYRIGHT
+# COPYRIGHT
+
 Copyright (c) 2026 Dakota Keeler and the util-unix contributors. SPDX-License-Identifier: GPL-2.0-or-later.
 
-LICENSE
+# LICENSE
+
 This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 2 of the License, or (at your option) any later version. It comes with ABSOLUTELY NO WARRANTY. The full text is in the file LICENSE of the source distribution.
 
-VERSION
+# VERSION
+
 This manual describes util-unix 0.3.0 (see build.zig.zon).
+
