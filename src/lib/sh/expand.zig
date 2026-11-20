@@ -63,7 +63,9 @@ const X = struct {
 
     fn boundary(x: *X) Error!void {
         if (x.join) {
-            try x.put(' ', quoted);
+            // `$@` in a context that does not split joins like `$*`: with
+            // the first character of IFS (dash, FreeBSD sh)
+            if (ifsFirst(x.sh)) |c| try x.put(c, quoted);
             return;
         }
         if (x.cur.b.items.len > 0 or x.marker) try x.done.append(x.a, x.cur);
@@ -341,12 +343,15 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
     const is_empty = is_unset or switch (pv) {
         .one => |v| v.len == 0,
         .many => |l| blk: {
-            // `$*` with only empty parameters is empty too.
+            // `$@` and `$*` count as null when every parameter is empty
+            // (`set -- ""; ${@:-x}` gives x in dash and FreeBSD sh); with
+            // `*` the separators also count (IFS= makes it null).
             var all = true;
             for (l) |v| if (v.len > 0) {
                 all = false;
             };
-            break :blk all and l.len == 0;
+            if (p.name[0] == '*' and !all) break :blk (try joined(x, pv)).len == 0;
+            break :blk all;
         },
         .unset => true,
     };
@@ -418,8 +423,16 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
         },
         .trim_prefix_small, .trim_prefix_large, .trim_suffix_small, .trim_suffix_large => {
             if (is_unset and sh.flags.nounset and !multi) return fatal(sh, .unset_variable, p.name, "{s}: parameter not set", .{p.name});
-            const v = try joined(x, pv);
             const pat = try stringMode(sh, x.a, p.arg, false, true);
+            if (pv == .many) {
+                // the operator applies to each positional parameter
+                const l = pv.many;
+                const out = try x.a.alloc([]const u8, l.len);
+                for (l, out) |v, *o| o.* = trim(v, pat, p.op);
+                try emit(x, .{ .many = out }, p.name, p.quoted);
+                return;
+            }
+            const v = try joined(x, pv);
             const r = trim(v, pat, p.op);
             try x.putAll(r, if (p.quoted) quoted else field);
             if (p.quoted) x.marker = true;

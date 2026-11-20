@@ -86,6 +86,8 @@ pub const Job = jobs_mod.Job;
 pub const Saved = struct {
     name: []u8,
     old: ?Var,
+    /// `local -`: the shell options to restore when the function returns.
+    flags: ?Flags = null,
 };
 
 pub const Shell = struct {
@@ -302,6 +304,7 @@ pub const Shell = struct {
     /// variables such as PWD and OPTIND).
     pub fn setVarRaw(self: *Shell, name: []const u8, value: []const u8) Allocator.Error!void {
         const gpa = self.gpa;
+        if (std.mem.eql(u8, name, "PATH")) self.clearHash();
         const copy = try gpa.dupe(u8, value);
         errdefer gpa.free(copy);
         const gop = try self.vars.getOrPut(gpa, name);
@@ -315,12 +318,25 @@ pub const Shell = struct {
         }
     }
 
+    /// Forget the remembered command locations (`hash -r`, a new PATH).
+    pub fn clearHash(self: *Shell) void {
+        var it = self.hash.iterator();
+        while (it.next()) |e| {
+            self.gpa.free(e.key_ptr.*);
+            self.gpa.free(e.value_ptr.*);
+        }
+        self.hash.clearRetainingCapacity();
+    }
+
     pub fn unsetVar(self: *Shell, name: []const u8) SetError!void {
+        if (std.mem.eql(u8, name, "PATH")) self.clearHash();
         const v = self.vars.getPtr(name) orelse return;
         if (v.readonly) return error.ReadOnly;
         if (v.value) |old| self.gpa.free(old);
         v.value = null;
-        if (!v.exported and !v.readonly) {
+        // unset also drops the export attribute (dash, FreeBSD sh): a later
+        // assignment does not export again.
+        if (!v.readonly) {
             if (self.vars.fetchRemove(name)) |kv| self.gpa.free(kv.key);
         }
     }
