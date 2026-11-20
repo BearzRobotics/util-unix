@@ -42,6 +42,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 TIMEOUT = 10
+SHOW = []  # debugging: print code, expectation and the outputs of cases whose name contains one of these
 SANDBOX = []  # command prefix that runs each case in its own session and PID namespace
 
 HEADER = re.compile(
@@ -152,6 +153,8 @@ def main():
             jobs = int(args[k + 1]); k += 2
         elif args[k] == "--sandbox":
             SANDBOX.extend(shlex.split(args[k + 1])); k += 2
+        elif args[k] == "--show":
+            SHOW.append(args[k + 1]); k += 2
         elif args[k] == "--out":
             outfile = args[k + 1]; k += 2
         else:
@@ -187,6 +190,11 @@ def main():
         f, idx, name, code, exp = job
         tmp = tempfile.mkdtemp(prefix="c", dir=work)
         try:
+            if SHOW and any(w in name or w == f + ":" + name for w in SHOW):
+                ed = expectation(exp, "dash")
+                sys.stdout.write("=== %s: %s\n%s--- expected(dash) %r\n--- ours %r\n--- dash %r\n--- bash %r\n" % (
+                    f, name, code, ed, run([shname], code, tmp, spec_bin), run([dash], code, tmp, spec_bin) if dash else None,
+                    run([bash, "--posix"], code, tmp, spec_bin) if bash else None))
             ed = expectation(exp, "dash")
             r_ours = run([shname], code, tmp, spec_bin)
             if meets(r_ours, ed):

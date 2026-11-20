@@ -466,7 +466,8 @@ fn execPipeline(sh: *Shell, node: *const Node, negate: bool, cmds: []const *cons
     } else {
         st = runStages(sh, cmds);
     }
-    if (negate) return @intFromBool(st == 0);
+    // `! break` and `! return` leave the status alone: the jump happens first
+    if (negate) return if (sh.flow != .none) st else @intFromBool(st == 0);
     errexitCheck(sh, st, "pipeline");
     return st;
 }
@@ -813,6 +814,15 @@ pub fn substitute(sh: *Shell, a: Allocator, node: *const Node) expand.Error![]co
     sys.close(p[0]);
     const st = waitFor(sh, pid, false);
     sh.last_subst_status = st;
+    // NUL bytes cannot be kept in a shell string; they are dropped (dash, FreeBSD sh)
+    if (std.mem.indexOfScalar(u8, buf.items, 0) != null) {
+        var w: usize = 0;
+        for (buf.items) |c| if (c != 0) {
+            buf.items[w] = c;
+            w += 1;
+        };
+        buf.items.len = w;
+    }
     var end = buf.items.len;
     while (end > 0 and buf.items[end - 1] == '\n') end -= 1;
     return buf.items[0..end];
@@ -1128,8 +1138,7 @@ fn restoreVar(sh: *Shell, sv: shell.Saved) void {
         if (sh.vars.getPtr(sv.name)) |cur| {
             if (cur.value) |x| sh.gpa.free(x);
             cur.value = null;
-            cur.exported = false;
-            if (!cur.readonly) if (sh.vars.fetchRemove(sv.name)) |kv| sh.gpa.free(kv.key);
+            if (sh.vars.fetchRemove(sv.name)) |kv| sh.gpa.free(kv.key);
         }
     }
 }
@@ -1195,6 +1204,12 @@ fn runExternal(sh: *Shell, a: Allocator, path: []const u8, args: []const []const
             sh.diagK(.not_executable, args[0], "{s}: Permission denied", .{args[0]});
             sys.exit(126);
         };
+        // a file with NUL bytes in its first line is a binary, not a script
+        const head = text[0 .. std.mem.indexOfScalar(u8, text, '\n') orelse text.len];
+        if (std.mem.indexOfScalar(u8, head, 0) != null) {
+            sh.diagK(.not_executable, args[0], "{s}: Exec format error", .{args[0]});
+            sys.exit(126);
+        }
         sh.setParams(args[1..]) catch {};
         sh.name = sh.gpa.dupe(u8, args[0]) catch sh.name;
         const st = runSource(sh, text, .{}) catch 2;

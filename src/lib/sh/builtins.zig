@@ -514,13 +514,20 @@ fn setCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             i += 1;
             break;
         }
-        if (arg.len < 2 or (arg[0] != '-' and arg[0] != '+')) break;
         if (std.mem.eql(u8, arg, "-")) {
+            // `set -`: turn off -x and -v and end the options (POSIX, obsolescent)
             sh.flags.xtrace = false;
             sh.flags.verbose = false;
             i += 1;
+            if (i >= args.len) return 0;
             break;
         }
+        if (std.mem.eql(u8, arg, "+")) {
+            // a lone `+` is an ignored option
+            i += 1;
+            continue;
+        }
+        if (arg.len < 2 or (arg[0] != '-' and arg[0] != '+')) break;
         const on = arg[0] == '-';
         var j: usize = 1;
         while (j < arg.len) : (j += 1) {
@@ -546,6 +553,9 @@ fn setCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     if (i <= args.len and (i < args.len or (i > 1 and std.mem.eql(u8, args[i - 1], "--")))) {
         sh.setParams(args[i..]) catch return 2;
+        // new positional parameters restart option parsing (dash, bash)
+        sh.setVarRaw("OPTIND", "1") catch {};
+        sh.getopts_sub = 0;
     }
     return 0;
 }
@@ -799,18 +809,15 @@ fn escapes(a: Allocator, out: *std.ArrayList(u8), s: []const u8, is_b: bool) All
                 try out.append(a, @truncate(v));
             },
             '1'...'7' => |d| {
-                if (is_b) {
-                    try out.append(a, '\\');
-                    try out.append(a, d);
-                } else {
-                    var v: u32 = d - '0';
-                    var n: usize = 0;
-                    while (n < 2 and i + 1 < s.len and s[i + 1] >= '0' and s[i + 1] <= '7') : (n += 1) {
-                        i += 1;
-                        v = v * 8 + (s[i] - '0');
-                    }
-                    try out.append(a, @truncate(v));
+                // \ddd (also in a %b operand, as dash, bash and FreeBSD sh)
+                _ = is_b;
+                var v: u32 = d - '0';
+                var n: usize = 0;
+                while (n < 2 and i + 1 < s.len and s[i + 1] >= '0' and s[i + 1] <= '7') : (n += 1) {
+                    i += 1;
+                    v = v * 8 + (s[i] - '0');
                 }
+                try out.append(a, @truncate(v));
             },
             else => |o| {
                 try out.append(a, '\\');
@@ -848,15 +855,17 @@ fn printfNumber(sh: *Shell, s: []const u8, st: *u8) i64 {
     if (s.len == 0) return 0;
     if (s[0] == '\'' or s[0] == '"') return if (s.len > 1) s[1] else 0;
     if (arith.parseNumber(s)) |v| return v;
-    // partial conversion
+    // partial conversion: the longest numeric prefix (leading blanks allowed)
     var end: usize = 0;
+    while (end < s.len and (s[end] == ' ' or (s[end] >= '\t' and s[end] <= '\r'))) end += 1;
+    const num_start = end;
     if (end < s.len and (s[end] == '-' or s[end] == '+')) end += 1;
     const digits_start = end;
     while (end < s.len and std.ascii.isDigit(s[end])) end += 1;
     if (end > digits_start) {
         sh.diagCmdK(.printf_number, s, "printf", "{s}: not completely converted", .{s});
         st.* = 1;
-        return std.fmt.parseInt(i64, s[0..end], 10) catch 0;
+        return std.fmt.parseInt(i64, s[num_start..end], 10) catch 0;
     }
     sh.diagCmdK(.printf_number, s, "printf", "{s}: expected numeric value", .{s});
     st.* = 1;
@@ -1646,6 +1655,10 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     const optstr = args[1];
     const name = args[2];
+    if (!lexer.isName(name)) {
+        sh.diagCmdK(.bad_variable_name, name, "getopts", "{s}: bad variable name", .{name});
+        return 2;
+    }
     const list: []const []const u8 = if (args.len > 3) args[3..] else @as([]const []const u8, @ptrCast(sh.params.items));
     const silent = optstr.len > 0 and optstr[0] == ':';
     const os = if (silent) optstr[1..] else optstr;

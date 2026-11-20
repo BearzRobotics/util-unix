@@ -790,6 +790,12 @@ pub const Parser = struct {
         while (true) {
             const c = self.cur() orelse return self.failOpen(.unterminated_quote, "`", boff, bline, "Syntax error: Unterminated quoted string", .{});
             if (c == '`') break;
+            if (c == '\\' and self.at(1) == '\n') {
+                // backslash-newline is a continuation, also inside quotes
+                self.pos += 2;
+                self.line += 1;
+                continue;
+            }
             if (c == '\\') {
                 const n = self.at(1) orelse return self.failOpen(.unterminated_quote, "`", boff, bline, "Syntax error: Unterminated quoted string", .{});
                 if (n == '$' or n == '`' or n == '\\' or (in_dq and n == '"')) {
