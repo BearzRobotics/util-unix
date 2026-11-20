@@ -148,8 +148,7 @@ pub fn waitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             job = jobs.resolve(sh, arg, &err);
             if (job == null) {
                 specError(sh, "wait", arg, err);
-                st = 127;
-                continue;
+                return 2;
             }
             pid_found = job.?.lastPid();
         } else {

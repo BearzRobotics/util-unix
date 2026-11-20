@@ -79,9 +79,9 @@ Results of the last run (`sh test/test_sh_corpora.sh`; the complete list of ever
 
 | Corpus | Run | Passed | Failed | our bug | interactive/jobs | deliberate | shell-specific or follows dash |
 |---|---|---|---|---|---|---|---|
-| yash `-p` | 1944 cases | 1719 | 219 | 20 | 1 | 0 | 198 |
-| FreeBSD | 518 cases | 402 | 116 | 27 | 1 | 0 | 88 |
-| Oils | 3954 cases | 1500 | 2454 | 62 | 4 | 34 | 2354 (2274 equal dash, 80 neither) |
+| yash `-p` | 1944 cases | 1793 | 145 | 20 | 0 | 0 | 125 |
+| FreeBSD | 518 cases | 417 | 101 | 18 | 0 | 0 | 83 |
+| Oils | 3954 cases | 1504 | 2450 | 62 | 3 | 32 | 2353 (2271 equal dash, 82 neither) |
 
 The first run (before the fixes below) had 106 (yash), 72 (FreeBSD) and 166 (Oils) cases in the our-bug class. `test/sh_corpora/known-bugs.txt` records the open ones; the suite fails on a bug that is not in it.
 

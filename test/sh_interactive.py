@@ -39,7 +39,7 @@ def ok(name, good, detail=""):
 
 def norm(t):
     t = re.sub(r"\b\d{3,}\b", "N", t)
-    t = re.sub(r"(?m)^(dash|sh): (\d+: )?", "", t)
+    t = re.sub(r"(?m)^(\S*/)?(dash|sh): (\d+: )?", "", t)
     t = re.sub(r"(?<=\S) {2,}", " ", t) if COLLAPSE else t
     return "\n".join(x.rstrip() for x in t.split("\n")).strip("\n")
 

@@ -1,131 +1,3 @@
-BUG	freebsd	builtins/command12.0
-BUG	freebsd	builtins/fc1.0
-BUG	freebsd	builtins/trap15.0
-BUG	freebsd	builtins/wait4.0
-BUG	freebsd	builtins/wait5.0
-BUG	freebsd	builtins/wait6.0
-BUG	freebsd	builtins/wait7.0
-BUG	freebsd	execution/bg11.0
-BUG	freebsd	execution/bg13.0
-BUG	freebsd	execution/bg8.0
-BUG	freebsd	execution/bg9.0
-BUG	freebsd	execution/fork2.0
-BUG	freebsd	execution/pipefail5.42
-BUG	freebsd	execution/redir1.0
-BUG	freebsd	execution/shellproc5.0
-BUG	freebsd	expansion/arith16.0
-BUG	freebsd	expansion/pathname3.0
-BUG	freebsd	parameters/env1.0
-BUG	freebsd	parser/alias2.0
-BUG	freebsd	parser/alias6.0
-BUG	freebsd	parser/heredoc6.0
-BUG	freebsd	parser/nul1.0
-BUG	freebsd	parser/ps1-expand1.0
-BUG	freebsd	parser/ps1-expand2.0
-BUG	freebsd	parser/ps1-expand3.0
-BUG	freebsd	parser/ps1-expand4.0
-BUG	freebsd	parser/ps1-expand5.0
-BUG	freebsd	parser/ps2-expand1.0
-BUG	oils	alias.test.sh	alias used in here doc
-BUG	oils	alias.test.sh	Loop split across both iterative and recursive aliases
-BUG	oils	arith.test.sh	Dynamic parsing on empty string
-BUG	oils	assign.test.sh	local a=loc $var c=loc
-BUG	oils	assign.test.sh	redirect after declare -p
-BUG	oils	background.test.sh	jobs -p prints one line per job
-BUG	oils	background.test.sh	Start background pipeline, wait %job_spec
-BUG	oils	ble-features.test.sh	[compat_array] ${arr} is ${arr[0]}
-BUG	oils	ble-features.test.sh	[compat_array] scalar write to arrays
-BUG	oils	ble-features.test.sh	[compat_array] scalar write to associative arrays
-BUG	oils	blog1.test.sh	${##}
-BUG	oils	blog2.test.sh	-a -a
-BUG	oils	bool-parse.test.sh	test builtin: ( == ) is confusing: equality test or non-empty string test
-BUG	oils	bugs.test.sh	other builtins fail on writing to full disk
-BUG	oils	builtin-bracket.test.sh	== and = does not do glob
-BUG	oils	builtin-bracket.test.sh	== is alias for =
-BUG	oils	builtin-bracket.test.sh	Overflow error
-BUG	oils	builtin-bracket.test.sh	[ -t invalid ]
-BUG	oils	builtin-cd.test.sh	$OLDPWD
-BUG	oils	builtin-cd.test.sh	cd BAD/..
-BUG	oils	builtin-cd.test.sh	cd - without OLDPWD
-BUG	oils	builtin-cd.test.sh	chdir is a synonym for cd - busybox ash
-BUG	oils	builtin-cd.test.sh	remove pwd dir
-BUG	oils	builtin-cd.test.sh	Survey of getcwd() syscall
-BUG	oils	builtin-eval-source.test.sh	source doesn't crash when targeting a directory
-BUG	oils	builtin-getopts.test.sh	getopts with invalid variable name
-BUG	oils	builtin-getopts.test.sh	OPTARG is empty (not unset) after parsing a flag doesn't take an arg
-BUG	oils	builtin-getopts.test.sh	OPTIND should be >= 1 (regression)
-BUG	oils	builtin-kill.test.sh	kill -15 %% kills current job
-BUG	oils	builtin-kill.test.sh	kill -n 9 specifies the signal number
-BUG	oils	builtin-meta-assign.test.sh	command local
-BUG	oils	builtin-meta.test.sh	command -v doesn't find non-executable file
-BUG	oils	builtin-printf.test.sh	%10.5(strftime format)T
-BUG	oils	builtin-printf.test.sh	printf %6q (width)
-BUG	oils	builtin-printf.test.sh	printf invalid format
-BUG	oils	builtin-printf.test.sh	printf negative integer overflow
-BUG	oils	builtin-printf.test.sh	printf positive integer overflow
-BUG	oils	builtin-printf.test.sh	printf %q
-BUG	oils	builtin-printf.test.sh	printf -v %q
-BUG	oils	builtin-printf.test.sh	printf -v %s
-BUG	oils	builtin-printf.test.sh	printf -v syntax error
-BUG	oils	builtin-printf.test.sh	%(strftime format)T
-BUG	oils	builtin-process.test.sh	arg that would overflow 64 bits is detected
-BUG	oils	builtin-process.test.sh	exec -- 2>&1
-BUG	oils	builtin-process.test.sh	exec builtin accepts --
-BUG	oils	builtin-process.test.sh	ulimit doesn't accept multiple flags - reduce confusion between shells
-BUG	oils	builtin-process.test.sh	ulimit too many args
-BUG	oils	builtin-set.test.sh	'set' and 'eval' round trip
-BUG	oils	builtin-trap.test.sh	SIGINT and INT are aliases
-BUG	oils	builtin-trap.test.sh	trap 1 is equivalent to SIGHUP; HUP is equivalent to SIGHUP
-BUG	oils	builtin-trap.test.sh	traps are not active inside subshells $() ()  trap | cat
-BUG	oils	builtin-type.test.sh	type of relative path
-BUG	oils	builtin-umask.test.sh	symbolic syntax error: start with -
-BUG	oils	builtin-umask.test.sh	umask permcopy running value
-BUG	oils	builtin-umask.test.sh	umask t perm
-BUG	oils	builtin-umask.test.sh	umask with too many arguments (i.e. extra spaces)
-BUG	oils	builtin-umask.test.sh	usage: empty input, space input
-BUG	oils	builtin-umask.test.sh	usage: large octal number
-BUG	oils	builtin-vars.test.sh	local after readonly
-BUG	oils	builtin-vars.test.sh	Unset exported variable, then define it again.  It's NOT still exported.
-BUG	oils	command-parsing.test.sh	Prefix env on assignment
-BUG	oils	command_.test.sh	filling $PATH cache, then deleting command
-BUG	oils	command_.test.sh	filling $PATH cache, then insert the same command earlier in cache
-BUG	oils	command_.test.sh	hash without args prints the cache
-BUG	oils	errexit-osh.test.sh	OLD: command sub in conditional, with inherit_errexit
-BUG	oils	exit-status.test.sh	func subshell OverflowError https://github.com/oilshell/oil/issues/996
-BUG	oils	exit-status.test.sh	subshell OverflowError https://github.com/oilshell/oil/issues/996
-BUG	oils	exit-status.test.sh	Truncating 'return' status
-BUG	oils	explore-parsing.test.sh	Length of length of ARGS!
-BUG	oils	explore-parsing.test.sh	Length of length of ARGS!  2 digit
-BUG	oils	glob.test.sh	Glob of negated unescaped [[] and []]
-BUG	oils	glob.test.sh	pattern starting with . does not return . and ..
-BUG	oils	here-doc.test.sh	Here doc with bad comsub delimiter
-BUG	oils	here-doc.test.sh	Here doc with bad var delimiter
-BUG	oils	nul-bytes.test.sh	Compare \x00 byte versus \x01 byte - read builtin
-BUG	oils	quote.test.sh	$''
-BUG	oils	quote.test.sh	$'' octal escapes don't have leading 0
-BUG	oils	quote.test.sh	$'' octal escapes with fewer than 3 chars
-BUG	oils	quote.test.sh	$'' with newlines
-BUG	oils	quote.test.sh	$'' with quotes
-BUG	oils	redirect-multi.test.sh	Non-file redirects don't respect glob args (we differe from bash)
-BUG	oils	redirect.test.sh	: 3>&3 (OSH regression)
-BUG	oils	redirect.test.sh	&>> appends stdout and stderr
-BUG	oils	redirect.test.sh	can't mention big file descriptor
-BUG	oils	redirect.test.sh	Descriptor redirect with filename
-BUG	oils	redirect.test.sh	Double digit fd (20> file)
-BUG	oils	sh-usage.test.sh	accepts -l flag
-BUG	oils	sh-usage.test.sh	sh +c is accepted
-BUG	oils	sh-usage.test.sh	shell obeys --help (regression for OSH)
-BUG	oils	tilde.test.sh	x=${undef-~:~}
-BUG	oils	toysh-posix.test.sh	no shebang
-BUG	oils	var-op-len.test.sh	Unicode string length (UTF-8)
-BUG	oils	var-op-strip.test.sh	Nested % and # operators (bug reported by Crestwave)
-BUG	oils	var-op-test.test.sh	$@ ("") and - and +
-BUG	oils	var-op-test.test.sh	"$*" ("" "") and - and + (IFS=)
-BUG	oils	var-op-test.test.sh	$@ (empty) and - and +
-BUG	oils	vars-bash.test.sh	$SHELL is set to what is in /etc/passwd
-BUG	oils	var-sub-quote.test.sh	$'' allowed within VarSub arguments
-BUG	oils	word-split.test.sh	IFS and joining arrays by assignments
-BUG	oils	xtrace.test.sh	xtrace with newlines
 BUG	yash	alias-p	alias-p.tst:146: using alias after redirection (complex)
 BUG	yash	alias-p	alias-p.tst:173: alias substitution to empty string
 BUG	yash	alias-p	alias-p.tst:197: alias substitution to blank before newline
@@ -143,7 +15,121 @@ BUG	yash	alias-p	alias-p.tst:439: alias substitution to parentheses in function 
 BUG	yash	alias-p	alias-p.tst:453: alias substitution to command in function definition
 BUG	yash	alias-p	alias-p.tst:480: alias ending with blank
 BUG	yash	alias-p	alias-p.tst:545: line continuation between alias names (1)
-BUG	yash	builtins-p	builtins-p.tst:344: intrinsic built-in jobs can be invoked without $PATH
 BUG	yash	exit-p	exit-p.tst:89: default exit status in signal trap
 BUG	yash	param-p	param-p.tst:236: length of valid variables
 BUG	yash	simple-p	simple-p.tst:18: redirections precedes assignments for non-special-builtin command
+BUG	freebsd	builtins/command12.0
+BUG	freebsd	builtins/trap15.0
+BUG	freebsd	builtins/wait6.0
+BUG	freebsd	builtins/wait7.0
+BUG	freebsd	execution/bg11.0
+BUG	freebsd	execution/bg13.0
+BUG	freebsd	execution/bg8.0
+BUG	freebsd	execution/bg9.0
+BUG	freebsd	execution/fork2.0
+BUG	freebsd	execution/pipefail5.42
+BUG	freebsd	execution/redir1.0
+BUG	freebsd	execution/shellproc5.0
+BUG	freebsd	expansion/arith16.0
+BUG	freebsd	expansion/pathname3.0
+BUG	freebsd	parser/alias2.0
+BUG	freebsd	parser/alias6.0
+BUG	freebsd	parser/heredoc6.0
+BUG	freebsd	parser/nul1.0
+BUG	oils	alias.test.sh	Loop split across both iterative and recursive aliases
+BUG	oils	alias.test.sh	alias used in here doc
+BUG	oils	arith.test.sh	Dynamic parsing on empty string
+BUG	oils	assign.test.sh	local a=loc $var c=loc
+BUG	oils	assign.test.sh	redirect after declare -p
+BUG	oils	background.test.sh	jobs -p prints one line per job
+BUG	oils	ble-features.test.sh	[compat_array] ${arr} is ${arr[0]}
+BUG	oils	ble-features.test.sh	[compat_array] scalar write to arrays
+BUG	oils	ble-features.test.sh	[compat_array] scalar write to associative arrays
+BUG	oils	blog1.test.sh	${##}
+BUG	oils	blog2.test.sh	-a -a
+BUG	oils	bool-parse.test.sh	test builtin: ( == ) is confusing: equality test or non-empty string test
+BUG	oils	bugs.test.sh	other builtins fail on writing to full disk
+BUG	oils	builtin-bracket.test.sh	== is alias for =
+BUG	oils	builtin-bracket.test.sh	== and = does not do glob
+BUG	oils	builtin-bracket.test.sh	[ -t invalid ]
+BUG	oils	builtin-bracket.test.sh	Overflow error
+BUG	oils	builtin-cd.test.sh	cd BAD/..
+BUG	oils	builtin-cd.test.sh	cd - without OLDPWD
+BUG	oils	builtin-cd.test.sh	$OLDPWD
+BUG	oils	builtin-cd.test.sh	remove pwd dir
+BUG	oils	builtin-cd.test.sh	Survey of getcwd() syscall
+BUG	oils	builtin-cd.test.sh	chdir is a synonym for cd - busybox ash
+BUG	oils	builtin-eval-source.test.sh	source doesn't crash when targeting a directory
+BUG	oils	builtin-getopts.test.sh	OPTARG is empty (not unset) after parsing a flag doesn't take an arg
+BUG	oils	builtin-getopts.test.sh	getopts with invalid variable name
+BUG	oils	builtin-getopts.test.sh	OPTIND should be >= 1 (regression)
+BUG	oils	builtin-kill.test.sh	kill -n 9 specifies the signal number
+BUG	oils	builtin-kill.test.sh	kill -15 %% kills current job
+BUG	oils	builtin-meta-assign.test.sh	command local
+BUG	oils	builtin-meta.test.sh	command -v doesn't find non-executable file
+BUG	oils	builtin-printf.test.sh	printf -v %s
+BUG	oils	builtin-printf.test.sh	printf -v %q
+BUG	oils	builtin-printf.test.sh	printf -v syntax error
+BUG	oils	builtin-printf.test.sh	printf invalid format
+BUG	oils	builtin-printf.test.sh	printf %q
+BUG	oils	builtin-printf.test.sh	printf %6q (width)
+BUG	oils	builtin-printf.test.sh	%(strftime format)T
+BUG	oils	builtin-printf.test.sh	%10.5(strftime format)T
+BUG	oils	builtin-printf.test.sh	printf positive integer overflow
+BUG	oils	builtin-printf.test.sh	printf negative integer overflow
+BUG	oils	builtin-process.test.sh	exec builtin accepts --
+BUG	oils	builtin-process.test.sh	exec -- 2>&1
+BUG	oils	builtin-process.test.sh	ulimit too many args
+BUG	oils	builtin-process.test.sh	ulimit doesn't accept multiple flags - reduce confusion between shells
+BUG	oils	builtin-process.test.sh	arg that would overflow 64 bits is detected
+BUG	oils	builtin-set.test.sh	'set' and 'eval' round trip
+BUG	oils	builtin-trap.test.sh	traps are not active inside subshells $() ()  trap | cat
+BUG	oils	builtin-trap.test.sh	SIGINT and INT are aliases
+BUG	oils	builtin-trap.test.sh	trap 1 is equivalent to SIGHUP; HUP is equivalent to SIGHUP
+BUG	oils	builtin-type.test.sh	type of relative path
+BUG	oils	builtin-umask.test.sh	usage: empty input, space input
+BUG	oils	builtin-umask.test.sh	symbolic syntax error: start with -
+BUG	oils	builtin-umask.test.sh	usage: large octal number
+BUG	oils	builtin-umask.test.sh	umask with too many arguments (i.e. extra spaces)
+BUG	oils	builtin-umask.test.sh	umask t perm
+BUG	oils	builtin-umask.test.sh	umask permcopy running value
+BUG	oils	builtin-vars.test.sh	Unset exported variable, then define it again.  It's NOT still exported.
+BUG	oils	builtin-vars.test.sh	local after readonly
+BUG	oils	command-parsing.test.sh	Prefix env on assignment
+BUG	oils	command_.test.sh	filling $PATH cache, then insert the same command earlier in cache
+BUG	oils	command_.test.sh	filling $PATH cache, then deleting command
+BUG	oils	command_.test.sh	hash without args prints the cache
+BUG	oils	errexit-osh.test.sh	OLD: command sub in conditional, with inherit_errexit
+BUG	oils	exit-status.test.sh	Truncating 'return' status
+BUG	oils	exit-status.test.sh	subshell OverflowError https://github.com/oilshell/oil/issues/996
+BUG	oils	exit-status.test.sh	func subshell OverflowError https://github.com/oilshell/oil/issues/996
+BUG	oils	explore-parsing.test.sh	Length of length of ARGS!
+BUG	oils	explore-parsing.test.sh	Length of length of ARGS!  2 digit
+BUG	oils	glob.test.sh	Glob of negated unescaped [[] and []]
+BUG	oils	glob.test.sh	pattern starting with . does not return . and ..
+BUG	oils	here-doc.test.sh	Here doc with bad var delimiter
+BUG	oils	here-doc.test.sh	Here doc with bad comsub delimiter
+BUG	oils	nul-bytes.test.sh	Compare \x00 byte versus \x01 byte - read builtin
+BUG	oils	quote.test.sh	$''
+BUG	oils	quote.test.sh	$'' with quotes
+BUG	oils	quote.test.sh	$'' with newlines
+BUG	oils	quote.test.sh	$'' octal escapes don't have leading 0
+BUG	oils	quote.test.sh	$'' octal escapes with fewer than 3 chars
+BUG	oils	redirect-multi.test.sh	Non-file redirects don't respect glob args (we differe from bash)
+BUG	oils	redirect.test.sh	Descriptor redirect with filename
+BUG	oils	redirect.test.sh	Double digit fd (20> file)
+BUG	oils	redirect.test.sh	: 3>&3 (OSH regression)
+BUG	oils	redirect.test.sh	&>> appends stdout and stderr
+BUG	oils	redirect.test.sh	can't mention big file descriptor
+BUG	oils	sh-usage.test.sh	sh +c is accepted
+BUG	oils	sh-usage.test.sh	shell obeys --help (regression for OSH)
+BUG	oils	tilde.test.sh	x=${undef-~:~}
+BUG	oils	toysh-posix.test.sh	no shebang
+BUG	oils	var-op-len.test.sh	Unicode string length (UTF-8)
+BUG	oils	var-op-strip.test.sh	Nested % and # operators (bug reported by Crestwave)
+BUG	oils	var-op-test.test.sh	$@ (empty) and - and +
+BUG	oils	var-op-test.test.sh	$@ ("") and - and +
+BUG	oils	var-op-test.test.sh	"$*" ("" "") and - and + (IFS=)
+BUG	oils	var-sub-quote.test.sh	$'' allowed within VarSub arguments
+BUG	oils	word-split.test.sh	IFS and joining arrays by assignments
+BUG	oils	xtrace.test.sh	xtrace with newlines
