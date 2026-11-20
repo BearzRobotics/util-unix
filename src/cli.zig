@@ -9,6 +9,7 @@
 //! and multicall executables (SPEC §8).
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 
 /// From build.zig.zon, through the build script (see build.zig).
@@ -84,11 +85,35 @@ pub fn writeStdout(io: Io, text: []const u8) bool {
     return true;
 }
 
-/// Print `<name> (util-unix) <version>` to stdout.
+/// The project's home, where issues are tracked.
+pub const repo_url = "https://github.com/BearzRobotics/util-unix";
+
+/// Print the version block to stdout: `<name> (util-unix) <version>`, copyright and
+/// license, the project address, and how this binary was built.
 pub fn printVersion(ctx: Context) bool {
-    var buf: [128]u8 = undefined;
-    const line = std.fmt.bufPrint(&buf, "{s} (util-unix) {s}\n", .{ ctx.name, version }) catch unreachable;
-    return writeStdout(ctx.io, line);
+    var buf: [1024]u8 = undefined;
+    const text = std.fmt.bufPrint(&buf,
+        \\{s} (util-unix) {s}
+        \\Copyright (c) 2026 Dakota Keeler and the util-unix contributors.
+        \\License GPL-2.0-or-later <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>.
+        \\This is free software: you are free to change and redistribute it.
+        \\There is NO WARRANTY, to the extent permitted by law.
+        \\
+        \\Project and bug reports: {s}
+        \\Built with Zig {s} for {s}-{s} ({s}).
+        \\
+    , .{
+        ctx.name,                           version,
+        repo_url,                           builtin.zig_version_string,
+        @tagName(builtin.target.cpu.arch), @tagName(builtin.target.os.tag),
+        switch (builtin.mode) {
+            .Debug => "Debug",
+            .ReleaseSafe => "ReleaseSafe",
+            .ReleaseFast => "ReleaseFast",
+            .ReleaseSmall => "ReleaseSmall",
+        },
+    }) catch unreachable;
+    return writeStdout(ctx.io, text);
 }
 
 /// Print a diagnostic `<name>: <message>\n` to stderr. Best effort.
