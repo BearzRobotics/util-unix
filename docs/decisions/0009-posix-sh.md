@@ -7,7 +7,7 @@ Status: accepted by the maintainer. Date: 2026-11-19. Not started when this was 
 A POSIX.1-2024 Shell Command Language implementation, `sh`, as a library
 (`util_unix.sh`) plus a thin wrapper and the usual three build modes. Reference
 behaviour: dash (installed on the dev machine, the differential oracle) and
-FreeBSD sh (consulted from its manual and source; not installed here). POSIX
+FreeBSD sh, run from the Chimera Linux sysroot (FreeBSD userland ported to Linux, `tools/bsdrun.sh`, rootfs extracted from `/stuff/Docs/Programs/Chimera.zip`; the same sysroot gives BSD grep, sed and ls as oracles for util-core). POSIX
 wins when the two differ and the choice is recorded. Scope includes interactive
 use: line editing, history, job control. Written fresh; nothing is borrowed
 from the dksh project.
