@@ -8,9 +8,15 @@
 UTIL="sh"
 . "$(dirname "$0")/shcmp.sh"
 
+# cx: like c, for cases that are deliberately erroneous or non-POSIX (syntax
+# errors, operators POSIX does not define, odd-but-legal forms shellcheck
+# flags). They are run like any case but excluded from the shellcheck hygiene
+# check; test_sh_lint.sh lists them as exempt.
+cx() { c "$@"; }
 if [ -n "${SHCMP_DUMP:-}" ]; then
     SHCMP_N=0
     c() { SHCMP_N=$((SHCMP_N + 1)); printf '%s\n' "$2" > "$SHCMP_DUMP/${SHCMP_EXEMPT:+x_}case$SHCMP_N.sh"; }
+    cx() { SHCMP_N=$((SHCMP_N + 1)); printf '%s\n' "$2" > "$SHCMP_DUMP/x_case$SHCMP_N.sh"; }
 fi
 
 # ---- quoting ----
@@ -21,7 +27,7 @@ c "backslash in double quotes" 'echo "a\$b\"c\\d\e"' B
 c "backslash newline joins" 'echo a\
 b' B
 c "double quote and param" 'x=1; echo "[$x]" '"'"'[$x]'"'" B
-c "adjacent quoting" 'echo "a"b'"'c'"'d' B
+cx "adjacent quoting" 'echo "a"b'"'c'"'d' B
 c "empty quotes make an argument" 'set -- "" ""; echo $#' B
 c "empty unquoted var vanishes" 'x=; set -- $x; echo $#' B
 c "quoted empty var stays" 'x=; set -- "$x"; echo $#' B
@@ -68,7 +74,7 @@ c "nested expansion in default" 'a=1; echo ${u:-${a}x}' B
 c "default containing space unquoted splits" 'set -- ${u:-a b}; echo $#' B
 c "default containing space quoted" 'set -- "${u:-a b}"; echo $#' B
 c "positional params" 'set -- a b c; echo $1 $2 $3 $# ${3}' B
-c "positional above nine" 'set -- 1 2 3 4 5 6 7 8 9 10 11; echo ${10} ${11} $10' B
+cx "positional above nine" 'set -- 1 2 3 4 5 6 7 8 9 10 11; echo ${10} ${11} $10' B
 c "dollar at quoted" 'set -- "a b" c; for i in "$@"; do echo "[$i]"; done' B
 c "dollar star quoted" 'set -- "a b" c; for i in "$*"; do echo "[$i]"; done' B
 c "dollar at unquoted" 'set -- "a b" c; for i in $@; do echo "[$i]"; done' B
@@ -152,10 +158,10 @@ c "arith empty var is zero" 'x=; echo $((x+1))' B
 c "arith var holding number" 'x=0x10; echo $((x+1))' B
 c "arith division by zero" 'echo $((1/0)); echo after' B
 c "arith modulo by zero" 'echo $((1%0)); echo after' B
-c "arith missing operand" 'echo $((1+)); echo after' B
+cx "arith missing operand" 'echo $((1+)); echo after' B
 c "arith bad octal" 'echo $((08)); echo after' B
-c "arith unmatched paren" 'echo $((1+(2)); echo after' B
-c "arith trailing garbage" 'echo $((1 2)); echo after' B
+cx "arith unmatched paren" 'echo $((1+(2)); echo after' B
+cx "arith trailing garbage" 'echo $((1 2)); echo after' B
 c "arith short circuit" 'echo $((0&&1/0)) $((1||1/0))' B
 c "arith nested" 'echo $(( $((1+1)) * 3 ))' B
 c "arith with spaces" 'echo $(( 1 + 2 ))' B
@@ -167,7 +173,7 @@ c "arith var with expression" 'x="1+2"; echo $((x)); echo after' B
 c "arith in for" 'i=0; while [ $i -lt 3 ]; do echo $i; i=$((i+1)); done' B
 c "arith paren cmdsub ambiguity" 'echo $( (echo a) )' B
 c "arith comma not allowed" 'echo $((1,2)); echo after' B
-c "arith exponent not allowed" 'echo $((2**3)); echo after' B
+cx "arith exponent not allowed" 'echo $((2**3)); echo after' B
 
 # ---- field splitting ----
 c "default IFS" 'x="a  b	c"; set -- $x; echo $#' B
@@ -194,7 +200,7 @@ c "glob question" 'touch a1 a2 b1; echo a?' B
 c "glob bracket" 'touch a1 a2 b1; echo [ab]1' B
 c "glob range" 'touch a1 b1 c1; echo [a-b]1' B
 c "glob negation" 'touch a1 b1 c1; echo [!a]1' B
-c "glob caret negation" 'touch a1 b1 c1; echo [^a]1' B
+cx "glob caret negation" 'touch a1 b1 c1; echo [^a]1' B
 c "glob no match literal" 'echo nomatch*' B
 c "glob dotfiles hidden" 'touch .h v; echo *' B
 c "glob dot explicit" 'touch .h v; echo .h*' B
@@ -241,7 +247,7 @@ c "redirect on function definition" 'f() { echo in; } > g; f; cat g' B
 c "redirect restored after builtin" 'echo a > f; echo b; cat f' B
 c "redirect word expansion" 'n=file; echo z > $n; cat file' B
 c "redirect with fd var like text" 'echo hi 2>/dev/null' B
-c "redirect two-digit fd" 'exec 10>f; echo a >&10; exec 10>&-; cat f' Pe
+cx "redirect two-digit fd" 'exec 10>f; echo a >&10; exec 10>&-; cat f' Pe
 c "redirect closed input" 'exec <&-; cat; echo "rc=$?"' B
 c "stderr to file" 'echo e >&2 2> f; cat f' B
 c "input from heredoc to fd 3" 'cat <&3 3<<EOF
@@ -300,7 +306,7 @@ EOF
 c "heredoc with quotes in body" 'cat <<EOF
 "dq" '"'"'sq'"'"'
 EOF' B
-c "heredoc empty" 'cat <<EOF
+cx "heredoc empty" 'cat <<EOF
 EOF
 echo done' B
 c "heredoc fd 3" 'cat 3<<EOF >&2 <&3
@@ -338,10 +344,10 @@ c "and or status" 'false && true; echo $?; true && false; echo $?' B
 c "semicolon list" 'echo a; echo b; echo c' B
 c "newline list" 'echo a
 echo b' B
-c "background and wait" 'echo bg & wait; echo done' B
+cx "background and wait" 'echo bg & wait; echo done' B
 c "background status wait" '(exit 5) & wait $!; echo $?' B
 c "dollar bang" 'true & echo $! | grep -q "^[0-9]" && echo ok; wait' B
-c "background no stdin" 'cat & wait; echo done' B
+cx "background no stdin" 'cat & wait; echo done' B
 c "pipeline with compound" 'for i in 1 2; do echo $i; done | wc -l' B
 c "pipeline with while" 'printf "a\nb\n" | while read l; do echo "<$l>"; done' B
 c "pipeline stage exit" 'sh -c "exit 3" | cat; echo $?' B
@@ -385,7 +391,7 @@ c "break" 'for i in 1 2 3; do if [ $i = 2 ]; then break; fi; echo $i; done' B
 c "continue" 'for i in 1 2 3; do if [ $i = 2 ]; then continue; fi; echo $i; done' B
 c "break 2" 'for i in 1 2; do for j in a b; do echo $i$j; break 2; done; done' B
 c "continue 2" 'for i in 1 2; do for j in a b; do echo $i$j; continue 2; done; done' B
-c "break more than depth" 'for i in 1 2; do break 5; echo no; done; echo done' B
+cx "break more than depth" 'for i in 1 2; do break 5; echo no; done; echo done' B
 c "break outside loop" 'break; echo after' B
 c "break zero is an error" 'for i in 1; do break 0; done; echo after' B
 c "continue in while" 'i=0; while [ $i -lt 4 ]; do i=$((i+1)); [ $i = 2 ] && continue; echo $i; done' B
@@ -403,7 +409,7 @@ a)
   ;;
 esac' B
 c "case optional leading paren" 'case a in (a) echo p;; esac' B
-c "case last without terminator" 'case a in a) echo x esac' B
+cx "case last without terminator" 'case a in a) echo x esac' B
 c "case empty body" 'case a in a) ;; esac; echo $?' B
 c "case word expansion" 'x=hello; case "$x" in hel*) echo h;; esac' B
 c "case status of body" 'case a in a) false;; esac; echo $?' B
@@ -422,7 +428,7 @@ c "function shares variables" 'f() { x=2; }; x=1; f; echo $x' B
 c "function redefine" 'f() { echo 1; }; f() { echo 2; }; f' B
 c "function with redirect" 'f() { echo in; }; f > g; cat g' B
 c "function calls function" 'a() { b; }; b() { echo b; }; a' B
-c "function body compound if" 'f() if true; then echo y; fi; f' B
+cx "function body compound if" 'f() if true; then echo y; fi; f' B
 c "function return in loop" 'f() { for i in 1 2 3; do if [ $i = 2 ]; then return 7; fi; done; }; f; echo $?' B
 c "function and special builtin name" 'f() { echo mine; }; f' B
 c "function dollar zero" 'f() { echo $0; }; f' B
@@ -499,8 +505,8 @@ c "trap exit on exit command" 'trap "echo bye" EXIT; exit 3' B
 c "trap exit status kept" 'trap "echo bye" EXIT; (exit 4)' B
 c "trap exit in subshell separate" 'trap "echo outer" EXIT; (trap "echo inner" EXIT; true); echo main' B
 c "trap exit not inherited by subshell" 'trap "echo T" EXIT; (echo sub); echo main' B
-c "trap reset" 'trap "echo x" EXIT; trap - EXIT; echo done' B
-c "trap ignore" 'trap "" EXIT; echo done' B
+cx "trap reset" 'trap "echo x" EXIT; trap - EXIT; echo done' B
+cx "trap ignore" 'trap "" EXIT; echo done' B
 c "trap signal" 'trap "echo got" USR1; kill -USR1 $$; echo after' B
 c "trap signal number" 'trap "echo got" 10; kill -10 $$; echo after' B
 c "trap multiple signals" 'trap "echo s" USR1 USR2; kill -USR2 $$; echo after' B
@@ -511,11 +517,11 @@ c "trap with quotes" 'trap "echo \"a b\"" EXIT' B
 c "trap shows" 'trap "echo hi" INT; trap' B
 c "trap exit status of handler" 'trap "exit 9" EXIT; exit 1' B
 c "trap runs after command" 'trap "echo trapped" USR1; kill -USR1 $$; echo next' B
-c "trap with wait" '(sleep 1; kill -USR1 $$) & trap "echo got" USR1; wait; echo done' B
+cx "trap with wait" '(sleep 1; kill -USR1 $$) & trap "echo got" USR1; wait; echo done' B
 c "trap dollar question in handler" 'trap "echo [\$?]" EXIT; false' B
 c "trap bad signal" 'trap "echo x" NOSUCHSIG; echo "rc=$?"' e
 c "trap EXIT zero" 'trap "echo z" 0; echo main' B
-c "trap numeric reset" 'trap "echo x" EXIT; trap 0; echo done' B
+cx "trap numeric reset" 'trap "echo x" EXIT; trap 0; echo done' B
 c "trap in subshell reset" 'trap "echo parent" USR1; (trap; echo in) ' B
 
 # ---- eval / dot / exec / command / type ----
@@ -616,7 +622,7 @@ c "echo basic" 'echo a b  c' B
 c "echo no args" 'echo' B
 c "echo -n" 'echo -n a; echo b' B
 c "echo escapes" 'echo "a\tb\\c"' e
-c "echo dash e is literal" 'echo -e a' e
+cx "echo dash e is literal" 'echo -e a' e
 c "echo dollar paren" 'echo "$(echo a)b"' B
 c "printf string" 'printf "%s\n" hello' B
 c "printf multiple args reuse format" 'printf "%s\n" a b c' B
@@ -666,15 +672,15 @@ c "test not" 'test ! a = b; echo $?; test ! -f nothing; echo $?' B
 c "test and or" 'test 1 -eq 1 -a 2 -eq 2; echo $?; test 1 -eq 2 -o 2 -eq 2; echo $?; test 1 -eq 2 -a 2 -eq 2; echo $?' B
 c "test parens" 'test \( 1 -eq 1 \); echo $?; test \( 1 -eq 2 -o 1 -eq 1 \) -a 3 -eq 3; echo $?' B
 c "test bracket" '[ a = a ]; echo $?; [ 1 -lt 2 ]; echo $?' B
-c "test bracket missing close" '[ a = a; echo $?' e
+cx "test bracket missing close" '[ a = a; echo $?' e
 c "test bad integer" '[ x -eq 1 ]; echo $?' e
-c "test unary operators as strings" '[ -f ]; echo $?; [ -n ]; echo $?' B
+cx "test unary operators as strings" '[ -f ]; echo $?; [ -n ]; echo $?' B
 c "test two args not" '[ ! x ]; echo $?; [ ! "" ]; echo $?' B
 c "test symlink" 'touch f; ln -s f l; [ -L l ]; echo $?; [ -L f ]; echo $?; [ -h l ]; echo $?' B
 c "test -nt -ot -ef" 'touch a; sleep 1; touch b; [ b -nt a ]; echo $?; [ a -ot b ]; echo $?; ln a c; [ a -ef c ]; echo $?' B
 c "test string with spaces" '[ "a b" = "a b" ]; echo $?' B
 c "test empty var needs quotes" 'x=; [ "$x" = "" ]; echo $?' B
-c "test special chars" '[ "(" = "(" ]; echo $?; [ "!" = "!" ]; echo $?' B
+cx "test special chars" '[ "(" = "(" ]; echo $?; [ "!" = "!" ]; echo $?' B
 c "test -t" '[ -t 0 ]; echo $?' B
 c "test -p -S -b -c" 'mkfifo p; [ -p p ]; echo $?; [ -c /dev/null ]; echo $?; [ -b /dev/null ]; echo $?' B
 c "test -ef nonexistent" '[ nothing -ef nothing ]; echo $?' B
@@ -731,10 +737,10 @@ c "umask bad" 'umask 999; echo "rc=$?"' e
 # ---- lexical and grammar corner cases ----
 c "semicolon after brace group" '{ echo a; }; echo b' B
 c "brace needs space" '{ echo a; } ' B
-c "keyword as argument" 'echo if then fi while' B
+cx "keyword as argument" 'echo if then fi while' B
 c "keyword quoted not keyword" '"if" 2>/dev/null; echo $?' B
 c "assignment-looking after command" 'echo a=b' B
-c "assignment with space is command" 'x= echo hi' B
+cx "assignment with space is command" 'x= echo hi' B
 c "empty assignment" 'x=; echo "[$x]"' B
 c "assignment before redirect" 'x=1 > f; echo $x; ls f' B
 c "number before redirect" 'echo 2>f; ls f' B
@@ -755,44 +761,44 @@ echo b' B
 c "empty command line" '
 ' B
 c "only comment" '# nothing' B
-c "unmatched quote" "echo 'abc" e
-c "unmatched dquote" 'echo "abc' e
-c "unexpected paren" 'echo )' e
-c "unexpected fi" 'fi' e
-c "unexpected then" 'then' e
-c "unexpected semicolon" '; echo a' e
-c "unexpected double semicolon" ';; echo a' e
-c "missing fi" 'if true; then echo a' e
-c "missing done" 'while true; do echo a' e
-c "missing esac" 'case a in a) echo x' e
-c "missing brace" '{ echo a' e
-c "missing paren" '( echo a' e
-c "missing then" 'if true; echo a; fi' e
-c "missing do" 'for i in a; echo $i; done' e
-c "bad for variable" 'for 1x in a; do :; done' e
-c "bad function name" '1f() { :; }' e
+cx "unmatched quote" "echo 'abc" e
+cx "unmatched dquote" 'echo "abc' e
+cx "unexpected paren" 'echo )' e
+cx "unexpected fi" 'fi' e
+cx "unexpected then" 'then' e
+cx "unexpected semicolon" '; echo a' e
+cx "unexpected double semicolon" ';; echo a' e
+cx "missing fi" 'if true; then echo a' e
+cx "missing done" 'while true; do echo a' e
+cx "missing esac" 'case a in a) echo x' e
+cx "missing brace" '{ echo a' e
+cx "missing paren" '( echo a' e
+cx "missing then" 'if true; echo a; fi' e
+cx "missing do" 'for i in a; echo $i; done' e
+cx "bad for variable" 'for 1x in a; do :; done' e
+cx "bad function name" '1f() { :; }' e
 c "bad substitution" 'echo ${x!}' e
-c "empty if body" 'if true; then fi' e
-c "empty while cond" 'while do :; done' e
-c "redirect without word" 'echo >' e
-c "pipe at end" 'echo a |' e
-c "and at end" 'true &&' e
-c "syntax error stops earlier output kept" 'echo before
+cx "empty if body" 'if true; then fi' e
+cx "empty while cond" 'while do :; done' e
+cx "redirect without word" 'echo >' e
+cx "pipe at end" 'echo a |' e
+cx "and at end" 'true &&' e
+cx "syntax error stops earlier output kept" 'echo before
 fi
 echo after' e
-c "heredoc unterminated" 'cat <<EOF
-body' e
+cx "heredoc unterminated" 'cat <<EOF
+body' Pe
 c "bang in middle" 'echo a ! b' B
 c "function keyword absent" 'f () { echo ok; }; f' B
-c "case esac as word" 'case esac in esac) echo ok;; esac' B
-c "for in with keywords" 'for i in then do done; do echo $i; done' B
+cx "case esac as word" 'case esac in esac) echo ok;; esac' B
+cx "for in with keywords" 'for i in then do done; do echo $i; done' B
 c "nested quotes in cmdsub" 'echo "$(echo "x y" | tr " " "-")"' B
-c "dollar paren paren ambiguity" 'echo $((echo a); (echo b))' e
+cx "dollar paren paren ambiguity" 'echo $((echo a); (echo b))' e
 c "background list" 'true & false & wait' B
 c "redirect from cmdsub arg" 'echo $(cat < /dev/null)x' B
 c "line number in error" 'echo a
 nosuchcmd2' B
-c "lineno" 'echo $LINENO' e
+c "lineno" 'echo $LINENO' Pe
 c "ifs default restored" 'IFS=:; unset IFS; set -- a:b; echo $#' B
 c "variable named like keyword" 'if=1; echo $if' B
 c "function named like builtin external" 'ls() { echo shadow; }; ls' B
@@ -837,14 +843,20 @@ c "exempt: local variable" 'f() { local x=1; echo $x; }; f; echo "[$x]"' e "POSI
 c "exempt: echo -e" 'echo -e "a\tb"' e "XSI echo interprets escapes; -e is an option in bash and literal in dash."
 c "exempt: double bracket" '[[ a = a ]] && echo yes' e "Not POSIX; dash rejects it."
 c "exempt: array" 'a=(1 2 3); echo ${a[1]}' e "Not POSIX."
-c "exempt: dollar single quote" 'echo $'"'"'a\tb'"'" e "POSIX.1-2024 does not require it (Austin Group 249 adds it); dash prints a literal."
+c "dollar single quote" 'echo $'"'"'a\tb\101\x41'"'" P "POSIX.1-2024 XCU 2.2.4 defines it; dash 0.5.12 prints a literal."
 c "exempt: double equals in test" '[ a == a ]; echo $?' Pe "Not POSIX; dash accepts it."
 c "exempt: function keyword" 'function f { echo hi; }; f' e "Not POSIX."
 c "exempt: source builtin" 'echo "echo s" > s; source ./s' e "Not POSIX; dot is the standard spelling."
 c "exempt: string replace" 'x=abc; echo ${x/b/X}' e "Not POSIX."
 c "exempt: substring" 'x=abcdef; echo ${x:1:2}' e "Not POSIX."
 c "exempt: process substitution" 'cat <(echo hi)' e "Not POSIX."
-c "exempt: pipefail" 'set -o pipefail; false | true; echo $?' e "POSIX.1-2024 adds pipefail; older shells lack it."
+c "pipefail first stage fails" 'set -o pipefail; false | true; echo $?' Pe "POSIX.1-2024 (Issue 8) adds pipefail; dash 0.5.12 has the name but no effect."
+c "pipefail last stage fails" 'set -o pipefail; true | false; echo $?' Pe "Issue 8."
+c "pipefail all succeed" 'set -o pipefail; true | true; echo $?' Pe "Issue 8."
+c "pipefail reports rightmost failure" 'set -o pipefail; sh -c "exit 3" | sh -c "exit 4" | true; echo $?' Pe "Issue 8: the status is that of the last (rightmost) command that failed."
+c "pipefail off again" 'set -o pipefail; set +o pipefail; false | true; echo $?' Pe "Issue 8."
+c "pipefail with errexit" 'set -e; set -o pipefail; false | true; echo not reached' Pe "Issue 8."
+c "pipefail with negation" 'set -o pipefail; ! false | true; echo $?' Pe "Issue 8."
 c "exempt: here-string" 'cat <<< hi' e "Not POSIX."
 c "exempt: ampersand redirect" 'echo hi &> f; cat f' e "Not POSIX."
 c "exempt: dollar RANDOM" 'echo ${RANDOM:+set}' e "Not POSIX."

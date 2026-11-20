@@ -21,6 +21,8 @@ PASS=0
 FAIL=0
 SKIP=0
 VARIES=0
+BSD_SAME=0
+BSD_DIFF=0
 SHCMP_HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$(cd "$SHCMP_HERE/../zig-out/bin" 2>/dev/null && pwd)"
 OURS="${OURS:-$BIN_DIR/sh}"
@@ -90,10 +92,11 @@ c() {
         fi
     done
     bsd_same=0
+    bsig=""
     if [ -n "$BSD" ] && case "$flags" in *B*) true;; *) false;; esac; then
         shcmp_bsd "$snippet" "$base.bsd"
         bsig="$(cat "$base.bsd.out"; echo "rc=$(cat "$base.bsd.rc")")"
-        if [ "$bsig" = "$ours_sig" ]; then bsd_same=1; matrix="$matrix freebsd="; else matrix="$matrix freebsd!"; fi
+        if [ "$bsig" = "$ours_sig" ]; then bsd_same=1; BSD_SAME=$((BSD_SAME + 1)); matrix="$matrix freebsd="; else BSD_DIFF=$((BSD_DIFF + 1)); matrix="$matrix freebsd!"; fi
     fi
     # stderr vs dash
     err_ok=1
@@ -128,7 +131,7 @@ c() {
                 name="${spec%%|*}"
                 printf ' %s: `%s` |' "$name" "$(printf '%s' "$(cat "$base.$name.out"; echo "rc=$(cat "$base.$name.rc")")" | tr '\n' '~' | sed 's/|/\\|/g')"
             done
-            [ $bsd_same != 0 ] && printf ' freebsd: same |' || printf ' freebsd: - |'
+            if [ -n "$bsig" ]; then printf ' freebsd: `%s` |' "$(printf '%s' "$bsig" | tr '\n' '~' | sed 's/|/\\|/g')"; else printf ' freebsd: - |'; fi
             printf ' ours: `%s` | %s |\n' "$(printf '%s' "$ours_sig" | tr '\n' '~' | sed 's/|/\\|/g')" "$note"
         } >> "$SH_DOC_OUT"
     fi
@@ -144,6 +147,7 @@ print_summary() {
     printf ' %s: %d/%d passed' "${UTIL:-sh}" "$PASS" "$TOTAL"
     [ "$SKIP" -gt 0 ] && printf ' (%d skipped)' "$SKIP"
     printf ' (%d recorded as shells-differ)\n' "$VARIES"
+    printf ' FreeBSD sh cross-check: %d same as ours, %d different (of %d run)\n' "$BSD_SAME" "$BSD_DIFF" "$((BSD_SAME + BSD_DIFF))"
     if [ "$FAIL" -gt 0 ]; then printf ' %d test(s) failed\n' "$FAIL"; else printf ' All tests passed!\n'; fi
     printf '======================================\n'
 }

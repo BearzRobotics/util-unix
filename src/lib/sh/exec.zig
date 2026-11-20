@@ -777,6 +777,8 @@ fn assignError(sh: *Shell, name: []const u8) u8 {
 fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     sh.cur_col = node.col;
     sh.cur_end_col = node.end_col;
+    // `set -n` in the middle of a script: nothing more runs (dash, bash).
+    if (sh.flags.noexec) return 0;
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     defer arena.deinit();
     const a = arena.allocator();
@@ -786,7 +788,10 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     expand.fields(sh, a, s.words, &args) catch |e| return xerr(sh, e);
     const vals = a.alloc([]const u8, s.assigns.len) catch return 2;
     // `export x=~` style operands expand tildes after `=` like assignments.
-    for (s.assigns, vals) |asg, *v| v.* = expand.assignValue(sh, a, asg.value) catch |e| return xerr(sh, e);
+    for (vals) |*v| v.* = "";
+    if (args.items.len > 0) {
+        for (s.assigns, vals) |asg, *v| v.* = expand.assignValue(sh, a, asg.value) catch |e| return xerr(sh, e);
+    }
     if (args.items.len > 0) {
         const nm = args.items[0];
         if (std.mem.eql(u8, nm, "export") or std.mem.eql(u8, nm, "readonly") or std.mem.eql(u8, nm, "local")) {
@@ -801,14 +806,22 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
         }
     }
 
-    if (sh.flags.xtrace and (args.items.len > 0 or vals.len > 0)) xtrace(sh, a, s, vals, args.items);
+    if (sh.flags.xtrace and args.items.len > 0) xtrace(sh, a, s, vals, args.items);
 
     if (args.items.len == 0) {
         var saved: Redirs = .{};
         const ok = applyRedirs(sh, a, s.redirs, &saved);
         defer saved.restore(sh.gpa);
         if (!ok) return 2;
-        for (s.assigns, vals) |asg, v| {
+        // POSIX 2.9.1 (Issue 8): each assignment is expanded and made in order,
+        // so a later one sees an earlier one.
+        for (s.assigns) |asg| {
+            const v = expand.assignValue(sh, a, asg.value) catch |e| return xerr(sh, e);
+            if (sh.flags.xtrace) {
+                var one = [_][]const u8{v};
+                const only: ast.Simple = .{ .assigns = &.{asg}, .words = &.{}, .redirs = &.{} };
+                xtrace(sh, a, only, &one, &.{});
+            }
             sh.setVar(asg.name, v) catch |e| switch (e) {
                 error.ReadOnly => return assignError(sh, asg.name),
                 error.OutOfMemory => return 2,

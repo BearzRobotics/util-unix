@@ -59,6 +59,9 @@ pub const ParamOp = enum {
     trim_suffix_small,
     /// `${x%%p}`
     trim_suffix_large,
+    /// An unknown `${...}` form; like dash the error is raised when the word
+    /// is expanded, not when it is parsed (`sh -n` accepts it).
+    bad_subst,
 };
 
 pub const Param = struct {

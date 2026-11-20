@@ -38,19 +38,25 @@ done
 printf 'checked %s POSIX snippets (exempt snippets are not linted)\n' "$n"
 
 # --- 2. syntax oracle ---
+# Policy: ours must agree with `dash -n` (that is a test failure otherwise);
+# a disagreement with shellcheck is printed as NOTE (recorded in
+# docs/compatibility/sh.md) because shellcheck is stricter than dash in places
+# (arithmetic and test arguments it cannot analyse) and more lenient in others.
+NOTES=0
 oracle() {
     f="$1"
     sc=$(shellcheck -s dash -S error -f gcc "$f" 2>&1 | grep -c 'SC1[0-9][0-9][0-9]')
     "$OURS" -n "$f" > /dev/null 2>&1; ours=$?
     dash -n "$f" > /dev/null 2>&1; d=$?
-    if [ "$sc" -eq 0 ] && [ "$ours" -ne 0 ]; then
-        bad "oracle $f: shellcheck parses it, ours rejects (rc=$ours; dash rc=$d)"
-    elif [ "$sc" -gt 0 ] && [ "$ours" -eq 0 ]; then
-        bad "oracle $f: shellcheck reports a syntax error, ours accepts (dash rc=$d)"
-    elif [ "$ours" -ne "$d" ]; then
+    if [ "$ours" -ne "$d" ]; then
         bad "sh -n vs dash -n on $f: ours=$ours dash=$d"
-    else
-        ok "oracle $f"
+        return
+    fi
+    ok "oracle $f"
+    if [ "$sc" -eq 0 ] && [ "$ours" -ne 0 ]; then
+        NOTES=$((NOTES + 1)); printf 'NOTE shellcheck parses %s; dash and ours reject it (rc=%s)\n' "$f" "$ours"
+    elif [ "$sc" -gt 0 ] && [ "$ours" -eq 0 ]; then
+        NOTES=$((NOTES + 1)); printf 'NOTE shellcheck reports a syntax error in %s; dash and ours accept it\n' "$f"
     fi
 }
 for f in "$TMP"/snip/*.sh "$HERE"/*.sh "$HERE"/../tools/*.sh "$HERE"/../bench/*.sh /stuff/git/util-core/test/*.sh /stuff/git/util-core/tools/*.sh /etc/init.d/*; do
@@ -59,7 +65,7 @@ for f in "$TMP"/snip/*.sh "$HERE"/*.sh "$HERE"/../tools/*.sh "$HERE"/../bench/*.
 done
 
 printf '\n======================================\n'
-printf ' sh lint/oracle: %d/%d passed\n' "$PASS" "$((PASS + FAIL))"
+printf ' sh lint/oracle: %d/%d passed (%d shellcheck disagreements noted)\n' "$PASS" "$((PASS + FAIL))" "$NOTES"
 [ "$FAIL" -eq 0 ] && echo " All tests passed!" || printf ' %d test(s) failed\n' "$FAIL"
 printf '======================================\n'
 [ "$FAIL" -eq 0 ]

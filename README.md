@@ -6,7 +6,9 @@ command-line wrappers. Spec: `ai/SPECS.md`. Engineering rules: `ai/AGENTS.md`.
 Implemented: `chmod`, `chown`, `chgrp`, `getent`, `id`, `groups`, `tty`, `uname`
 (ownership: `docs/decisions/0005-unix-only-commands-belong-here.md`) and
 `stty`, `who`, `pinky`, `chcon`, `runcon`, `hostname`
-(`docs/decisions/0006-unix-commands-beyond-util-linux-and-raw-ioctl.md`).
+(`docs/decisions/0006-unix-commands-beyond-util-linux-and-raw-ioctl.md`) and
+`sh`, a POSIX shell (milestone 1, the non-interactive core; decision 0009,
+`docs/manpages/sh.md`, `docs/sh-diagnostics.md`, `docs/posix-shell-differences.md`).
 Each command's compatibility record (`docs/compatibility/`) lists what was
 compared with the reference program and what was not; `runcon`'s transition and
 `pinky`'s short format are the unverified parts.

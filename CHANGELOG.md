@@ -3,6 +3,13 @@
 ## Unreleased
 
 **Added**
+- `sh`: a POSIX shell (decision 0009, milestone 1: lexer, parser, all expansions, redirections and
+  here-documents, control flow, functions, subshells, traps, special and regular builtins) as the
+  library `util_unix.sh` plus the `sh` wrapper. Diagnostics have stable codes (SH1001-SH7009), four
+  styles (`--diagnostics=posix|rich|json|gcc`), `sh --explain CODE`, and `sh --check` lint mode.
+  Differential suite `test/test_sh.sh` (dash, bash --posix, busybox ash, yash, FreeBSD sh),
+  `test/test_sh_diag.sh`, `test/test_sh_lint.sh`; `docs/std-io-gaps.md` rows 17-24; `sys.zig` is now
+  part of the library module.
 - `--json` for `uname`, `id` and `who` (not GNU; decision 0007) and `util_unix.json`.
 
 ## 0.3.0

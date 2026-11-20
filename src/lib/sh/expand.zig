@@ -231,6 +231,10 @@ fn lookup(x: *X, name: []const u8) Error!PV {
     switch (c) {
         '@', '*' => return .{ .many = @as([]const []const u8, @ptrCast(sh.params.items)) },
         '#' => return .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.params.items.len}) },
+        'L' => if (std.mem.eql(u8, name, "LINENO")) return .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.line}) } else {
+            const v = sh.getVar(name) orelse return .unset;
+            return .{ .one = v };
+        },
         '?' => return .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.status}) },
         '$' => return .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.pid}) },
         '!' => return if (sh.bg_pid == 0) .unset else .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.bg_pid}) },
@@ -335,6 +339,12 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
     };
     const missing = if (p.colon) is_empty else is_unset;
     switch (p.op) {
+        .bad_subst => {
+            sh.diagKind(.bad_substitution, p.name, "Bad substitution");
+            sh.status = 2;
+            sh.flow = .exit_shell;
+            return error.Fatal;
+        },
         .plain => {
             if (is_unset and sh.flags.nounset and !multi) return fatal(sh, "{s}: parameter not set", .{p.name});
             try emit(x, pv, p.name, p.quoted);

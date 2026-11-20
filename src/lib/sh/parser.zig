@@ -440,6 +440,7 @@ pub const Parser = struct {
             self.pos += 1;
             return;
         };
+        if (n == '\'' and !in_dq and ctx != .text) return self.scanDollarQuote(b);
         if (n == '{') {
             self.pos += 2;
             return self.scanBraced(b, in_dq);
@@ -469,13 +470,116 @@ pub const Parser = struct {
             try b.push(a, .{ .param = p });
             return;
         }
-        _ = ctx;
         try b.lit(a, '$', in_dq);
         self.pos += 1;
     }
 
+    /// `$'...'` (POSIX.1-2024 XCU 2.2.4 Dollar-Single-Quotes): backslash
+    /// escapes are decoded; the result is quoted text.
+    fn scanDollarQuote(self: *Parser, b: *Builder) Error!void {
+        const a = self.a;
+        const qoff = self.pos;
+        const qline = self.line;
+        self.pos += 2;
+        var out: std.ArrayList(u8) = .empty;
+        while (true) {
+            const c = self.cur() orelse return self.failOpen(.unterminated_quote, "$'", qoff, qline, "Syntax error: Unterminated quoted string", .{});
+            if (c == '\'') break;
+            if (c != '\\') {
+                try out.append(a, c);
+                self.adv();
+                continue;
+            }
+            const e = self.at(1) orelse return self.failOpen(.unterminated_quote, "$'", qoff, qline, "Syntax error: Unterminated quoted string", .{});
+            self.pos += 2;
+            switch (e) {
+                'a' => try out.append(a, 7),
+                'b' => try out.append(a, 8),
+                'e', 'E' => try out.append(a, 27),
+                'f' => try out.append(a, 12),
+                'n' => try out.append(a, '\n'),
+                'r' => try out.append(a, '\r'),
+                't' => try out.append(a, '\t'),
+                'v' => try out.append(a, 11),
+                '\\', '\'', '"', '?' => try out.append(a, e),
+                'c' => {
+                    const x = self.cur() orelse continue;
+                    self.pos += 1;
+                    try out.append(a, if (x == '?') 127 else x & 0x1f);
+                },
+                'x' => {
+                    var v: u32 = 0;
+                    var k: usize = 0;
+                    while (k < 2) : (k += 1) {
+                        const h = self.cur() orelse break;
+                        const d = std.fmt.charToDigit(h, 16) catch break;
+                        v = v * 16 + d;
+                        self.pos += 1;
+                    }
+                    try out.append(a, @truncate(v));
+                },
+                '0'...'7' => {
+                    var v: u32 = e - '0';
+                    var k: usize = 1;
+                    while (k < 3) : (k += 1) {
+                        const h = self.cur() orelse break;
+                        if (h < '0' or h > '7') break;
+                        v = v * 8 + (h - '0');
+                        self.pos += 1;
+                    }
+                    try out.append(a, @truncate(v));
+                },
+                'u', 'U' => {
+                    var v: u32 = 0;
+                    var k: usize = 0;
+                    const max: usize = if (e == 'u') 4 else 8;
+                    while (k < max) : (k += 1) {
+                        const h = self.cur() orelse break;
+                        const d = std.fmt.charToDigit(h, 16) catch break;
+                        v = v *% 16 +% d;
+                        self.pos += 1;
+                    }
+                    var enc: [4]u8 = undefined;
+                    const n = std.unicode.utf8Encode(@intCast(@min(v, 0x10ffff)), &enc) catch 0;
+                    try out.appendSlice(a, enc[0..n]);
+                },
+                else => {
+                    try out.append(a, '\\');
+                    try out.append(a, e);
+                },
+            }
+        }
+        self.pos += 1;
+        try b.push(a, .{ .quoted = out.items });
+    }
+
+    /// Skip an unknown `${...}` form to its closing brace; the expander
+    /// reports "Bad substitution" if the word is ever expanded.
+    fn badSubst(self: *Parser, b: *Builder, in_dq: bool, start: usize) Error!void {
+        var depth: usize = 1;
+        var i = start;
+        while (i < self.src.len) : (i += 1) {
+            switch (self.src[i]) {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if (depth == 0) break;
+                },
+                else => {},
+            }
+        } else return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
+        const p = try self.a.create(ast.Param);
+        p.* = .{ .name = try self.a.dupe(u8, self.src[start..i]), .op = .bad_subst, .quoted = in_dq };
+        for (self.src[start..i]) |c| if (c == '\n') {
+            self.line += 1;
+        };
+        self.pos = i + 1;
+        try b.push(self.a, .{ .param = p });
+    }
+
     fn scanBraced(self: *Parser, b: *Builder, in_dq: bool) Error!void {
         const a = self.a;
+        const bstart = self.pos;
         const p = try a.create(ast.Param);
         p.* = .{ .name = "", .quoted = in_dq };
         var c = self.cur() orelse return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
@@ -505,11 +609,11 @@ pub const Parser = struct {
         } else if (lexer.isSpecialParam(c)) {
             p.name = try a.dupe(u8, self.src[self.pos .. self.pos + 1]);
             self.pos += 1;
-        } else return self.failK(.bad_substitution, "Bad substitution", .{});
+        } else return self.badSubst(b, in_dq, bstart);
 
         const d = self.cur() orelse return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
         if (length) {
-            if (d != '}') return self.failK(.bad_substitution, "Bad substitution", .{});
+            if (d != '}') return self.badSubst(b, in_dq, bstart);
             p.op = .length;
             self.pos += 1;
             try b.push(a, .{ .param = p });
@@ -529,7 +633,7 @@ pub const Parser = struct {
                     '=' => .assign_default,
                     '?' => .error_if_unset,
                     '+' => .use_alternate,
-                    else => return self.failK(.bad_substitution, "Bad substitution", .{}),
+                    else => return self.badSubst(b, in_dq, bstart),
                 };
                 p.colon = true;
                 self.pos += 2;
@@ -568,7 +672,7 @@ pub const Parser = struct {
                     self.pos += 1;
                 }
             },
-            else => return self.failK(.bad_substitution, "Bad substitution", .{}),
+            else => return self.badSubst(b, in_dq, bstart),
         }
         p.op = op;
         var inner: Builder = .{};
@@ -1357,7 +1461,7 @@ test "mutation: corpus scripts with random byte damage parse or fail cleanly" {
         while (iter < 600) : (iter += 1) {
             const len = @min(seed.len, buf.len);
             @memcpy(buf[0..len], seed[0..len]);
-            var cur = len;
+            var cur: usize = len;
             const edits = 1 + rnd.uintLessThan(usize, 4);
             var k: usize = 0;
             while (k < edits) : (k += 1) {
