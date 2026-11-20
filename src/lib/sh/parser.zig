@@ -810,7 +810,7 @@ pub const Parser = struct {
         sub.aliases = self.aliases;
         sub.line = self.line;
         sub.depth = self.depth + 1;
-        const body = try sub.parseList(.top);
+        const body = try sub.parseList(.compound);
         const t = try sub.next();
         if (t.tag != .eof) return sub.unexpected(t, null);
         try b.push(a, .{ .cmdsub = .{ .body = body, .quoted = in_dq } });

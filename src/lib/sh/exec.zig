@@ -1007,6 +1007,8 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
         else => runInShell(sh, a, r, args.items, s, vals),
     };
     errexitCheck(sh, st, name);
+    // a signal that arrived while the command ran: its trap runs now (POSIX 2.11)
+    if (sh.flow == .none) checkTraps(sh);
     return st;
 }
 

@@ -279,13 +279,15 @@ fn ifsFirst(sh: *Shell) ?u8 {
 fn emit(x: *X, pv: PV, name: []const u8, is_quoted: bool) Error!void {
     const fl: u8 = if (is_quoted) quoted else field;
     switch (pv) {
-        .unset => {},
+        .unset => if (is_quoted and !(name.len > 0 and name[0] == '@')) {
+            x.marker = true; // "$unset" is one empty field
+        },
         .one => |v| {
             try x.putAll(v, fl);
             if (is_quoted) x.marker = true;
         },
         .many => |list| {
-            if (name[0] == '*' and is_quoted) {
+            if (name.len > 0 and name[0] == '*' and is_quoted) {
                 var first = true;
                 const sep = ifsFirst(x.sh);
                 for (list) |v| {
@@ -323,8 +325,14 @@ fn joined(x: *X, pv: PV) Error![]const u8 {
 
 fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
     const sh = x.sh;
+    if (p.op == .bad_subst) {
+        sh.diagKind(.bad_substitution, p.name, "Bad substitution");
+        sh.status = 2;
+        sh.flow = .exit_shell;
+        return error.Fatal;
+    }
     const pv = try lookup(x, p.name);
-    const multi = p.name[0] == '@' or p.name[0] == '*';
+    const multi = p.name.len > 0 and (p.name[0] == '@' or p.name[0] == '*');
     const is_unset = switch (pv) {
         .unset => true,
         .many => |l| l.len == 0,

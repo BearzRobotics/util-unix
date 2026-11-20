@@ -55,7 +55,7 @@ done
 
 [ -x "$OURS" ] || { echo "no sh at $OURS (build with zig build -Doptimize=ReleaseSafe -Dcommands=sh -Dmode=standalone)"; exit 1; }
 WANT="$*"
-want_corpus() { [ -z "$WANT" ] || case " $WANT " in *" $1 "*) return 0;; esac; return 1; }
+want_corpus() { [ -z "$WANT" ] && return 0; case " $WANT " in *" $1 "*) return 0;; esac; return 1; }
 
 # ---- yash ------------------------------------------------------------------
 corpus_yash() {
@@ -125,7 +125,7 @@ corpus_freebsd() {
     done > "$TMP/fb.list"
     runfb() { # runfb SHELL FILE -> prints "rc" and leaves $TMP/fb.out
         w="$TMP/fbw.$$"; rm -rf "$w"; mkdir -p "$w"
-        (cd "$w" && SH="$1" $SANDBOX timeout 30 "$1" "$2" > "$TMP/fb.out.$$" 2> /dev/null < /dev/null; echo $? > "$TMP/fb.rc.$$")
+        (cd "$w" && SH="$1" $SANDBOX timeout 30 "$1" "$2" > "$TMP/fb.out.$$" 2> "$TMP/fb.err.$$" < /dev/null; echo $? > "$TMP/fb.rc.$$")
         rm -rf "$w"
     }
     judge() { # judge SHELL FILE -> 0 when the case passes
@@ -140,7 +140,10 @@ corpus_freebsd() {
         if judge "$OURS" "$f"; then pass=$((pass + 1)); continue; fi
         fail=$((fail + 1))
         if [ -x /usr/bin/dash ] && judge /usr/bin/dash "$f"; then cat="BUG"; bug=$((bug + 1)); else cat="OTHER"; oth=$((oth + 1)); fi
-        printf '%s\tfreebsd\t%s\t(exit %s, wanted %s)\n' "$cat" "$rel" "$(cat "$TMP/fb.rc.$$")" "${f##*.}" >> "$REPORT"
+        judge "$OURS" "$f" # leave our run's output and status behind
+        sd="stdout ok"
+        if [ -f "$f.stdout" ]; then cmp -s "$TMP/fb.out.$$" "$f.stdout" || sd="stdout differs"; fi
+        printf '%s\tfreebsd\t%s\texit %s, wanted %s; %s; stderr: %s\n' "$cat" "$rel" "$(cat "$TMP/fb.rc.$$")" "${f##*.}" "$sd" "$(head -c 140 "$TMP/fb.err.$$" | tr '\n\t' '~ ')" >> "$REPORT"
     done < "$TMP/fb.list"
     echo "freebsd: $pass passed, $fail failed ($bug bug, $oth other-shell)"
 }

@@ -263,7 +263,7 @@ pub fn main(ctx: cli.Context) u8 {
     var rest = args[i..];
     // $0 of a script read from standard input is the name the shell was invoked by
     var argv0_buf: [512]u8 = undefined;
-    var name: []const u8 = argv0(&argv0_buf) orelse ctx.name;
+    var name: []const u8 = ctx.name;
     var label: []const u8 = "stdin";
     var script: ?[]u8 = null;
     defer if (script) |s| gpa.free(s);
@@ -291,6 +291,7 @@ pub fn main(ctx: cli.Context) u8 {
         }
     } else if (from_stdin or rest.len == 0) {
         from_stdin = true;
+        name = argv0(&argv0_buf) orelse ctx.name;
     } else {
         name = rest[0];
         label = rest[0];

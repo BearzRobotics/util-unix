@@ -300,13 +300,19 @@ pub const Evaluator = struct {
     }
 };
 
+/// Digits to a value; out of range saturates at the largest intmax_t as
+/// strtoimax does, which dash relies on (FreeBSD sh reports an error instead;
+/// POSIX leaves it undefined, so dash is followed, docs/posix-shell-differences.md).
 fn parseWrapping(digits: []const u8, base: u8) i64 {
     var v: u64 = 0;
     for (digits) |c| {
         const d = std.fmt.charToDigit(c, base) catch unreachable;
-        v = v *% base +% d;
+        const m = @mulWithOverflow(v, @as(u64, base));
+        const a = @addWithOverflow(m[0], @as(u64, d));
+        if (m[1] != 0 or a[1] != 0 or a[0] > std.math.maxInt(i64)) return std.math.maxInt(i64);
+        v = a[0];
     }
-    return @bitCast(v);
+    return @intCast(v);
 }
 
 /// strtoimax-style parse of a whole string (base 0); null when not a number.
