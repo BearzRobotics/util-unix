@@ -185,7 +185,8 @@ pub fn open(path: []const u8, f: OpenFlags, mode: u32) Error!i32 {
     };
     while (true) {
         const r = linux.openat(linux.AT.FDCWD, p, o, @intCast(mode));
-        if (linux.errno(r) == .INTR) continue;
+        // a caught signal is reported (E_INTR) so the shell can run its trap and retry
+        if (linux.errno(r) == .INTR and !any_pending) continue;
         return @intCast(try check(r));
     }
 }

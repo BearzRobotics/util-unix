@@ -40,9 +40,15 @@ fn aliasGet(ctx: *anyopaque, name: []const u8) ?[]const u8 {
 }
 
 /// Parse and execute `src` one complete command at a time.
-pub fn runSource(sh: *Shell, src: []const u8, o: RunOpts) error{OutOfMemory}!u8 {
+pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!u8 {
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     const a = arena.allocator();
+    // NUL bytes in a script are ignored (dash, FreeBSD sh)
+    const src = if (std.mem.indexOfScalar(u8, src_in, 0) != null) blk: {
+        var clean: std.ArrayList(u8) = .empty;
+        for (src_in) |c| if (c != 0) try clean.append(a, c);
+        break :blk clean.items;
+    } else src_in;
     var d: parser.Diag = .{};
     var p = try parser.Parser.initProgram(a, src, &d);
     p.aliases = .{ .ctx = sh, .get = aliasGet };
@@ -58,7 +64,8 @@ pub fn runSource(sh: *Shell, src: []const u8, o: RunOpts) error{OutOfMemory}!u8 
                 sh.line = d.line;
                 reportSyntax(sh, &d, o.prefix, src);
                 sh.status = 2;
-                sh.flow = .exit_shell;
+                // `command eval 'bad'` is a regular builtin call: it fails, the shell goes on
+                if (!(sh.no_die > 0 and o.prefix.len > 0)) sh.flow = .exit_shell;
                 last = 2;
                 break;
             },
@@ -180,7 +187,8 @@ fn readMore(gpa: Allocator, buf: *std.ArrayList(u8), fd: i32, chunk: *[8192]u8) 
             return true;
         };
         if (n == 0) return true;
-        buf.appendSlice(gpa, chunk[0..n]) catch return true;
+        // NUL bytes in a script are ignored (dash, FreeBSD sh; POSIX leaves them undefined)
+        for (chunk[0..n]) |c| if (c != 0) buf.append(gpa, c) catch return true;
         return false;
     }
 }
@@ -390,6 +398,13 @@ fn execReplace(sh: *Shell, node: *const Node) u8 {
             const st = execSimple(sh, node, s, true);
             sh.status = st;
             return st;
+        },
+        // already in a child that exits afterwards (`(cmd) &`, a pipeline stage):
+        // the subshell needs no second process, only its trap reset
+        .subshell => |body| {
+            const b = body orelse return 0;
+            childInit(sh, false);
+            return execReplace(sh, b);
         },
         else => return execNode(sh, node),
     }
@@ -767,9 +782,17 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
                     },
                     else => unreachable,
                 }
-                const fd = sys.open(path, flags, mode) catch {
-                    openError(sh, path, flags.create);
-                    return false;
+                const fd = while (true) {
+                    break sys.open(path, flags, mode) catch {
+                        // a trapped signal interrupted a blocked open (a FIFO): run the trap, retry
+                        if (sys.errno() == sys.E_INTR) {
+                            checkTraps(sh);
+                            if (sh.flow != .none) return false;
+                            continue;
+                        }
+                        openError(sh, path, flags.create);
+                        return false;
+                    };
                 };
                 if (!place(sh, fd, n, save)) return false;
             },
@@ -829,6 +852,15 @@ fn saveFd(sh: *Shell, n: i32, save: ?*Redirs) bool {
 
 /// Put the open descriptor `fd` at number `n` (closing `fd`).
 fn place(sh: *Shell, fd: i32, n: i32, save: ?*Redirs) bool {
+    if (fd == n) {
+        // open() returned the very number: it was closed before, so restoring means closing
+        if (save) |sv| sv.saved.append(sh.gpa, .{ .fd = n, .saved = -1 }) catch {
+            sys.close(fd);
+            return false;
+        };
+        sys.setCloexec(n, false);
+        return true;
+    }
     if (!saveFd(sh, n, save)) {
         sys.close(fd);
         return false;
@@ -1307,7 +1339,7 @@ fn runExternal(sh: *Shell, a: Allocator, path: []const u8, args: []const []const
         };
         // a file with NUL bytes in its first line is a binary, not a script
         const head = text[0 .. std.mem.indexOfScalar(u8, text, '\n') orelse text.len];
-        if (std.mem.indexOfScalar(u8, head, 0) != null) {
+        if (std.mem.indexOfScalar(u8, head, 0) != null or std.mem.startsWith(u8, text, "\x7fELF")) {
             sh.diagK(.not_executable, args[0], "{s}: Exec format error", .{args[0]});
             sys.exit(126);
         }

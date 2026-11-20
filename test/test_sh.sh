@@ -836,6 +836,23 @@ a=$(cat f2) 3>|$(echo f2) true; echo $?' E "POSIX 2.9.1 (dash); FreeBSD sh expan
 c "redirection with assignment on a function and a builtin" 'f() { echo "in f $a"; }
 a=2 f >f4; cat f4
 a=3 >f5 sh -c "echo \$a"; cat f5' B
+c "wait accepts --" 'wait --; echo $?
+: &
+wait -- $!; echo $?' B
+c "command -v quotes an alias value" "alias aa=echo\\ \\'\\\"\\'
+cmd=\$(command -v aa)
+alias aa=echo\\ bad
+eval \"\$cmd\"
+[ \"\$(eval aa)\" = \\\" ] && echo same" B
+c "command eval of a syntax error does not exit the shell" 'command eval \) 2>/dev/null; echo "after $?"' B
+c "a function name is a trap action, not a signal" 'term() { echo got; }; trap term TERM; kill -TERM $$; echo after' B
+c "wait for a pipeline job gives the pipefail status" 'set -o pipefail
+(exit 42) | : &
+wait %+; echo $?' B
+c "background subshell of one command is that command" '(sleep 1)& sleep 0.2; cat /proc/$!/comm; kill $!' B
+c "NUL bytes in a script are ignored" 'printf "echo a\0b\n\0echo c\n" > f; . ./f' B
+c "a redirection that opens the fd it names is undone" 'touch f; { :; } 3<f; echo x >&3 2>/dev/null; echo $?' B
+c "slashes in a globbed path are kept" 'cd /; set -- /etc//pa[s]swd /./et[c]//; echo "$@"' B
 cx "heredoc ended by end of input" 'cat <<EOF
 abc' B
 cx "heredoc ended by end of input after newline" 'cat <<EOF

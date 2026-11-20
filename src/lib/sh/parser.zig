@@ -1153,7 +1153,12 @@ pub const Parser = struct {
 
     fn parseTrailingRedirs(self: *Parser, node: *const Node, line: u32) Error!*const Node {
         var redirs: std.ArrayList(*ast.Redirect) = .empty;
-        while (try self.tryRedirect()) |r| try redirs.append(self.a, r);
+        // a word after a compound command is alias-expanded (it may be an operator)
+        try self.maybeAlias();
+        while (try self.tryRedirect()) |r| {
+            try redirs.append(self.a, r);
+            try self.maybeAlias();
+        }
         if (redirs.items.len == 0) return node;
         return self.mk(line, .{ .redirected = .{ .body = node, .redirs = try redirs.toOwnedSlice(self.a) } });
     }

@@ -565,7 +565,8 @@ fn glob(sh: *Shell, a: Allocator, fb: FieldBuf, out: *std.ArrayList([]const u8))
 
 fn joinPath(a: Allocator, prefix: []const u8, name: []const u8) Allocator.Error![]const u8 {
     if (prefix.len == 0) return name;
-    if (prefix[prefix.len - 1] == '/') return std.fmt.allocPrint(a, "{s}{s}", .{ prefix, name });
+    // only the root has no separator to add: a run of slashes in the pattern is kept
+    if (prefix.len == 1 and prefix[0] == '/') return std.fmt.allocPrint(a, "{s}{s}", .{ prefix, name });
     return std.fmt.allocPrint(a, "{s}/{s}", .{ prefix, name });
 }
 
@@ -596,7 +597,8 @@ fn walk(a: Allocator, prefix: []const u8, segs: []const []const u8, idx: usize, 
     const last = idx + 1 == segs.len;
     if (seg.len == 0) {
         // `a//b` or a trailing slash: keep it in the result.
-        const p2 = try std.fmt.allocPrint(a, "{s}/", .{std.mem.trimEnd(u8, prefix, "/")});
+        // every slash of a run is kept (dash, FreeBSD sh)
+        const p2 = try std.fmt.allocPrint(a, "{s}/", .{prefix});
         if (last) {
             if (sys.stat(prefix, true)) |info| {
                 if (info.kind == .dir) try out.append(a, p2);

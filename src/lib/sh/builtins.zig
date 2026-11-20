@@ -647,7 +647,10 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         return die(sh, 2);
     }
     var action: ?[]const u8 = null;
-    if (sys.signalNumber(args[i]) == null or args[i].len == 0) {
+    // Only an unsigned decimal integer (or `-`) as the first operand makes every
+    // operand a condition (POSIX trap); a name such as `term` is an action.
+    const first_is_cond = args[i].len > 0 and std.mem.indexOfNone(u8, args[i], "0123456789") == null;
+    if (!first_is_cond and !std.mem.eql(u8, args[i], "-")) {
         action = args[i];
         i += 1;
         if (i >= args.len) {
@@ -1196,6 +1199,7 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         const n = sys.read(0, &ch) catch {
             if (sys.errno() == sys.E_INTR) {
                 exec.checkTraps(sh);
+                if (sh.flow != .none) return sh.status; // the trap left the shell (exit, return)
                 continue;
             }
             return 1;
@@ -1535,7 +1539,7 @@ fn describe(sh: *Shell, a: Allocator, name: []const u8, verbose: bool, out: *std
         return true;
     }
     if (sh.aliases.get(name)) |v| {
-        if (verbose) out.print(a, "{s} is an alias for {s}\n", .{ name, v }) catch {} else out.print(a, "alias {s}='{s}'\n", .{ name, v }) catch {};
+        if (verbose) out.print(a, "{s} is an alias for {s}\n", .{ name, v }) catch {} else out.print(a, "alias {s}={s}\n", .{ name, quoteSingle(a, v) catch v }) catch {};
         return true;
     }
     if (sh.funcs.get(name) != null) {
