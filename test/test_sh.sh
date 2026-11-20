@@ -828,6 +828,14 @@ bar\\
 ' bar=X
 echo           \\
 foo" B
+c "bare exit in a signal trap uses the status of the interrupted command" 'trap "(exit 2); exit" INT
+(exit 1)
+kill -INT $$' E "POSIX 2.14: the status is that of the last command before the trap action (the kill, 0); FreeBSD sh differs."
+c "redirections are performed before assignments are expanded" 'rm -f f2
+a=$(cat f2) 3>|$(echo f2) true; echo $?' E "POSIX 2.9.1 (dash); FreeBSD sh expands the assignment first."
+c "redirection with assignment on a function and a builtin" 'f() { echo "in f $a"; }
+a=2 f >f4; cat f4
+a=3 >f5 sh -c "echo \$a"; cat f5' B
 cx "heredoc ended by end of input" 'cat <<EOF
 abc' B
 cx "heredoc ended by end of input after newline" 'cat <<EOF

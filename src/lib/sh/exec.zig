@@ -979,7 +979,8 @@ fn assignError(sh: *Shell, name: []const u8) u8 {
     return 2;
 }
 
-fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
+fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8 {
+    var s = s_in;
     sh.cur_col = node.col;
     sh.cur_end_col = node.end_col;
     // `set -n` in the middle of a script: nothing more runs (dash, bash).
@@ -1003,6 +1004,19 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     const vals = a.alloc([]const u8, s.assigns.len) catch return 2;
     // `export x=~` style operands expand tildes after `=` like assignments.
     for (vals) |*v| v.* = "";
+    // POSIX 2.9.1: the redirections are performed before the assignments of a
+    // command with a name are expanded (so `a=$(cat f) >f true` sees f). They are
+    // applied here, in the shell, around the command; special builtins and `exec`
+    // keep their own order (their redirections may be permanent).
+    var early: Redirs = .{};
+    defer early.restore(sh.gpa);
+    if (args.items.len > 0 and s.assigns.len > 0 and s.redirs.len > 0 and !lexer.isSpecialBuiltin(args.items[0]) and !std.mem.eql(u8, args.items[0], "command")) {
+        if (!applyRedirs(sh, a, s.redirs, &early)) {
+            errexitCheck(sh, 2, "redirection");
+            return 2;
+        }
+        s.redirs = &.{};
+    }
     if (args.items.len > 0) {
         for (s.assigns, vals) |asg, *v| v.* = expand.assignValue(sh, a, asg.value) catch |e| return xerr(sh, e);
     }
@@ -1093,6 +1107,7 @@ fn execSimple(sh: *Shell, node: *const Node, s: ast.Simple, replace: bool) u8 {
     errexitCheck(sh, st, name);
     // a signal that arrived while the command ran: its trap runs now (POSIX 2.11)
     if (sh.flow == .none) {
+        sh.status = st; // $? and a bare `exit` in the trap see this command's status
         checkTraps(sh);
         // a trap that exits or returns decides the status
         if (sh.flow != .none) return sh.status;
