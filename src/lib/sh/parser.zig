@@ -758,8 +758,13 @@ pub const Parser = struct {
         const cs_line = self.line;
         const saved = self.peeked;
         self.peeked = null;
+        // here-documents of the enclosing command read their bodies after the
+        // line that closes this substitution, not at its first newline
+        const outer_here = self.here;
+        self.here = .empty;
         const body = try self.parseList(.compound);
         const t = try self.next();
+        self.here = outer_here;
         switch (t.tag) {
             .op => |o| if (o == .rparen) {
                 self.peeked = saved;
@@ -1521,6 +1526,17 @@ fn joinLines(a: Allocator, src: []const u8) Allocator.Error!struct { text: []con
         i += 1;
     }
     return .{ .text = out.items, .conts = conts.items };
+}
+
+/// Parse text as the body of an unquoted here-document: only `$` and backquote
+/// expansions (used for PS4, which is expanded when it is printed).
+pub fn parseText(a: Allocator, text: []const u8) Error!ast.Word {
+    var d: Diag = .{};
+    var sub = Parser.init(a, text, &d);
+    sub.depth = 1;
+    var inner: Builder = .{};
+    try sub.scanParts(&inner, .text, true);
+    return inner.finish(a);
 }
 
 /// Parse a whole source text. The result owns its arena. On a syntax error

@@ -822,7 +822,16 @@ pub fn substitute(sh: *Shell, a: Allocator, node: *const Node) expand.Error![]co
 
 fn xtrace(sh: *Shell, a: Allocator, s: ast.Simple, vals: []const []const u8, args: []const []const u8) void {
     var line: std.ArrayList(u8) = .empty;
-    const ps4 = sh.getVar("PS4") orelse "+ ";
+    var ps4: []const u8 = sh.getVar("PS4") orelse "+ ";
+    // PS4 is subject to parameter expansion, command substitution and arithmetic
+    if (std.mem.indexOfAny(u8, ps4, "$`") != null) {
+        if (parser.parseText(a, ps4)) |w| {
+            const saved_trace = sh.flags.xtrace;
+            sh.flags.xtrace = false;
+            defer sh.flags.xtrace = saved_trace;
+            if (expand.string(sh, a, w)) |v| ps4 = v else |_| {}
+        } else |_| {}
+    }
     line.appendSlice(a, ps4) catch return;
     var first = true;
     for (s.assigns, vals) |asg, v| {
@@ -1041,7 +1050,7 @@ fn hasAssignTilde(w: ast.Word) bool {
 fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s: ast.Simple, vals: []const []const u8) u8 {
     const is_special = r == .special;
     var saved: Redirs = .{};
-    const is_exec = std.mem.eql(u8, args[0], "exec") or (args.len > 1 and std.mem.eql(u8, args[0], "command") and execBehindCommand(args);
+    const is_exec = std.mem.eql(u8, args[0], "exec") or (args.len > 1 and std.mem.eql(u8, args[0], "command") and execBehindCommand(args));
     if (!applyRedirs(sh, a, s.redirs, &saved)) {
         saved.restore(sh.gpa);
         if (is_special) {

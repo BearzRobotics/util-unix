@@ -204,7 +204,9 @@ fn eval(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     return exec.runSource(sh, text, .{ .prefix = "eval" }) catch 2;
 }
 
-fn dot(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
+fn dot(sh: *Shell, a: Allocator, args_in: []const []const u8) u8 {
+    var args = args_in;
+    if (args.len > 1 and std.mem.eql(u8, args[1], "--")) args = args[1..];
     if (args.len < 2) {
         sh.diagCmdK(.usage, null, ".", "filename argument required", .{});
         return die(sh, 2);
@@ -1181,6 +1183,25 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             while (val.items.len > 0) {
                 const li = pos + val.items.len - 1;
                 if (!esc.items[li] and isWs(ifs, b[li])) _ = val.pop() else break;
+            }
+            // a single trailing non-whitespace delimiter ends the last field too
+            // (POSIX 2.6.5: "A-B-" with two names gives "B"); not when the
+            // remainder holds another such delimiter ("C-D -")
+            if (val.items.len > 0) {
+                const li = pos + val.items.len - 1;
+                if (!esc.items[li] and isIfs(ifs, b[li]) and !isWs(ifs, b[li])) {
+                    var other = false;
+                    for (val.items[0 .. val.items.len - 1], 0..) |ch, k| if (!esc.items[pos + k] and isIfs(ifs, ch) and !isWs(ifs, ch)) {
+                        other = true;
+                    };
+                    if (!other) {
+                        _ = val.pop();
+                        while (val.items.len > 0) {
+                            const lj = pos + val.items.len - 1;
+                            if (!esc.items[lj] and isWs(ifs, b[lj])) _ = val.pop() else break;
+                        }
+                    }
+                }
             }
             pos = b.len;
         } else {

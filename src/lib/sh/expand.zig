@@ -29,6 +29,9 @@ pub const Error = error{ Fatal, OutOfMemory };
 const lit: u8 = 0;
 const quoted: u8 = 1;
 const field: u8 = 2;
+/// Zero-width mark of an empty quoted part (`''`, `""`): it keeps a field
+/// alive and separates it from neighbouring split results; never output.
+const empty_q: u8 = 3;
 
 const FieldBuf = struct {
     b: std.ArrayList(u8) = .empty,
@@ -116,6 +119,7 @@ fn stringMode(sh: *Shell, a: Allocator, w: ast.Word, assign: bool, as_pattern: b
     for (w) |p| try part(&x, p, lit);
     var out: std.ArrayList(u8) = .empty;
     for (x.cur.b.items, x.cur.f.items) |c, fl| {
+        if (fl == empty_q) continue;
         if (as_pattern and fl == quoted and isPatternSpecial(c)) try out.append(a, '\\');
         try out.append(a, c);
     }
@@ -135,7 +139,7 @@ fn part(x: *X, p: ast.Part, text_flag: u8) Error!void {
     switch (p) {
         .text => |t| try x.putAll(t, text_flag),
         .quoted => |t| {
-            try x.putAll(t, quoted);
+            if (t.len == 0) try x.put(0, empty_q) else try x.putAll(t, quoted);
             x.marker = true;
         },
         .tilde => |u| try tilde(x, u, false),
@@ -476,6 +480,7 @@ fn splitAndGlob(x: *X, fb: FieldBuf, out: *std.ArrayList([]const u8)) Error!void
             const c = b[i];
             if (f[i] == field and std.mem.indexOfScalar(u8, ifs, c) != null) {
                 if (isWs(ifs, c)) {
+                    const was_have = have;
                     if (have) {
                         try pieces.append(x.a, cur);
                         cur = .{};
@@ -484,6 +489,8 @@ fn splitAndGlob(x: *X, fb: FieldBuf, out: *std.ArrayList([]const u8)) Error!void
                     i += 1;
                     while (i < b.len and f[i] == field and isWs(ifs, b[i])) i += 1;
                     if (i < b.len and f[i] == field and std.mem.indexOfScalar(u8, ifs, b[i]) != null and !isWs(ifs, b[i])) {
+                        // leading white space then a delimiter: an empty field before it
+                        if (!was_have and pieces.items.len == 0) try pieces.append(x.a, .{});
                         i += 1;
                         while (i < b.len and f[i] == field and isWs(ifs, b[i])) i += 1;
                     }
@@ -503,7 +510,24 @@ fn splitAndGlob(x: *X, fb: FieldBuf, out: *std.ArrayList([]const u8)) Error!void
         }
         if (have) try pieces.append(x.a, cur);
     }
-    for (pieces.items) |pc| try glob(sh, x.a, pc, out);
+    for (pieces.items) |pc| {
+        var has_mark = false;
+        for (pc.f.items) |fl| if (fl == empty_q) {
+            has_mark = true;
+            break;
+        };
+        if (!has_mark) {
+            try glob(sh, x.a, pc, out);
+            continue;
+        }
+        var clean: FieldBuf = .{};
+        for (pc.b.items, pc.f.items) |c, fl| {
+            if (fl == empty_q) continue;
+            try clean.b.append(x.a, c);
+            try clean.f.append(x.a, fl);
+        }
+        try glob(sh, x.a, clean, out);
+    }
 }
 
 fn glob(sh: *Shell, a: Allocator, fb: FieldBuf, out: *std.ArrayList([]const u8)) Error!void {
