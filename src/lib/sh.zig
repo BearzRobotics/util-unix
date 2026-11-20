@@ -19,6 +19,12 @@ pub const builtins = @import("sh/builtins.zig");
 pub const shell = @import("sh/shell.zig");
 pub const diag = @import("sh/diag.zig");
 pub const lint = @import("sh/lint.zig");
+pub const jobs = @import("sh/jobs.zig");
+pub const jobcmd = @import("sh/jobcmd.zig");
+pub const history = @import("sh/history.zig");
+pub const completion = @import("sh/completion.zig");
+pub const interactive = @import("sh/interactive.zig");
+pub const readline = @import("sh/readline.zig");
 
 pub const Shell = shell.Shell;
 pub const Env = shell.Env;
@@ -39,4 +45,10 @@ test {
     _ = shell;
     _ = diag;
     _ = lint;
+    _ = jobs;
+    _ = jobcmd;
+    _ = history;
+    _ = readline;
+    _ = completion;
+    _ = interactive;
 }

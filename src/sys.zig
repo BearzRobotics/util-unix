@@ -580,3 +580,137 @@ pub fn signalNumber(name: []const u8) ?u8 {
     }
     return null;
 }
+
+// --- terminal and process groups (sh milestone 2; docs/std-io-gaps.md rows 25-29) ---
+
+/// Kernel `struct termios` as returned by TCGETS (not glibc's).
+pub const Termios = extern struct {
+    iflag: u32 = 0,
+    oflag: u32 = 0,
+    cflag: u32 = 0,
+    lflag: u32 = 0,
+    line: u8 = 0,
+    cc: [19]u8 = @splat(0),
+};
+
+const TCGETS = 0x5401;
+const TCSETS = 0x5402;
+const TCSETSW = 0x5403;
+const TIOCGPGRP = 0x540F;
+const TIOCSPGRP = 0x5410;
+const TIOCGWINSZ_ = 0x5413;
+
+pub fn tcgetattr(fd: i32) Error!Termios {
+    if (comptime !is_linux) return nosys();
+    var t: Termios = .{};
+    _ = try check(linux.ioctl(fd, TCGETS, @intFromPtr(&t)));
+    return t;
+}
+
+pub fn tcsetattr(fd: i32, t: *const Termios) Error!void {
+    if (comptime !is_linux) return nosys();
+    _ = try check(linux.ioctl(fd, TCSETSW, @intFromPtr(t)));
+}
+
+/// `t` with the modes a line editor needs: no echo, no canonical mode, no
+/// signal characters, no flow control, 8-bit input, reads return after one
+/// byte. Output processing is left alone so "\n" still ends a line.
+pub fn termiosRaw(t: Termios) Termios {
+    var r = t;
+    r.iflag &= ~@as(u32, 0o000400 | 0o000100 | 0o000200 | 0o002000 | 0o000040); // ICRNL INLCR IGNCR IXON ISTRIP
+    r.lflag &= ~@as(u32, 0o000002 | 0o000010 | 0o000001 | 0o100000); // ICANON ECHO ISIG IEXTEN
+    r.cc[6] = 1; // VMIN
+    r.cc[5] = 0; // VTIME
+    return r;
+}
+
+/// The terminal's erase, kill and EOF characters (VERASE=2, VKILL=3, VEOF=4).
+pub fn termiosChars(t: Termios) struct { erase: u8, kill: u8, eof: u8 } {
+    return .{ .erase = t.cc[2], .kill = t.cc[3], .eof = t.cc[4] };
+}
+
+pub const WinSize = struct { rows: u16, cols: u16 };
+
+pub fn winsize(fd: i32) ?WinSize {
+    if (comptime !is_linux) return null;
+    var w: [4]u16 = @splat(0);
+    if (linux.errno(linux.ioctl(fd, TIOCGWINSZ_, @intFromPtr(&w))) != .SUCCESS) return null;
+    if (w[1] == 0) return null;
+    return .{ .rows = w[0], .cols = w[1] };
+}
+
+pub fn getpgrp() i32 {
+    if (comptime !is_linux) return 0;
+    return @intCast(linux.getpgid(0));
+}
+
+pub fn setpgid(pid: i32, pgid: i32) Error!void {
+    if (comptime !is_linux) return nosys();
+    _ = try check(linux.setpgid(pid, pgid));
+}
+
+pub fn tcgetpgrp(fd: i32) Error!i32 {
+    if (comptime !is_linux) return nosys();
+    var p: i32 = 0;
+    _ = try check(linux.ioctl(fd, TIOCGPGRP, @intFromPtr(&p)));
+    return p;
+}
+
+pub fn tcsetpgrp(fd: i32, pgid: i32) Error!void {
+    if (comptime !is_linux) return nosys();
+    var p: i32 = pgid;
+    _ = try check(linux.ioctl(fd, TIOCSPGRP, @intFromPtr(&p)));
+}
+
+pub const WUNTRACED: u32 = 2;
+pub const WNOHANG: u32 = 1;
+pub const WCONTINUED: u32 = 8;
+
+/// wait4(2) with explicit flags (`WNOHANG`, `WUNTRACED`, `WCONTINUED`); pid 0
+/// in the result means nothing changed (with `WNOHANG`).
+pub fn waitpidFlags(pid: i32, flags: u32) Error!WaitResult {
+    if (comptime !is_linux) return nosys();
+    var st: i32 = 0;
+    const r = try check(linux.wait4(pid, &st, flags, null));
+    return .{ .pid = @intCast(r), .status = @bitCast(st) };
+}
+
+/// Stop signal of a wait status, or 0 when the child did not stop.
+pub fn statusStopSignal(status: u32) u8 {
+    if (comptime !is_linux) return 0;
+    if (linux.W.IFSTOPPED(status)) return @intCast((status >> 8) & 0xff);
+    return 0;
+}
+
+pub fn statusContinued(status: u32) bool {
+    return status == 0xffff;
+}
+
+pub fn statusCoreDumped(status: u32) bool {
+    return status & 0x80 != 0 and (status & 0x7f) != 0;
+}
+
+/// True when `fd` has input within `timeout_ms` (-1 forever). EINTR gives false
+/// with errno E_INTR.
+pub fn pollIn(fd: i32, timeout_ms: i32) bool {
+    if (comptime !is_linux) return false;
+    var p = [1]linux.pollfd{.{ .fd = fd, .events = 1, .revents = 0 }};
+    const r = linux.poll(&p, 1, timeout_ms);
+    if (linux.errno(r) != .SUCCESS) {
+        last_errno = @intFromEnum(linux.errno(r));
+        return false;
+    }
+    return r > 0;
+}
+
+/// Send `sig` to every process of group `pgid`.
+pub fn killpg(pgid: i32, sig: u8) Error!void {
+    return kill(-pgid, sig);
+}
+
+pub const SIGWINCH: u8 = 28;
+
+/// True when `sig` was caught since its flag was last taken (does not clear it).
+pub fn peekPending(sig: u8) bool {
+    return sig < nsig and pending_flags[sig];
+}

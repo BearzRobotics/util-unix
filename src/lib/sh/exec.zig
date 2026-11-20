@@ -22,6 +22,7 @@ const builtins = @import("builtins.zig");
 const lexer = @import("lexer.zig");
 const diagmod = @import("diag.zig");
 const shell = @import("shell.zig");
+const jobs = @import("jobs.zig");
 const Shell = shell.Shell;
 const Node = ast.Node;
 const Allocator = std.mem.Allocator;
@@ -201,8 +202,15 @@ pub fn waitFor(sh: *Shell, pid: i32, report: bool) u8 {
 
 fn childInit(sh: *Shell, bg: bool) void {
     sh.in_subshell = true;
-    sh.jobs.clearRetainingCapacity();
+    jobs.clearAll(sh);
     sys.clearPendingAny();
+    if (sh.flags.interactive) {
+        // The interactive shell's own dispositions must not leak into
+        // commands (POSIX XCU sh "Signals").
+        for ([_]u8{ 2, 3, 15, 20, 21, 22 }) |sg| if (!sh.inherited_ignore[sg]) {
+            _ = sys.setSignal(sg, .default);
+        };
+    }
     var i: u8 = 0;
     while (i < sys.nsig) : (i += 1) {
         if (sh.traps[i]) |t| {
@@ -213,7 +221,7 @@ fn childInit(sh: *Shell, bg: bool) void {
             }
         }
     }
-    if (bg) {
+    if (bg and !sh.jc) {
         _ = sys.setSignal(2, .ignore);
         _ = sys.setSignal(3, .ignore);
     }
@@ -236,10 +244,21 @@ const ChildIo = struct {
     close: []const i32 = &.{},
     devnull_stdin: bool = false,
     bg: bool = false,
+    job: ?*jobs.Job = null,
 };
 
+fn useJobs(sh: *Shell) bool {
+    return sh.jc and !sh.in_subshell;
+}
+
+fn nodeText(sh: *Shell, node: *const Node) []u8 {
+    return jobs.unparse(sh.gpa, node) catch &.{};
+}
+
 fn forkRun(sh: *Shell, node: *const Node, cio: ChildIo) ?i32 {
-    const pid = sys.fork() catch {
+    const text = if (cio.job != null) nodeText(sh, node) else &[_]u8{};
+    defer if (text.len > 0) sh.gpa.free(text);
+    const pid = jobs.forkInto(sh, cio.job, text, !cio.bg) catch {
         sh.diag("Cannot fork", .{});
         return null;
     };
@@ -315,8 +334,12 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
         },
         .subshell => |body| {
             const b = body orelse return 0;
-            const pid = forkRun(sh, b, .{}) orelse return 1;
-            const st = waitFor(sh, pid, true);
+            const job: ?*jobs.Job = if (useJobs(sh)) jobs.create(sh) else null;
+            const pid = forkRun(sh, b, .{ .job = job }) orelse {
+                if (job) |j| jobs.remove(sh, j);
+                return 1;
+            };
+            const st = if (job) |j| jobs.waitFg(sh, j) else waitFor(sh, pid, true);
             errexitCheck(sh, st, "subshell");
             return st;
         },
@@ -345,9 +368,18 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
 }
 
 fn spawnBackground(sh: *Shell, node: *const Node) u8 {
-    const pid = forkRun(sh, node, .{ .devnull_stdin = !sh.flags.monitor, .bg = true }) orelse return 1;
+    const job = jobs.create(sh);
+    if (job != null and !useJobs(sh)) job.?.grouped = false;
+    const pid = forkRun(sh, node, .{ .devnull_stdin = !sh.jc, .bg = true, .job = if (useJobs(sh)) job else null }) orelse {
+        if (job) |j| jobs.remove(sh, j);
+        return 1;
+    };
     sh.bg_pid = pid;
-    sh.jobs.append(sh.gpa, .{ .pid = pid }) catch {};
+    if (job) |j| if (j.procs.items.len == 0) {
+        const t = nodeText(sh, node);
+        defer if (t.len > 0) sh.gpa.free(t);
+        jobs.addPlain(sh, j, pid, t);
+    };
     return 0;
 }
 
@@ -376,6 +408,7 @@ fn runStages(sh: *Shell, cmds: []const *const Node) u8 {
     defer fds.deinit(gpa);
     var prev_read: ?i32 = null;
     var spawned: usize = 0;
+    const job: ?*jobs.Job = if (useJobs(sh)) jobs.create(sh) else null;
     for (cmds, 0..) |c, i| {
         var next_pipe: ?[2]i32 = null;
         if (i + 1 < cmds.len) {
@@ -395,6 +428,7 @@ fn runStages(sh: *Shell, cmds: []const *const Node) u8 {
             .stdin = prev_read,
             .stdout = if (next_pipe) |np| np[1] else null,
             .close = closes.items,
+            .job = job,
         }) orelse {
             if (prev_read) |r| sys.close(r);
             if (next_pipe) |np| {
@@ -410,6 +444,15 @@ fn runStages(sh: *Shell, cmds: []const *const Node) u8 {
             sys.close(np[1]);
             prev_read = np[0];
         } else prev_read = null;
+    }
+    if (job) |j| {
+        if (spawned == 0) {
+            jobs.remove(sh, j);
+            return 2;
+        }
+        const jst = jobs.waitFg(sh, j);
+        if (spawned < cmds.len) return 2;
+        return jst;
     }
     var st: u8 = 0;
     var worst: u8 = 0;
@@ -982,11 +1025,16 @@ pub fn callFunction(sh: *Shell, body: *const Node, args: []const []const u8) u8 
 
 fn runExternal(sh: *Shell, a: Allocator, path: []const u8, args: []const []const u8, s: ast.Simple, vals: []const []const u8, replace: bool) u8 {
     if (!replace) {
-        const pid = sys.fork() catch {
+        const job: ?*jobs.Job = if (useJobs(sh)) jobs.create(sh) else null;
+        const node: Node = .{ .line = 0, .kind = .{ .simple = s } };
+        const text = if (job != null) nodeText(sh, &node) else &[_]u8{};
+        defer if (text.len > 0) sh.gpa.free(text);
+        const pid = jobs.forkInto(sh, job, text, true) catch {
             sh.diag("Cannot fork", .{});
+            if (job) |j| jobs.remove(sh, j);
             return 2;
         };
-        if (pid != 0) return waitFor(sh, pid, true);
+        if (pid != 0) return if (job) |j| jobs.waitFg(sh, j) else waitFor(sh, pid, true);
         childInit(sh, false);
     }
     if (!applyRedirs(sh, a, s.redirs, null)) sys.exit(2);

@@ -15,6 +15,7 @@ const ast = @import("ast.zig");
 const parser = @import("parser.zig");
 const diagmod = @import("diag.zig");
 const exec = @import("exec.zig");
+const jobs_mod = @import("jobs.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Env = struct {
@@ -78,7 +79,7 @@ pub const Options = struct {
     reporter_ctx: ?*anyopaque = null,
 };
 
-pub const Job = struct { pid: i32, status: ?u8 = null };
+pub const Job = jobs_mod.Job;
 
 pub const Saved = struct {
     name: []u8,
@@ -112,7 +113,23 @@ pub const Shell = struct {
     /// Errexit is suppressed while this is non-zero.
     noerrexit: u32 = 0,
     in_subshell: bool = false,
-    jobs: std.ArrayList(Job) = .empty,
+    jobs: std.ArrayList(*Job) = .empty,
+    job_stamp: u64 = 0,
+    /// Job control is on (`set -m`): jobs get process groups.
+    jc: bool = false,
+    /// Controlling terminal descriptor (>= 10, close-on-exec) or -1.
+    tty_fd: i32 = -1,
+    shell_pgid: i32 = 0,
+    tty_modes: ?sys.Termios = null,
+    /// `exit` was requested explicitly (an interactive shell survives other
+    /// errors that end a script).
+    explicit_exit: bool = false,
+    /// Number of the command being read by the interactive loop, and the one
+    /// at which `exit` last warned about stopped jobs.
+    cmd_seq: u64 = 0,
+    exit_warned: u64 = 0,
+    /// Interactive-shell services supplied by `interactive.zig`.
+    history: ?*@import("history.zig").History = null,
     /// Variables saved by `local`, restored when the function returns.
     locals: std.ArrayList(Saved) = .empty,
     /// Arenas of programs that defined functions; kept for the shell's life.
@@ -179,6 +196,13 @@ pub const Shell = struct {
         return self;
     }
 
+    /// Signals an interactive shell with job control ignores (POSIX: SIGTSTP,
+    /// SIGTTIN, SIGTTOU; SIGINT/SIGQUIT/SIGTERM are handled by the loop).
+    pub fn ignoreJobSignals(self: *Shell) void {
+        _ = self;
+        for ([_]u8{ 20, 21, 22 }) |s| _ = sys.setSignal(s, .ignore);
+    }
+
     fn initPwd(self: *Shell) Allocator.Error!void {
         var buf: [4096]u8 = undefined;
         const phys = sys.getcwd(&buf) catch return;
@@ -225,6 +249,7 @@ pub const Shell = struct {
         for (self.params.items) |p| gpa.free(p);
         self.params.deinit(gpa);
         for (self.traps) |t| if (t) |s| gpa.free(s);
+        jobs_mod.clearAll(self);
         self.jobs.deinit(gpa);
         for (self.locals.items) |l| {
             gpa.free(l.name);

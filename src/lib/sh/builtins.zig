@@ -16,6 +16,9 @@ const expand = @import("expand.zig");
 const shell = @import("shell.zig");
 const arith = @import("arith.zig");
 const pattern = @import("pattern.zig");
+const jobs = @import("jobs.zig");
+const jobcmd = @import("jobcmd.zig");
+const history = @import("history.zig");
 const Shell = shell.Shell;
 const Allocator = std.mem.Allocator;
 
@@ -57,8 +60,18 @@ const table = [_]struct { []const u8, Fn, bool }{
     .{ "ulimit", ulimitCmd, false },
     .{ "umask", umaskCmd, false },
     .{ "unalias", unaliasCmd, false },
-    .{ "wait", waitCmd, false },
+    .{ "wait", jobcmd.waitCmd, false },
+    .{ "jobs", jobcmd.jobsCmd, false },
+    .{ "fg", jobcmd.fgCmd, false },
+    .{ "bg", jobcmd.bgCmd, false },
+    .{ "fc", history.fcCmd, false },
 };
+
+/// Name of the i-th builtin (for completion).
+pub fn nameAt(i: usize) ?[]const u8 {
+    if (i >= table.len) return null;
+    return table[i][0];
+}
 
 pub fn find(name: []const u8) ?Builtin {
     for (table) |e| if (std.mem.eql(u8, e[0], name)) return .{ .run = e[1], .special = e[2] };
@@ -69,7 +82,7 @@ pub fn find(name: []const u8) ?Builtin {
 
 /// A special-builtin error: the non-interactive shell exits.
 fn die(sh: *Shell, st: u8) u8 {
-    if (sh.no_die > 0) return st;
+    if (sh.no_die > 0 or sh.flags.interactive) return st;
     sh.status = st;
     sh.flow = .exit_shell;
     return st;
@@ -77,6 +90,13 @@ fn die(sh: *Shell, st: u8) u8 {
 
 /// `exit` itself: always leaves the shell.
 fn leave(sh: *Shell, st: u8) u8 {
+    if (sh.flags.interactive and sh.jc and jobs.anyStopped(sh) and sh.exit_warned + 1 != sh.cmd_seq) {
+        sh.exit_warned = sh.cmd_seq;
+        sh.diagBare("You have stopped jobs.");
+        sh.status = 1;
+        return 1;
+    }
+    sh.explicit_exit = true;
     sh.status = st;
     sh.flow = .exit_shell;
     return st;
@@ -471,9 +491,17 @@ fn knownOptName(name: []const u8) bool {
 }
 
 /// Set the option named `name`; false when unknown.
+/// `set -m` / `set +m`: engage or release job control.
+fn monitorChanged(sh: *Shell, on: bool) void {
+    if (on) _ = jobs.enable(sh, false) else jobs.disable(sh);
+}
+
 pub fn setNamedOption(sh: *Shell, name: []const u8, on: bool) bool {
     if (namedFlag(sh, name)) |p| {
         p.* = on;
+        if (on and std.mem.eql(u8, name, "vi")) sh.flags.emacs = false;
+        if (on and std.mem.eql(u8, name, "emacs")) sh.flags.vi = false;
+        if (std.mem.eql(u8, name, "monitor")) monitorChanged(sh, on);
         return true;
     }
     return knownOptName(name);
@@ -482,6 +510,7 @@ pub fn setNamedOption(sh: *Shell, name: []const u8, on: bool) bool {
 pub fn setOption(sh: *Shell, letter: u8, on: bool) bool {
     const p = flagPtr(sh, letter) orelse return false;
     p.* = on;
+    if (letter == 'm') monitorChanged(sh, on);
     return true;
 }
 
@@ -1600,30 +1629,6 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 
 // --- wait, kill, umask, ulimit -------------------------------------------------------------------
 
-fn waitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
-    if (args.len == 1) {
-        for (sh.jobs.items) |j| _ = exec.waitFor(sh, j.pid, false);
-        sh.jobs.clearRetainingCapacity();
-        return 0;
-    }
-    var st: u8 = 0;
-    for (args[1..]) |arg| {
-        const pid = parseNum(arg) orelse {
-            sh.diagCmd("wait", "Illegal number: {s}", .{arg});
-            return 2;
-        };
-        var found: ?usize = null;
-        for (sh.jobs.items, 0..) |j, k| if (j.pid == pid) {
-            found = k;
-        };
-        if (found) |k| {
-            st = exec.waitFor(sh, @intCast(pid), false);
-            _ = sh.jobs.orderedRemove(k);
-        } else st = 127;
-    }
-    return st;
-}
-
 fn killCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
     var sig: u8 = 15;
@@ -1661,6 +1666,10 @@ fn killCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     var st: u8 = 0;
     for (args[i..]) |p| {
+        if (jobcmd.killJob(sh, p, sig)) |r| {
+            if (r != 0) st = r;
+            continue;
+        }
         const pid = parseNum(p) orelse {
             sh.diagCmd("kill", "invalid pid {s}", .{p});
             st = 2;

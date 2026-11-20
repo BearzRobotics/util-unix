@@ -49,6 +49,7 @@ pub const Kind = enum {
     cannot_fork,
     cannot_open_script,
     errexit_exit,
+    stopped_jobs,
     // 5xxx builtins
     illegal_option,
     cannot_shift,
@@ -63,6 +64,10 @@ pub const Kind = enum {
     alias_not_found,
     bad_limit,
     not_in_function,
+    no_such_job,
+    no_job_control,
+    history_error,
+    ambiguous_job,
     // 6xxx invocation
     invocation_option,
     missing_argument,
@@ -127,6 +132,7 @@ pub const catalog = [_]Entry{
     .{ .code = 4003, .kind = .cannot_fork, .exit = 2, .summary = "A process or pipe could not be created", .rich = "{s}", .help = "the system is out of processes or descriptors; check ulimits", .explain = "fork(2) or pipe(2) failed, usually because of a resource limit.", .bad = "(ulimit -u 1; : | :)", .good = "(: | :)", .dash = "Cannot fork" },
     .{ .code = 4004, .kind = .cannot_open_script, .exit = 127, .summary = "The script file named on the command line cannot be opened", .rich = "cannot open script '{s}'", .help = "check the path", .explain = "`sh file` could not read the file; the exit status is 127.", .bad = "sh nosuch.sh", .good = "sh ./script.sh", .dash = "Can't open nosuch.sh" },
     .{ .code = 4005, .kind = .errexit_exit, .exit = 0, .summary = "`set -e` ended the shell after a failing command (note, rich and json styles only)", .rich = "`set -e` is on and '{s}' failed, so the shell exits", .help = "test the command (`cmd || handle`) if the failure is expected", .explain = "POSIX XCU 2.14 `set -e`: a failing command that is not part of a condition, an `&&`/`||` list (except the last) or a negated pipeline ends the shell with that command's status. This note names the command and line; it is never printed in the posix style, and never changes the exit status.", .bad = "set -e\nfalse\necho unreachable", .good = "set -e\nfalse || :\necho reachable", .dash = "(none: dash exits silently)" },
+    .{ .code = 4006, .kind = .stopped_jobs, .exit = 1, .summary = "`exit` was refused because jobs are stopped", .rich = "you have stopped jobs", .help = "run `jobs`, resume them with `fg` or end them with `kill`, or type `exit` again to leave anyway", .explain = "An interactive shell with job control warns once when `exit` (or end of input) would abandon stopped jobs; the next `exit` leaves and hangs them up. Not reported by a non-interactive shell.", .bad = "(interactive) sleep 9 ^Z; exit", .good = "(interactive) sleep 9 ^Z; exit; exit", .dash = "You have stopped jobs." },
     .{ .code = 5001, .kind = .illegal_option, .exit = 2, .summary = "A builtin was given an option it does not have", .rich = "unknown option '{s}'", .help = "see the builtin's description in the manual", .explain = "A special builtin that gets an invalid option makes a non-interactive shell exit (POSIX XCU 2.8.1).", .bad = "set -Z", .good = "set -e", .dash = "set: Illegal option -Z" },
     .{ .code = 5002, .kind = .cannot_shift, .exit = 2, .summary = "`shift` was asked to drop more parameters than exist", .rich = "cannot shift: fewer than the requested parameters", .help = "compare `$#` with the count first", .explain = "`shift n` requires n <= `$#` (POSIX XCU 2.14, shift).", .bad = "set -- a; shift 2", .good = "set -- a; shift", .dash = "shift: can't shift that many" },
     .{ .code = 5003, .kind = .cannot_cd, .exit = 2, .summary = "`cd` could not change directory", .rich = "cannot change directory to '{s}'", .help = "check that it exists and you may enter it", .explain = "`cd` failed; the status is non-zero and the directory is unchanged.", .bad = "cd /nonexistent", .good = "cd /", .dash = "cd: can't cd to /nonexistent" },
@@ -140,6 +146,10 @@ pub const catalog = [_]Entry{
     .{ .code = 5011, .kind = .alias_not_found, .exit = 1, .summary = "`alias` or `unalias` named an alias that is not defined", .rich = "no alias named '{s}'", .help = "`alias` with no arguments lists the defined aliases", .explain = "Aliases are looked up by exact name.", .bad = "unalias nosuch", .good = "alias ll='ls -l'; unalias ll", .dash = "unalias: nosuch: not found" },
     .{ .code = 5012, .kind = .bad_limit, .exit = 1, .summary = "`ulimit` could not read or set the limit", .rich = "{s}", .help = "the hard limit cannot be raised without privilege", .explain = "getrlimit/setrlimit failed.", .bad = "ulimit -n 99999999999", .good = "ulimit -n 256", .dash = "ulimit: bad limit: Operation not permitted" },
     .{ .code = 5013, .kind = .not_in_function, .exit = 2, .summary = "`local` was used outside a function", .rich = "`local` can only be used inside a function", .help = "declare the variable normally, or move the code into a function", .explain = "`local` is not in POSIX; where available it is only valid in a function body.", .bad = "local x=1", .good = "f() { local x=1; }", .dash = "local: not in a function" },
+    .{ .code = 5014, .kind = .no_such_job, .exit = 1, .summary = "A job specification names no job", .rich = "{s}: no such job", .help = "`jobs` lists the jobs; a specification is `%n`, `%%`, `%+`, `%-`, `%string` or `%?string`", .explain = "`fg`, `bg`, `kill`, `wait` and `jobs` accept job specifications (POSIX XCU 3.204 Job Control Job ID). With no argument `fg` and `bg` act on the current job, which does not exist when no job was started.", .bad = "fg", .good = "sleep 9 & fg", .dash = "fg: No current job" },
+    .{ .code = 5015, .kind = .no_job_control, .exit = 1, .summary = "Job control could not be enabled", .rich = "job control is off: {s}", .help = "run the shell from a terminal, or without `-m`", .explain = "An interactive shell enables job control (`set -m`) only when standard input, output or error is a terminal it can control. Otherwise it runs without process groups and says so.", .bad = "(sh -i < file) set -m", .good = "(a terminal)", .dash = "can't access tty; job control turned off" },
+    .{ .code = 5016, .kind = .history_error, .exit = 1, .summary = "`fc` found no such history entry or history is off", .rich = "{s}", .help = "`fc -l` lists the entries; an operand is a number, a negative offset or the start of a command", .explain = "`fc` selects commands by number (negative counts back from the most recent) or by the text a command starts with. History exists only in an interactive shell.", .bad = "fc -l", .good = "(interactive) fc -l", .dash = "fc: not found" },
+    .{ .code = 5017, .kind = .ambiguous_job, .exit = 1, .summary = "A job specification matches several jobs", .rich = "'{s}' matches more than one job", .help = "make the string longer so that it matches only one job, or use `%n`", .explain = "`%string` and `%?string` must select exactly one job (POSIX XCU 3.204).", .bad = "sleep 7 & sleep 8 & fg %sl", .good = "sleep 7 & sleep 8 & fg %sleep\\ 7", .dash = "fg: %sl: Ambiguous" },
     .{ .code = 6001, .kind = .invocation_option, .exit = 2, .summary = "`sh` was started with an option it does not have", .rich = "unknown option '{s}'", .help = "see `sh` in the manual for the option list", .explain = "The command line options are those of POSIX `sh`: -a -b -C -e -f -h -i -m -n -u -v -x, -c, -s, -o and +o.", .bad = "sh -Z", .good = "sh -e", .dash = "Illegal option -Z" },
     .{ .code = 6002, .kind = .missing_argument, .exit = 2, .summary = "`sh -c` or `-o` needs an argument", .rich = "{s}", .help = "give the command string after `-c`", .explain = "`sh -c` requires the command string as the next operand.", .bad = "sh -c", .good = "sh -c 'echo hi'", .dash = "-c requires an argument" },
     .{ .code = 7001, .kind = .lint_unquoted_expansion, .exit = 1, .summary = "An unquoted expansion is split into words and globbed", .rich = "unquoted expansion of '{s}' is split on whitespace and expanded as a glob", .help = "quote it as \"${name}\" unless you want word splitting", .explain = "Unquoted `$name` and `$(cmd)` results undergo field splitting and pathname expansion (POSIX XCU 2.6.5, 2.6.6), so a value with spaces or `*` becomes several arguments.", .bad = "rm $file", .good = "rm \"$file\"", .dash = "(none)", .shellcheck = "SC2086" },
@@ -210,6 +220,11 @@ pub const Classified = struct { kind: Kind, subject: []const u8 };
 
 /// Place a runtime message (dash wording, without prefix) into the catalog.
 pub fn classify(msg: []const u8) Classified {
+    if (contains(msg, "No current job") or contains(msg, "No such job")) return .{ .kind = .no_such_job, .subject = if (contains(msg, "No current job")) "current job" else msg[std.mem.lastIndexOf(u8, msg, ": ").? + 2 ..] };
+    if (endsWith(msg, "Ambiguous")) return .{ .kind = .ambiguous_job, .subject = lastField(msg[0 .. msg.len - ": Ambiguous".len]) };
+    if (contains(msg, "job control turned off")) return .{ .kind = .no_job_control, .subject = msg };
+    if (startsWith(msg, "You have stopped jobs")) return .{ .kind = .stopped_jobs, .subject = "" };
+    if (startsWith(msg, "fc: ") and (contains(msg, "history") )) return .{ .kind = .history_error, .subject = msg };
     if (contains(msg, "arithmetic expression: division by zero")) return .{ .kind = .division_by_zero, .subject = afterLast(msg, ": \"", "\"") };
     if (startsWith(msg, "arithmetic expression:")) return .{ .kind = .arithmetic_syntax, .subject = msg };
     if (contains(msg, "Illegal number: ")) return .{ .kind = .illegal_number, .subject = msg[std.mem.lastIndexOf(u8, msg, "Illegal number: ").? + 16 ..] };
