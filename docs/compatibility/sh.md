@@ -79,4 +79,6 @@ Per decision 0008. stdout and exit status stay dash's.
 
 ## Tests
 
+Milestone 2 counts: `test_sh_interactive.sh` 281/281 (pseudo-terminal sessions: emacs and vi editing, history and `fc` against FreeBSD sh, job control against dash and FreeBSD sh, prompts, startup, signals, completion, paste and rendering; skipped without python3/pty), `test_sh.sh` 710/710, `test_sh_diag.sh` 368/368 (343 plus the cases and documentation checks of SH4006, SH5014-SH5017), `test_sh_lint.sh` 1533/1533 (the two new scripts are linted too), `zig build test` library tests 110 passed 2 skipped (readline key-sequence tests with a memory terminal, job text, history).
+
 Counts at the end of milestone 1 (unchanged by milestone 2 except where noted): `test_sh.sh` 710/710 (115 cases where the shells disagree are recorded; FreeBSD sh cross-check 606 same, 23 different, of 629), `test_sh_diag.sh` 343/343, `test_sh_lint.sh` 1530/1530 (15 shellcheck disagreements noted), `zig build test` 95 passed 2 skipped. Each script prints its own: `sh test/test_sh.sh` (differential, about 700 cases), `sh test/test_sh_diag.sh` (exact messages), `sh test/test_sh_lint.sh` (shellcheck hygiene and parser oracle), `zig build test` (unit tests of lexer, parser, arithmetic, pattern matching, diagnostics, lint, plus a fuzz target and a deterministic mutation run of the parser).
