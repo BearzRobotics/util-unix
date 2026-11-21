@@ -19,12 +19,34 @@ compared with the reference program and what was not; `runcon`'s transition and
 zig build                      # everything: one binary per command, plus util-unix (multicall)
 zig build -Dmode=standalone    # only the one-binary-per-command executables
 zig build -Dmode=multicall     # only the util-unix multicall binary
+zig build -Dman=false          # skip the manual pages (default: installed to share/man/man1/NAME.1.md)
 zig build test                 # library and wrapper unit tests
 sh test/run_all_tests.sh       # differential tests against the GNU binaries in /usr/bin
 OURS_MULTICALL=1 sh test/test_chmod.sh   # same tests through `util-unix chmod`
 sh test/vm/run.sh              # QEMU guest tests: terminal, root-only changes, many groups
 sh bench/run.sh                # poop comparison with GNU (needs ../poop)
 ```
+
+Needs Zig 0.17.1. Install with `zig build -Doptimize=ReleaseSafe --prefix ~/.local`; the
+manual pages (Markdown, dkman layout, `docs/manpages/`) go to `share/man/man1/NAME.1.md`.
+
+## Download
+
+Prebuilt archives are attached to each [release](https://github.com/BearzRobotics/util-unix/releases):
+`util-unix-VERSION-linux-x86_64.tar.gz` and `util-unix-VERSION-linux-aarch64.tar.gz` (static musl), with
+`SHA256SUMS`. Each holds `bin/` (every command plus the `util-unix` multicall binary) and
+`share/man/man1/`. Other targets build from source with `zig build -Dtarget=...`.
+
+## Supported platforms
+
+| Platform | Prebuilt download | Status |
+|---|---|---|
+| Linux x86_64, aarch64 | yes (static musl) | reference platform, tested |
+| macOS x86_64, aarch64 | no | compile-checked in CI only; builds from source |
+| Windows | no | not a target (these are Unix commands) |
+
+No prebuilt macOS binaries are provided because no maintainer owns a Mac; they will be offered once a
+volunteer with a Mac steps up to test and maintain that platform. Cutting a release: `docs/release.md`.
 
 ## Use as a library (e.g. from DKDE)
 

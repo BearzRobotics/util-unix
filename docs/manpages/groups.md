@@ -79,5 +79,5 @@ This program is free software; you can redistribute it and/or modify it under th
 
 # VERSION
 
-This manual describes util-unix 0.3.0 (see build.zig.zon).
+This manual describes util-unix 0.4.0 (see build.zig.zon).
 
