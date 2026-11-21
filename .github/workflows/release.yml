@@ -1,0 +1,62 @@
+name: release
+
+# A tag v* builds the archives and publishes a GitHub release. workflow_dispatch is a
+# dry run: it builds and uploads the archives as workflow artifacts and publishes nothing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: x86_64-linux-musl,  label: linux-x86_64 }
+          - { target: aarch64-linux-musl, label: linux-aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Tag matches build.zig.zon
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v=$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != build.zig.zon version $v" >&2; exit 1; }
+      - name: Package
+        run: scripts/package.sh "${{ matrix.target }}" "${{ matrix.label }}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and notes
+        run: |
+          cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS && cd ..
+          {
+            scripts/release-notes.sh "${GITHUB_REF_NAME}"
+            printf '\n%s\n' 'Prebuilt archives: Linux (x86_64, aarch64; static musl). Other targets build from source (zig build -Dtarget=...); no prebuilt macOS or Windows binaries are provided. Check downloads against SHA256SUMS.'
+          } > notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --notes-file notes.md --verify-tag

@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+Adds `sh`, a strict POSIX shell, and structured output.
+
+**Highlights**
+- `sh`: written from POSIX.1-2024 (XCU chapter 2), checked differentially against dash, bash
+  `--posix`, busybox ash, yash and FreeBSD sh. Milestone 1 (the whole non-interactive language)
+  and milestone 2 (interactive mode: prompts, emacs and vi line editing, history and `fc`, tab
+  completion, job control) are implemented. Extensions are diagnostic only: stable codes
+  SH1001-SH7009, `--diagnostics=posix|rich|json|gcc`, `sh --explain CODE`, `sh --check`
+  (decision 0008, 0009; `docs/sh-diagnostics.md`, `docs/posix-shell-differences.md`).
+- `--json` for `uname`, `id` and `who` (decision 0007).
+- Library first on Zig `std.Io`; build modes `-Dmode=standalone|multicall|all`, the multicall
+  binary `util-unix`, manual pages in the dkman layout installed with `-Dman` (default on).
+- GNU compatibility with documented extensions, per command in `docs/compatibility/`.
+- Linux only (x86_64 and aarch64); prebuilt static musl archives are attached to the release.
+
+**Detail**
 
 **Added**
 - `sh`: a POSIX shell (decision 0009, milestone 1: lexer, parser, all expansions, redirections and
