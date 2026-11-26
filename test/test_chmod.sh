@@ -91,6 +91,13 @@ run_tree "-R unreadable subdir"    'mkdir -p t/u; touch t/u/f; chmod 000 t/u' -R
 root_sandboxed "$SCRATCH" run_tree "-R --preserve-root /"    "$R" -R --preserve-root 700 /
 root_sandboxed "$SCRATCH" run_tree "-R --preserve-root /."   "$R" -R --preserve-root 700 /.
 run_tree "--preserve-root not rec" "$R" --preserve-root 700 t
+# the guard must not depend on /proc (chroots and rescue systems often lack it)
+SANDBOX_EXTRA="--tmpfs /proc"
+for op in /. /.. /tmp/..; do
+    root_sandboxed "$SCRATCH" run_tree "no /proc: -R --preserve-root $op" "$R" -R --preserve-root 700 "$op"
+done
+root_sandboxed "$SCRATCH" run_tree "no /proc: -R --preserve-root rootlink/" "$R; ln -s / rootlink" -R --preserve-root 700 rootlink/
+SANDBOX_EXTRA=""
 printf "\n[ Symbolic links ]\n"
 run_tree "symlink arg"             "$S" 600 sl
 run_tree "symlink to dir arg"      "$S" 700 sd

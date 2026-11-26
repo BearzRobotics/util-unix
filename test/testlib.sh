@@ -44,7 +44,8 @@ ours() {
 # except SCRATCH, an existing directory that holds the case's fixtures. The
 # sandbox is first shown to block a mode change outside SCRATCH; without that
 # proof the case is skipped, never run unprotected.
-sandbox_cmd() { printf 'timeout -s KILL 60 bwrap --ro-bind / / --dev /dev --bind %s %s --die-with-parent' "$1" "$1"; }
+# SANDBOX_EXTRA adds bwrap options for one case (e.g. "--tmpfs /proc").
+sandbox_cmd() { printf 'timeout -s KILL 60 bwrap --ro-bind / / --dev /dev %s --bind %s %s --die-with-parent' "${SANDBOX_EXTRA:-}" "$1" "$1"; }
 sandbox_blocks_writes() {
     probe_dir=$(mktemp -d) || return 1
     : > "$probe_dir/victim" && chmod 600 "$probe_dir/victim"

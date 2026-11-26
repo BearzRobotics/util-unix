@@ -115,10 +115,21 @@ pub const Options = struct {
     base: ?Io.Dir = null,
 };
 
-/// True when `path` names the root directory, literally or through links
-/// ("/", "//", "/.", a symlink to "/"). For `--preserve-root`.
+/// True when `path` names the root directory, however it is spelled ("/", "//",
+/// "/.", "/tmp/..", a symlink to "/", a bind mount of it). For
+/// `--preserve-root`. On Linux the files are compared by device and inode, which
+/// needs no /proc; if "/" itself cannot be examined the answer is yes, so a
+/// caller that guards on it fails closed.
 pub fn isRoot(io: Io, path: []const u8) bool {
     if (path.len > 0 and std.mem.indexOfNone(u8, path, "/") == null) return true;
+    if (fsown.statAt(Io.Dir.cwd(), "/", true)) |root| {
+        // a path that cannot be examined is not walked either
+        const st = fsown.statAt(Io.Dir.cwd(), path, true) catch return false;
+        return st.sameFile(root);
+    } else |err| {
+        if (err != error.Unsupported) return true;
+    }
+    // elsewhere, compare resolved path names
     var buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const n = Io.Dir.cwd().realPathFile(io, path, &buf) catch return false;
     return std.mem.eql(u8, buf[0..n], "/");
@@ -462,6 +473,13 @@ test "a subdirectory swapped for a symlink during the walk is not followed" {
 test "a subdirectory swapped for another directory during the walk is not entered" {
     if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
     try expectSwapContained(.command_line, .other_directory);
+}
+
+test "isRoot recognises every spelling of the root directory" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for ([_][]const u8{ "/", "//", "/.", "/..", "/./.", "/tmp/.." }) |path| try testing.expect(isRoot(testing.io, path));
+    for ([_][]const u8{ "/tmp", ".", "/nonexistent-zz", "" }) |path| try testing.expect(!isRoot(testing.io, path));
 }
 
 test "validMode accepts GNU forms and rejects junk" {
