@@ -231,4 +231,6 @@ print_summary() {
         fi
     fi
     printf "======================================\n"
+    # The suite's exit status: print_summary is every suite's last command.
+    [ "$FAIL" -eq 0 ]
 }

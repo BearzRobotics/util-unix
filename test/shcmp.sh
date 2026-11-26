@@ -150,4 +150,5 @@ print_summary() {
     printf ' FreeBSD sh cross-check: %d same as ours, %d different (of %d run)\n' "$BSD_SAME" "$BSD_DIFF" "$((BSD_SAME + BSD_DIFF))"
     if [ "$FAIL" -gt 0 ]; then printf ' %d test(s) failed\n' "$FAIL"; else printf ' All tests passed!\n'; fi
     printf '======================================\n'
+    [ "$FAIL" -eq 0 ]
 }
