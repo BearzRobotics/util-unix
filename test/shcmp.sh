@@ -163,7 +163,11 @@ print_summary() {
     printf ' %s: %d/%d passed' "${UTIL:-sh}" "$PASS" "$TOTAL"
     [ "$SKIP" -gt 0 ] && printf ' (%d skipped)' "$SKIP"
     printf ' (%d recorded as shells-differ)\n' "$VARIES"
-    printf ' FreeBSD sh cross-check: %d same as ours, %d different (of %d run)\n' "$BSD_SAME" "$BSD_DIFF" "$((BSD_SAME + BSD_DIFF))"
+    if [ -n "$BSD" ]; then
+        printf ' FreeBSD sh cross-check: %d same as ours, %d different (of %d run)\n' "$BSD_SAME" "$BSD_DIFF" "$((BSD_SAME + BSD_DIFF))"
+    else
+        printf ' FreeBSD sh cross-check: NOT RUN (needs bwrap and a sysroot in CHIMERA_ROOT; see tools/bsdrun.sh)\n'
+    fi
     if [ "$FAIL" -gt 0 ]; then printf ' %d test(s) failed\n' "$FAIL"; else printf ' All tests passed!\n'; fi
     printf '======================================\n'
     [ "$FAIL" -eq 0 ]

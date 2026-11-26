@@ -25,7 +25,7 @@ fi
 c "single quotes" "echo 'a  b \$x'" B
 c "double quotes keep spaces" 'echo "a  b"' B
 c "backslash outside quotes" 'echo a\ b\\c' B
-c "backslash in double quotes" 'echo "a\$b\"c\\d\e"' B
+c "backslash in double quotes" 'printf "%s\n" "a\$b\"c\\d\e"' B
 c "backslash newline joins" 'echo a\
 b' B
 c "double quote and param" 'x=1; echo "[$x]" '"'"'[$x]'"'" B
@@ -89,7 +89,7 @@ c "dollar question" 'true; echo $?; false; echo $?' B
 c "dollar dollar is a number" 'case $$ in *[!0-9]*) echo bad;; *) echo ok;; esac' B
 c "dollar dash default" 'echo "[$-]"' B
 c "dollar bang unset" 'echo "[$!]"' B
-c "dollar zero from -c" 'echo $0' B
+c "dollar zero from -c" 'sh -c "echo \${0##*/}"' B
 c "dollar hash" 'set -- a b; echo $#; set --; echo $#' B
 c "special var in default" 'echo ${1-none} ${#-x}' B
 c "undefined with set -u" 'set -u; echo $u; echo after' B
@@ -202,7 +202,7 @@ c "glob question" 'touch a1 a2 b1; echo a?' B
 c "glob bracket" 'touch a1 a2 b1; echo [ab]1' B
 c "glob range" 'touch a1 b1 c1; echo [a-b]1' B
 c "glob negation" 'touch a1 b1 c1; echo [!a]1' B
-cx "glob caret negation" 'touch a1 b1 c1; echo [^a]1' B
+cx "glob caret negation" 'touch a1 b1 c1; echo [^a]1' BP "POSIX leaves [^...] unspecified (XCU 2.14.1); bash, yash, busybox and FreeBSD sh negate, dash takes ^ literally."
 c "glob no match literal" 'echo nomatch*' B
 c "glob dotfiles hidden" 'touch .h v; echo *' B
 c "glob dot explicit" 'touch .h v; echo .h*' B
@@ -444,7 +444,7 @@ c "function calls function" 'a() { b; }; b() { echo b; }; a' B
 cx "function body compound if" 'f() if true; then echo y; fi; f' B
 c "function return in loop" 'f() { for i in 1 2 3; do if [ $i = 2 ]; then return 7; fi; done; }; f; echo $?' B
 c "function and special builtin name" 'f() { echo mine; }; f' B
-c "function dollar zero" 'f() { echo $0; }; f' B
+c "function dollar zero" 'sh -c "f() { echo \${0##*/}; }; f"' B
 c "function unset" 'f() { echo hi; }; unset -f f; f; echo "rc=$?"' B
 c "function in pipeline" 'f() { cat; }; echo x | f' B
 c "function overrides regular builtin" 'echo() { printf "mine\n"; }; echo hi' B

@@ -15,7 +15,7 @@ from sh_pty import Session, strip
 SH = os.path.abspath(sys.argv[1])
 HERE = os.path.dirname(os.path.abspath(__file__))
 BSD = os.path.join(HERE, "..", "tools", "bsdrun.sh")
-HAVE_BSD = os.access(BSD, os.X_OK) and os.path.exists("/stuff/tmp/chimera-sysroot/bin/sh") and subprocess.call(["which", "bwrap"], stdout=subprocess.DEVNULL) == 0
+HAVE_BSD = os.access(BSD, os.X_OK) and os.path.exists(os.path.join(os.environ.get("CHIMERA_ROOT", "/stuff/tmp/chimera-sysroot"), "bin/sh")) and subprocess.call(["which", "bwrap"], stdout=subprocess.DEVNULL) == 0
 HAVE_DASH = subprocess.call(["which", "dash"], stdout=subprocess.DEVNULL) == 0
 passed = failed = 0
 COLLAPSE = False
