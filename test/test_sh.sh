@@ -685,6 +685,25 @@ END_OF_SCRIPT
 sh s; echo "= $?"; sh < s; echo "= $?"' e
 c "continuation: dollar-single-quotes keep it" 'printf "%s\\n" "x=\$'\''a\\'\''b'\''" "y='\''keep\\" "this'\''" "printf \"%s\\\\n\" \"\$x\" \"\$y\"" > s; sh s' Pe "dash has no dollar-single-quotes (POSIX.1-2024)."
 
+# ---- pipes with a standard descriptor closed (SHX-02) ----
+c "pipeline with stdin closed" 'exec <&-; echo hi | cat; echo st=$?'
+c "command substitution with stdout closed" 'exec >&-; x=$(echo hi); echo "x=[$x]" >&2'
+c "pipeline with stdin and stdout closed" 'exec <&- >&-; x=$(echo a | cat | cat); echo "x=[$x]" >&2'
+c "pipeline with all three closed" 'exec 4>log <&- >&- 2>&-; x=$(echo a | cat); echo "x=[$x]" >&4; exec 4>&-; cat log >/dev/null; { read l < log; case $l in "x=[a]") exit 0;; esac; exit 1; }'
+c "here-document and redirection with stdin closed" 'exec <&-; cat <<E
+doc
+E
+echo file > f; cat < f; read a < f; echo $a; x=$(cat <<E
+in-subst
+E
+); echo $x'
+
+# ---- getopts when the argument list changes (SHX-03) ----
+c "getopts: operands change inside a group" 'getopts ab o -ab; echo "$o"; getopts ab o -x 2>/dev/null; echo "$o $?"' Pe "dash keeps its place in the old argument; bash and ours start the new one."
+c "getopts: function call changes the arguments" 'f() { getopts ab o; echo "$o"; }; f -ab; f -a; echo done'
+c "getopts: shift inside a group" 'set -- -ab -b; getopts ab o; echo "$o"; shift 2; getopts ab o; echo "$o $?"; echo done' e
+c "getopts: new argument is not an option" 'getopts abc o -abc; getopts abc o word; echo "$o $?"; getopts abc o -- ; echo "$o $?"' Pe "dash reads on inside the new word; yash and ours see that it is no option."
+
 # ---- a temporary PATH does not stay remembered (SHX-01) ----
 EVIL='mkdir evil; printf "#!/bin/sh\necho FROM-TEMPORARY-PATH\n" > evil/ls; chmod +x evil/ls; '
 c "temporary PATH for one command is forgotten" "$EVIL"'PATH=$PWD/evil ls; ls -d /'

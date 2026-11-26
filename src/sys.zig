@@ -258,11 +258,19 @@ pub fn fdIsOpen(fd: i32) bool {
     return linux.errno(linux.fcntl(fd, linux.F.GETFD, 0)) == .SUCCESS;
 }
 
-/// pipe2(O_CLOEXEC): { read end, write end }.
+/// pipe2(O_CLOEXEC): { read end, write end }. Neither end is descriptor 0, 1
+/// or 2, even when one of those is closed: callers move the ends onto them.
 pub fn pipe() Error![2]i32 {
     if (comptime !is_linux) return nosys();
     var fds: [2]i32 = undefined;
     _ = try check(linux.pipe2(&fds, .{ .CLOEXEC = true }));
+    errdefer for (fds) |fd| close(fd);
+    for (&fds) |*fd| {
+        if (fd.* > 2) continue;
+        const moved = try dupAbove(fd.*, 10);
+        close(fd.*);
+        fd.* = moved;
+    }
     return fds;
 }
 

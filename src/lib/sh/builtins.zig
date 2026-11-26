@@ -1855,6 +1855,13 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     if (optind != sh.getopts_last_optind) sh.getopts_sub = 0;
     var sub = sh.getopts_sub;
     var idx = if (sub > 0) optind - 1 else optind;
+    // The arguments may not be the ones `sub` counts in: a function call,
+    // `shift` or other operands change them without touching OPTIND. A place
+    // that is not inside a group of options starts that argument afresh.
+    if (sub > 0 and idx >= 1 and idx <= list.len) {
+        const there = list[idx - 1];
+        if (sub >= there.len or there[0] != '-' or std.mem.eql(u8, there, "--")) sub = 0;
+    }
     const finish = struct {
         fn f(s: *Shell, n: []const u8, val: []const u8, oi: usize, sub_: usize, st: u8) u8 {
             const ok = lexer.isName(n);
