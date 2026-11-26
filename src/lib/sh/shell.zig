@@ -320,7 +320,8 @@ pub const Shell = struct {
     /// later commands with values that are missing or cut short, whatever
     /// `set -e` says. (An interactive shell goes back to its prompt.)
     pub fn oom(self: *Shell, _: Allocator.Error) u8 {
-        self.errRaw("sh: out of memory\n");
+        // a host that takes the diagnostics gets this one too
+        if (self.reporter != null) self.diagK(.other, null, "out of memory", .{}) else self.errRaw("sh: out of memory\n");
         self.flow = .exit_shell;
         self.status = 2;
         return 2;
