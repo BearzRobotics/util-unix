@@ -354,7 +354,7 @@ echo b' B
 cx "background and wait" 'echo bg & wait; echo done' B
 c "background status wait" '(exit 5) & wait $!; echo $?' B
 c "dollar bang" 'true & echo $! | grep -q "^[0-9]" && echo ok; wait' B
-cx "background no stdin" 'cat & wait; echo done' B
+cx "background no stdin" 'echo data | { cat & wait; echo done; }' B
 c "pipeline with compound" 'for i in 1 2; do echo $i; done | wc -l' B
 c "pipeline with while" 'printf "a\nb\n" | while read l; do echo "<$l>"; done' B
 c "pipeline stage exit" 'sh -c "exit 3" | cat; echo $?' B
@@ -492,7 +492,7 @@ c "set -x trace" 'set -x; echo hi' e
 c "set -x assignment" 'set -x; x=1; echo $x' e
 c "set -x plus" 'set -x; set +x; echo hi' B
 c "set -n" 'echo before; set -n; echo not run' B
-c "set -v" 'set -v; echo hi' e
+c "set -v" 'printf "set -v\necho hi\n" > s; sh s 2>&1' B
 c "set -f" 'touch a; set -f; echo *' B
 c "set -u" 'set -u; echo $nothing; echo after' B
 c "set -a" 'set -a; x=1; sh -c "echo \$x"' B
@@ -573,7 +573,7 @@ c "command -v function" 'f() { :; }; command -v f' B
 c "command -v missing" 'command -v nosuchcmd; echo $?' B
 c "command exec" 'command exec echo hi' B
 c "command special builtin error does not exit" 'command shift 5; echo after' B
-c "command -p" 'command -p echo hi' B
+c "command -p" 'PATH=/nonexistent; command -p cat /dev/null; echo $?' B
 c "command not found status" 'command nosuchcmd; echo $?' B
 c "type builtin" 'type cd' B
 c "type function" 'f() { :; }; type f' B
@@ -664,8 +664,8 @@ c "printf plus flag" 'printf "%+d % d\n" 5 5' B
 c "printf unsigned" 'printf "%u\n" 3' B
 c "read basic" 'echo "a b c" | { read x y; echo "$x|$y"; }' B
 c "read one var gets line" 'echo "  a b  " | { read x; echo "[$x]"; }' B
-c "read -r" 'echo "a\\b" | { read -r x; echo "$x"; }' B
-c "read backslash" 'echo "a\\b" | { read x; echo "$x"; }' B
+c "read -r" 'printf "%s\n" "a\\\\b" | { read -r x; printf "%s\n" "$x"; }' B
+c "read backslash" 'printf "%s\n" "a\\\\b" | { read x; printf "%s\n" "$x"; }' B
 c "read continuation" 'printf "a\\\\\nb\n" | { read x; echo "$x"; }' B
 c "read eof status" 'printf "" | { read x; echo "rc=$?"; }' B
 c "read partial line" 'printf "abc" | { read x; echo "rc=$? $x"; }' B
@@ -716,12 +716,12 @@ c "getopts in function" 'f() { while getopts x: o; do echo "$o=$OPTARG"; done; }
 c "getopts status end" 'set -- a; getopts a o; echo $?' B
 c "getopts OPTIND reset" 'set -- -a; getopts a o; OPTIND=1; getopts a o; echo $o' B
 c "cd and pwd" 'mkdir d; cd d; pwd | sed "s#.*/##"' B
-c "cd dot dot" 'mkdir -p a/b; cd a/b; cd ../..; pwd | sed "s#.*/##" | grep -c .' B
+c "cd dot dot" 'mkdir -p a/b; p=$(pwd); cd a/b; cd ../..; if [ "$(pwd)" = "$p" ]; then echo back; else echo elsewhere; fi' B
 c "cd empty operand is a no-op" 'mkdir d; cd d; cd ""; echo $?; pwd | sed "s#.*/##"' B
 c "cd with a read-only OLDPWD fails" 'mkdir d; p=$(pwd); readonly OLDPWD; cd d 2>/dev/null; echo $?; if [ "$(pwd)" = "$p" ]; then echo stayed; else echo moved; fi' B
 c "glob directory order uses the slash" 'mkdir a a.b a-b; touch a/f a.b/f a-b/f; echo */f; echo */' B
 c "glob dot-star slash order" 'mkdir .h; echo .*/' B
-c "cd dash prints" 'mkdir d; cd d; cd - >/dev/null; echo $?' B
+c "cd dash prints" 'mkdir -p x/d; cd x; cd d; cd - > ../../out; echo $?; sed "s#.*/##" ../out' B
 c "cd nonexistent" 'cd /nonexistent; echo "rc=$?"' B
 c "cd file" 'touch f; cd f; echo "rc=$?"' e
 c "cd sets PWD" 'mkdir d; cd d; case $PWD in */d) echo ok;; esac' B
