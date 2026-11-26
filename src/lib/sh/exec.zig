@@ -144,7 +144,10 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
             error.Syntax => {
                 if (!eof and p.pos >= p.src.len) {
                     arena.deinit();
-                    eof = readMore(gpa, &buf, fd, &chunk);
+                    eof = readMore(gpa, &buf, fd, &chunk) catch |re| switch (re) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        error.ReadFailed => return readFailed(sh),
+                    };
                     continue;
                 }
                 sh.cur_src = buf.items;
@@ -164,7 +167,10 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
         const complete = eof or (p.pos < p.src.len) or (std.mem.endsWith(u8, p.src, "\n") and !endsInContinuation(p.src));
         if (!eof and (maybe == null or !complete or p.warn_heredoc != null)) {
             arena.deinit();
-            eof = readMore(gpa, &buf, fd, &chunk);
+            eof = readMore(gpa, &buf, fd, &chunk) catch |re| switch (re) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        error.ReadFailed => return readFailed(sh),
+                    };
             continue;
         }
         if (p.warn_heredoc) |w| {
@@ -201,17 +207,34 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
 }
 
 /// Append the next chunk of `fd` to `buf`; true at end of input.
-fn readMore(gpa: Allocator, buf: *std.ArrayList(u8), fd: i32, chunk: *[8192]u8) bool {
+/// Append more of the script to `buf`; true at its end. A failure is never
+/// taken for the end: what has been read may stop in the middle of a command.
+fn readMore(gpa: Allocator, buf: *std.ArrayList(u8), fd: i32, chunk: *[8192]u8) error{ OutOfMemory, ReadFailed }!bool {
     while (true) {
         const n = sys.read(fd, chunk) catch {
             if (sys.errno() == sys.E_INTR) continue;
-            return true;
+            // a descriptor someone left non-blocking (dash turns that off too)
+            if (sys.errno() == sys.E_AGAIN and sys.setBlocking(fd)) continue;
+            return error.ReadFailed;
         };
         if (n == 0) return true;
         // NUL bytes in a script are ignored (dash, FreeBSD sh; POSIX leaves them undefined)
-        for (chunk[0..n]) |c| if (c != 0) buf.append(gpa, c) catch return true;
+        var kept: usize = 0;
+        for (chunk[0..n]) |c| if (c != 0) {
+            chunk[kept] = c;
+            kept += 1;
+        };
+        try buf.appendSlice(gpa, chunk[0..kept]);
         return false;
     }
+}
+
+/// The script cannot be read: the shell stops with a failure.
+fn readFailed(sh: *Shell) u8 {
+    sh.diagK(.other, null, "error reading the script: {s}", .{sys.strerror(sys.errno())});
+    sh.status = 2;
+    sh.flow = .exit_shell;
+    return 2;
 }
 
 fn reportSyntax(sh: *Shell, d: *const parser.Diag, prefix: []const u8, src: []const u8) void {

@@ -1350,6 +1350,37 @@ echo end
 "
 fi
 
+# ---- a script that cannot be read in full is not run as if it had ended (QUAL-01) ----
+if [ -z "${SHCMP_DUMP:-}" ]; then
+    desc="unreadable script on standard input is an error"
+    err=$("$OURS" < / 2>&1); rc=$?
+    case "$rc $err" in
+    0\ *) FAIL=$((FAIL + 1)); printf 'FAIL %s: exit 0\n' "$desc" ;;
+    *"error reading the script"*) PASS=$((PASS + 1)); printf 'PASS %s\n' "$desc" ;;
+    *) FAIL=$((FAIL + 1)); printf 'FAIL %s: rc=%s %s\n' "$desc" "$rc" "$err" ;;
+    esac
+
+    desc="failed allocations never run part of a script"
+    if strace -o /dev/null -f -e inject=mmap:error=ENOMEM:when=1000 true 2>/dev/null; then
+        # one command longer than a read buffer, then another
+        { printf 'echo would-delete /srv/data/'; head -c 9000 /dev/zero | tr '\0' a
+          printf '/tmp-only\necho second-command\n'; } > "$TEST_TMP/oom.sh"
+        bad=""; n=1
+        while [ $n -le 40 ]; do
+            out=$(strace -o /dev/null -f -e inject=mmap,mremap:error=ENOMEM:when=$n "$OURS" < "$TEST_TMP/oom.sh" 2>/dev/null); rc=$?
+            # whatever was printed must be whole commands; success needs both
+            part=$(printf '%s\n' "$out" | grep 'would-delete' | grep -cv '/tmp-only$')
+            whole=$(printf '%s\n' "$out" | grep -c '/tmp-only$\|^second-command$')
+            if [ "$part" != 0 ] || { [ $rc = 0 ] && [ "$whole" != 2 ]; }; then bad="$bad $n(rc=$rc)"; fi
+            n=$((n + 1))
+        done
+        if [ -z "$bad" ]; then PASS=$((PASS + 1)); printf 'PASS %s\n' "$desc"
+        else FAIL=$((FAIL + 1)); printf 'FAIL %s: at injection%s\n' "$desc" "$bad"; fi
+    else
+        skip_case "$desc (strace cannot inject here)"
+    fi
+fi
+
 SHCMP_EXEMPT=1
 c "exempt: local variable" 'f() { local x=1; echo $x; }; f; echo "[$x]"' e "POSIX has no local; dash, bash, busybox, yash all accept it."
 c "exempt: echo -e" 'echo -e "a\tb"' e "XSI echo interprets escapes; -e is an option in bash and literal in dash."

@@ -81,6 +81,7 @@ pub fn errno() u16 {
     return last_errno;
 }
 
+pub const E_AGAIN: u16 = 11;
 pub const E_NOENT: u16 = 2;
 pub const E_INTR: u16 = 4;
 pub const E_2BIG: u16 = 7;
@@ -246,6 +247,16 @@ pub fn dupAbove(fd: i32, min: i32) Error!i32 {
     if (comptime !is_linux) return nosys();
     const F_DUPFD_CLOEXEC = 1030;
     return @intCast(try check(linux.fcntl(fd, F_DUPFD_CLOEXEC, @intCast(min))));
+}
+
+/// Clear O_NONBLOCK; false if that could not be done or it was not set.
+pub fn setBlocking(fd: i32) bool {
+    if (comptime !is_linux) return false;
+    const flags = linux.fcntl(fd, linux.F.GETFL, 0);
+    if (linux.errno(flags) != .SUCCESS) return false;
+    const nonblock: u32 = @bitCast(linux.O{ .NONBLOCK = true });
+    if (flags & nonblock == 0) return false;
+    return linux.errno(linux.fcntl(fd, linux.F.SETFL, flags & ~@as(usize, nonblock))) == .SUCCESS;
 }
 
 pub fn setCloexec(fd: i32, on: bool) void {

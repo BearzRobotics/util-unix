@@ -362,7 +362,10 @@ pub fn main(ctx: cli.Context) u8 {
         _ = sh.jobs.enable(shell, false);
     }
     if (from_stdin and !check_mode) {
-        _ = shell.runFd(0) catch return 2;
+        _ = shell.runFd(0) catch {
+            cli.warn(ctx, "out of memory", .{});
+            return 2;
+        };
         return shell.finish();
     }
     const text: []const u8 = if (is_c) command.? else (script orelse {
