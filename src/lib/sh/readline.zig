@@ -456,7 +456,9 @@ pub const Editor = struct {
         if (self.bracketed_paste) self.term.write(self.term.ctx, "\x1b[?2004h");
         defer if (self.bracketed_paste) self.term.write(self.term.ctx, "\x1b[?2004l");
         self.begin(prompt, history);
-        var chunk: [256]u8 = undefined;
+        // One byte at a time: whatever follows the line stays in the
+        // terminal's queue, for the next line or for the command that reads it.
+        var chunk: [1]u8 = undefined;
         while (true) {
             const r = self.term.read(self.term.ctx, &chunk, if (self.parser.pendingEsc()) 40 else -1);
             switch (r) {

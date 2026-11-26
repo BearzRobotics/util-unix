@@ -61,9 +61,9 @@ class Ed:
         # drop the echoed command line(s): everything up to the first output line
         return lines
 
-    def out(self, keys, timeout=3.0):
+    def out(self, keys, timeout=3.0, enter="\n"):
         self.s.take()
-        self.s.send(keys + "\n")
+        self.s.send(keys + enter)
         t = self.s.expect(r"\n\$ ?$", timeout)
         if t is None:
             self.s.send("\x03")
@@ -76,8 +76,8 @@ class Ed:
     def close(self):
         self.s.close()
 
-def edcase(ed, name, keys, want):
-    got = ed.out(keys)
+def edcase(ed, name, keys, want, enter="\n"):
+    got = ed.out(keys, enter=enter)
     ok(name, got == want, "keys %r\nwant %r\n got %r" % (keys, want, got))
 
 # ---------------------------------------------------------------------------
@@ -97,7 +97,7 @@ def hist_ed(mode, name, keys, want, extra_env=None):
 
 def emacs_cases():
     ed = Ed("emacs")
-    e = lambda n, k, w: edcase(ed, "emacs: " + n, k, w)
+    e = lambda n, k, w, **kw: edcase(ed, "emacs: " + n, k, w, **kw)
     e("plain line", "echo abc", "abc")
     e("C-a inserts at start", "bc" + C("A") + "echo a", "abc")
     e("C-e end", "echo a" + C("A") + C("E") + "bc", "abc")
@@ -138,7 +138,8 @@ def emacs_cases():
     e("end of line key at end", "echo a" + END + END + "b", "ab")
     e("C-a C-k clears", "xx" + C("A") + C("K") + "echo ok", "ok")
     e("backspace at start", "\x7f\x7fecho ok", "ok")
-    e("M-# comments the line", "echo hi" + M("#"), "")
+    # `#` submits the line itself: another newline would be a second, empty line
+    e("M-# comments the line", "echo hi" + M("#"), "", enter="")
     ed.close()
     # history and search (fresh sessions with a known history)
     h = lambda n, k, w: hist_ed("emacs", n, k, w)
@@ -164,7 +165,7 @@ def emacs_cases():
 
 def vi_cases():
     ed = Ed("vi")
-    v = lambda n, k, w: edcase(ed, "vi: " + n, k, w)
+    v = lambda n, k, w, **kw: edcase(ed, "vi: " + n, k, w, **kw)
     v("insert is the initial mode", "echo abc", "abc")
     v("ESC 0 l i", "echo bc" + ESC + "05li" + "a", "abc")
     v("a appends", "echo a" + ESC + "abc", "abc")
@@ -210,7 +211,7 @@ def vi_cases():
     v("c$", "echo abc zzz" + ESC + "08lc$ def", "abc def")
     v("yy then p", "echo a" + ESC + "yyp", "aecho a")
     v("count w", "echo a b c d" + ESC + "02wiX", "a Xb c d")
-    v("# comments the line", "echo hi" + ESC + "#", "")
+    v("# comments the line", "echo hi" + ESC + "#", "", enter="")
     v("insert: C-w deletes a word", "echo abc def" + C("W") + "x", "abc x")
     v("insert: C-u kills the line", "xxx" + C("U") + "echo abc", "abc")
     v("insert: DEL erases", "echo abcd" + "\x7f" + "x", "abcx")
@@ -400,6 +401,12 @@ def ignored_signals(pid):
             if l.startswith("SigIgn:"):
                 return int(l.split()[1], 16)
     return 0
+
+def input_and_history_cases():
+    # SHI-02: what follows an Enter in the same write is not thrown away
+    has("two commands in one write", ["raw:echo first$((1))\recho second$((2))\recho third$((3))\r"], ["first1", "second2", "third3"])
+    has("typing ahead while a command runs", ["raw:sleep 1\r", "raw:echo A$((1))\recho B$((2))\recho C$((3))\r", ("sleep", 1.5)], ["A1", "B2", "C3"])
+    has("typed ahead lines reach a command that reads", ["raw:read v; echo got-$v-$((1+1))\rtyped\n"], ["got-typed-2"])
 
 def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
@@ -637,6 +644,7 @@ def main():
     open(os.path.join(TMP, "ed.sh"), "w").write("#!/bin/sh\necho 'echo edited' > \"$1\"\n")
     os.chmod(os.path.join(TMP, "ed.sh"), 0o755)
     sections = {"emacs": emacs_cases, "vi": vi_cases, "jobs": job_cases, "fc": fc_cases}
+    sections["input"] = input_and_history_cases
     sections.update(EXTRA)
     want = [a for a in sys.argv[2:]] or list(sections)
     for n in want:
