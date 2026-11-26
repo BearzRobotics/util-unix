@@ -460,6 +460,15 @@ fn handBack(sh: *Shell) void {
     if (sh.tty_modes) |*m| sys.tcsetattr(sh.tty_fd, m) catch {};
 }
 
+/// Finish a job whose processes can no longer be waited for. Their statuses are
+/// unknown, which must not look like success.
+fn lostChildren(j: *Job) void {
+    for (j.procs.items) |*p| if (p.state == .running) {
+        p.state = .done;
+        p.status = 127 << 8; // wait(2) form of exit status 127
+    };
+}
+
 /// Wait for a foreground job. Returns its status; a stopped job reports
 /// 128+signal and is kept in the table.
 pub fn waitFg(sh: *Shell, j: *Job) u8 {
@@ -472,11 +481,8 @@ pub fn waitFg(sh: *Shell, j: *Job) u8 {
                 intr = false;
                 continue;
             }
-            // No such child (already reaped elsewhere): treat as done.
-            for (j.procs.items) |*p| if (p.state == .running) {
-                p.state = .done;
-                p.status = 0;
-            };
+            // No such child (someone else reaped it).
+            lostChildren(j);
         }
     }
     j.foreground = false;
@@ -511,10 +517,7 @@ pub fn waitJob(sh: *Shell, j: *Job) bool {
     while (j.state() == .running) {
         if (!waitOne(sh, &intr)) {
             if (intr) return false;
-            for (j.procs.items) |*p| if (p.state == .running) {
-                p.state = .done;
-                p.status = 0;
-            };
+            lostChildren(j);
         }
     }
     return true;

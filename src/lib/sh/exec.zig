@@ -1407,7 +1407,7 @@ fn runExternal(sh: *Shell, a: Allocator, path: []const u8, args: []const []const
         if (!overridden) env.append(a, e) catch sys.exit(2);
     }
     for (s.assigns, vals) |asg, v| env.append(a, std.fmt.allocPrint(a, "{s}={s}", .{ asg.name, v }) catch sys.exit(2)) catch sys.exit(2);
-    sys.execve(a, path, args, env.items) catch {};
+    execProgram(sh, a, path, args, env.items);
     const e = sys.errno();
     if (e == sys.E_NOEXEC) execScript(sh, a, path, args, s.assigns, vals);
     if (e == sys.E_NOENT or e == sys.E_NOTDIR) {
@@ -1416,6 +1416,24 @@ fn runExternal(sh: *Shell, a: Allocator, path: []const u8, args: []const []const
     }
     sh.diagK(if (e == sys.E_ACCES) .not_executable else .other, args[0], "{s}: {s}", .{ args[0], sys.strerror(e) });
     sys.exit(126);
+}
+
+/// True when programs the shell runs are to start with SIGCHLD ignored: the
+/// user said `trap '' CHLD`, or the shell inherited the ignore. The shell's own
+/// disposition is never "ignore".
+fn childrenIgnoreChld(sh: *const Shell) bool {
+    if (sh.traps[sys.SIGCHLD]) |t| return t.len == 0;
+    return sh.inherited_ignore[sys.SIGCHLD];
+}
+
+/// execve with the signal dispositions the program is to start with. Returns
+/// only on failure, with `sys.errno` describing it.
+pub fn execProgram(sh: *Shell, a: Allocator, path: []const u8, args: []const []const u8, env: []const []const u8) void {
+    const ignore_chld = childrenIgnoreChld(sh);
+    const before = sys.getSignal(sys.SIGCHLD);
+    if (ignore_chld) _ = sys.setSignal(sys.SIGCHLD, .ignore);
+    sys.execve(a, path, args, env) catch {};
+    if (ignore_chld) _ = sys.setSignal(sys.SIGCHLD, before);
 }
 
 /// execve failed with ENOEXEC: POSIX 2.9.1.1 says the shell then runs the file
@@ -1447,6 +1465,8 @@ pub fn execScript(sh: *Shell, a: Allocator, path: []const u8, args: []const []co
         sh.setVarRaw(asg.name, v) catch {};
         sh.setExported(asg.name, true) catch {};
     }
+    // the new shell inherits an ignored SIGCHLD as a program would
+    sh.inherited_ignore[sys.SIGCHLD] = childrenIgnoreChld(sh);
     sh.funcs.clearRetainingCapacity();
     sh.aliases.clearRetainingCapacity();
     sh.clearHash();

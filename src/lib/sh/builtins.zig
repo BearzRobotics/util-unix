@@ -319,7 +319,7 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         const user_ignored = if (sh.traps[sg]) |t| t.len == 0 else false;
         if (!sh.inherited_ignore[sg] and !user_ignored) _ = sys.setSignal(sg, .default);
     };
-    sys.execve(a, path, rest, env) catch {};
+    exec.execProgram(sh, a, path, rest, env);
     const e = sys.errno();
     if (e == sys.E_NOEXEC) exec.execScript(sh, a, path, rest, &.{}, &.{});
     if (interactive_main) for (own) |sg| {
@@ -723,12 +723,16 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         // A signal that was ignored on entry to a non-interactive shell cannot be trapped or
         // reset; no error is reported (POSIX XCU 2.15 trap)
         if (n > 0 and sh.inherited_ignore[n] and !sh.flags.interactive) continue;
+        // an interactive shell may change a signal it inherited as ignored
+        if (n == sys.SIGCHLD) sh.inherited_ignore[n] = false;
         if (sh.traps[n]) |old| sh.gpa.free(old);
         sh.traps[n] = null;
         sh.trap_set[n] = true;
         if (action) |cmd| {
             sh.traps[n] = sh.gpa.dupe(u8, cmd) catch return 2;
-            if (n > 0 and !sh.inherited_ignore[n]) _ = sys.setSignal(n, if (cmd.len == 0) .ignore else .catch_flag);
+            // `trap '' CHLD` is recorded for the programs run, not applied here
+            const ignored: sys.SignalAction = if (n == sys.SIGCHLD) .default else .ignore;
+            if (n > 0 and !sh.inherited_ignore[n]) _ = sys.setSignal(n, if (cmd.len == 0) ignored else .catch_flag);
         } else if (n > 0 and !sh.inherited_ignore[n]) _ = sys.setSignal(n, shellDefault(sh, n));
     }
     return st;

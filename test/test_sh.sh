@@ -540,6 +540,14 @@ c "trap EXIT zero" 'trap "echo z" 0; echo main' B
 cx "trap numeric reset" 'trap "echo x" EXIT; trap 0; echo done' B
 c "trap in subshell reset" 'trap "echo parent" USR1; (trap; echo in) ' BP "POSIX.1-2024 trap: a subshell reports the parent's traps; dash and FreeBSD sh print nothing (deviation recorded in docs/posix-shell-differences.md)."
 
+# With SIGCHLD ignored the kernel reaps children itself; the shell must not let
+# that lose their statuses. IGN_CHLD starts the rest of its line that way.
+IGN_CHLD="python3 -I -c 'import os,signal,sys; signal.signal(signal.SIGCHLD,signal.SIG_IGN); os.execvp(sys.argv[1],sys.argv[1:])'"
+c "trap ignore CHLD keeps statuses" 'trap "" CHLD; false; echo $?; sh -c "exit 3" && echo no; echo $?; (exit 5) & wait $!; echo $?; x=$(exit 4); echo $?' e
+c "inherited ignored CHLD keeps statuses" "$IGN_CHLD sh -c 'false; echo \$?; sh -c \"exit 3\" && echo no; echo \$?; (exit 5) & wait \$!; echo \$?; x=\$(exit 4); echo \$?'" e
+c "inherited ignored CHLD keeps statuses with set -m" "$IGN_CHLD sh -c 'set -m; false; echo \$?; false && echo no; sh -c \"exit 3\"; echo \$?' 2>/dev/null" e
+c "inherited ignored CHLD reaches programs" "$IGN_CHLD sh -c 'grep SigIgn /proc/self/status; (grep SigIgn /proc/self/status; :); exec grep SigIgn /proc/self/status' | cut -c 20" eP "POSIX leaves a signal ignored on entry ignored in programs run; dash resets SIGCHLD, bash, busybox and yash pass it on."
+
 # ---- eval / dot / exec / command / type ----
 c "eval simple" 'eval echo hi' B
 c "eval concatenates args" 'eval "echo" "a" "b"' B

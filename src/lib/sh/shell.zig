@@ -219,6 +219,10 @@ pub const Shell = struct {
         try self.initPwd();
         for ([_]u8{ 2, 3, 15 }) |s| _ = s;
         for (1..sys.nsig) |i| self.inherited_ignore[i] = sys.getSignal(@intCast(i)) == .ignore;
+        // While SIGCHLD is ignored the kernel reaps children itself and their
+        // statuses are lost, so the shell never leaves it ignored. Programs it
+        // runs still inherit the ignore (see `exec.execProgram`).
+        if (self.inherited_ignore[sys.SIGCHLD]) _ = sys.setSignal(sys.SIGCHLD, .default);
         return self;
     }
 
@@ -248,6 +252,7 @@ pub const Shell = struct {
 
     pub fn deinit(self: *Shell) void {
         const gpa = self.gpa;
+        if (self.inherited_ignore[sys.SIGCHLD]) _ = sys.setSignal(sys.SIGCHLD, .ignore);
         var vit = self.vars.iterator();
         while (vit.next()) |e| {
             if (e.value_ptr.value) |v| gpa.free(v);

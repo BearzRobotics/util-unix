@@ -573,6 +573,8 @@ pub fn clearPendingAny() void {
     any_pending = false;
 }
 
+pub const SIGCHLD: u8 = 17;
+
 pub const signal_names = [_][]const u8{
     "EXIT",   "HUP",  "INT",    "QUIT", "ILL",   "TRAP", "ABRT", "BUS",
     "FPE",    "KILL", "USR1",   "SEGV", "USR2",  "PIPE", "ALRM", "TERM",
