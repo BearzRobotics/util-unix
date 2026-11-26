@@ -704,6 +704,9 @@ c "getopts: function call changes the arguments" 'f() { getopts ab o; echo "$o";
 c "getopts: shift inside a group" 'set -- -ab -b; getopts ab o; echo "$o"; shift 2; getopts ab o; echo "$o $?"; echo end' e
 c "getopts: new argument shorter than the place in the old one" 'getopts abc o -abc; getopts abc o x >/dev/null 2>&1; getopts abc o -- >/dev/null 2>&1; echo alive'
 
+# ---- a function from eval, dot or a trap outlives its source text (MEM-01) ----
+c "tilde in a function defined by dot and eval" '{ echo "f() { echo ~root/x; }"; printf "# %070000d\n" 0; } > big.sh; . ./big.sh; f; big=$(printf "%070000d" 0); eval ": $big; g() { p=a:~root; echo \$p ~root; }"; g'
+
 # ---- a temporary PATH does not stay remembered (SHX-01) ----
 EVIL='mkdir evil; printf "#!/bin/sh\necho FROM-TEMPORARY-PATH\n" > evil/ls; chmod +x evil/ls; '
 c "temporary PATH for one command is forgotten" "$EVIL"'PATH=$PWD/evil ls; ls -d /'
