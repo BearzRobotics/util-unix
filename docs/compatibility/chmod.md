@@ -29,6 +29,7 @@ All options of GNU chmod 9.7. Differential-tested: octal and symbolic modes (inc
 3. **Unchanged modes** are set anyway; GNU 9.7 calls `fchmodat` unconditionally too (verified in `process_file`).
 4. **Umask is read once at start-up** by setting it to 0 and restoring it (the syscall has no query form). A concurrent file creation by another thread in that instant would see the wrong mask; chmod is single-threaded.
 5. **`-h` on a symbolic link** is silently skipped; Linux cannot change a link's own mode. (GNU behaves the same in the tested cases.)
+6. **`-P` without `-R` is ignored**, like `-H` and `-L`. GNU 9.7 instead reads the mode of the symbolic link itself (0777), computes the new mode from that and applies it to the target, so `chmod -P u+x l` leaves a 0666 target at 0777 (observed with strace, 2026-11-25). We compute the new mode from the target.
 
 ## Platforms
 

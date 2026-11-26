@@ -123,6 +123,19 @@ run_tree "--no-dereference"        "$S" --no-dereference 600 sl
 run_tree "--dereference"           "$S" --dereference 600 sl
 run_tree "-v symlink"              "$S" -v 600 sl
 run_tree "-v dangling"             "$S" -v 600 dang
+# -P belongs to -R. GNU 9.7 takes the new mode from the link's own 0777 when it
+# is given without -R (go-rwx gives the target 0700, u+x gives it 0777); ours
+# ignores it, as both ignore -H and -L (docs/compatibility/chmod.md).
+for case in "go-rwx 600" "u+x 766"; do
+    d="$SCRATCH/pflag"; rm -rf "$d"; mkdir -p "$d"; echo x > "$d/f"; chmod 666 "$d/f"; ln -s f "$d/l"
+    out=$(cd "$d" && ours -P "${case% *}" l 2>&1); rc=$?
+    got="$rc $(stat -c %a "$d/f") $out"
+    if [ "$got" = "0 ${case#* } " ]; then PASS=$((PASS + 1)); printf "PASS -P without -R changes the target (%s)\n" "${case% *}"
+    else FAIL=$((FAIL + 1)); printf "FAIL -P without -R changes the target (%s): got %s\n" "${case% *}" "$got"; fi
+done
+run_tree "-H without -R"            "$S" -v -H go-rwx sl
+run_tree "-L without -R"            "$S" -v -L u+x sl
+
 printf "\n[ Option forms and errors ]\n"
 run_tree "mode that looks like option -x"   "$S" -x f
 run_tree "-w mode"                 "$S" -w f

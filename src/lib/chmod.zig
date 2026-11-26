@@ -178,6 +178,8 @@ const Engine = struct {
 
     fn follows(e: *Engine, is_arg: bool) bool {
         if (e.opts.no_dereference) return false;
+        // -H, -L and -P say how to recurse; without that they mean nothing
+        if (!e.opts.recurse) return true;
         return switch (e.opts.traversal) {
             .physical => false,
             .command_line => is_arg,
@@ -390,6 +392,19 @@ test "octal mode on one file, reported with -v and -c" {
     try testing.expect(try run(testing.io, testing.allocator, "f", opts)); // no change: silent
     try testing.expectEqual(@as(usize, 1), log.list.items.len);
     try testing.expectEqualStrings("changed f 0644->0600", log.list.items[0]);
+}
+
+test "a traversal choice means nothing without recursion" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "f", .data = "" });
+    try tmp.dir.setFilePermissions(testing.io, "f", .fromMode(0o666), .{});
+    try tmp.dir.symLink(testing.io, "f", "l", .{});
+    var log: Log = .{};
+    defer log.deinit();
+    const opts: Options = .{ .change = .{ .mode_text = "go-rwx" }, .traversal = .physical, .reporter = log.reporter(), .base = tmp.dir };
+    try testing.expect(try run(testing.io, testing.allocator, "l", opts));
+    try testing.expectEqual(@as(u16, 0o600), try modeOf(tmp.dir, "f"));
 }
 
 test "recursion is pre-order and skips symlinks met on the way" {
