@@ -685,6 +685,21 @@ END_OF_SCRIPT
 sh s; echo "= $?"; sh < s; echo "= $?"' e
 c "continuation: dollar-single-quotes keep it" 'printf "%s\\n" "x=\$'\''a\\'\''b'\''" "y='\''keep\\" "this'\''" "printf \"%s\\\\n\" \"\$x\" \"\$y\"" > s; sh s' Pe "dash has no dollar-single-quotes (POSIX.1-2024)."
 
+# ---- a temporary PATH does not stay remembered (SHX-01) ----
+EVIL='mkdir evil; printf "#!/bin/sh\necho FROM-TEMPORARY-PATH\n" > evil/ls; chmod +x evil/ls; '
+c "temporary PATH for one command is forgotten" "$EVIL"'PATH=$PWD/evil ls; ls -d /'
+c "local PATH is forgotten" "$EVIL"'f() { local PATH=$PWD/evil; ls; }; f; ls -d /'
+c "temporary PATH after one that ran a builtin" "$EVIL"'PATH=$PWD/evil true; PATH=$PWD/evil ls; ls -d /'
+c "PATH changed inside a function called with a temporary PATH" "$EVIL"'f() { PATH=$PWD/evil; ls; }; PATH=$PATH f; ls -d /'
+
+# ---- a script without #! starts as a new shell (SHX-04) ----
+NOBANG='nobang() { cat > "$1"; chmod +x "$1"; }; '
+c "script without #!: set -e works though the caller ignores errors" "$NOBANG"'printf "set -e\nfalse\necho SHOULD-NOT-PRINT\n" | nobang s; if ./s; then echo then; else echo else; fi; ./s || echo "or $?"; ! ./s; echo $?'
+c "script without #!: loop depth is its own" "$NOBANG"'echo "break; echo after-break" | nobang s; for i in 1 2; do ./s 2>/dev/null; echo $i; done' e
+c "script without #!: variables, exports and OPTIND" "$NOBANG"'echo "echo \$# \${OPTIND-unset} \${V-unset} \${U-unset} \$E" | nobang s; U=1; export E=e; V=v ./s a b; getopts a o -a; ./s; (exec ./s z)'
+c "script without #!: no functions or aliases" "$NOBANG"'echo "f 2>/dev/null; echo \$?" | nobang s; f() { echo f; }; alias g=echo; ./s' e
+c "script without #!: ignored signal stays ignored, traps do not carry over" "$NOBANG"'echo "kill -USR1 \$\$; echo alive; trap" | nobang s; trap "" USR1; ./s; trap "echo caught" USR1; ./s; echo $?' eP "dash lists no trap for a signal ignored on entry"
+
 # ---- eval / dot / exec / command / type ----
 c "eval simple" 'eval echo hi' B
 c "eval concatenates args" 'eval "echo" "a" "b"' B

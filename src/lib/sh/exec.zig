@@ -1383,6 +1383,8 @@ fn restoreVar(sh: *Shell, sv: shell.Saved) void {
         sh.flags = f;
         return;
     }
+    // what was found along the temporary PATH must not outlive it
+    if (std.mem.eql(u8, sv.name, "PATH")) sh.clearHash();
     if (sv.old) |o| {
         if (sh.vars.getPtr(sv.name)) |cur| {
             if (cur.value) |x| sh.gpa.free(x);
@@ -1491,9 +1493,10 @@ pub fn execProgram(sh: *Shell, a: Allocator, path: []const u8, args: []const []c
 }
 
 /// execve failed with ENOEXEC: POSIX 2.9.1.1 says the shell then runs the file
-/// as if a new shell had been invoked with it as the operand. The current
-/// process becomes that shell: variables that are not exported, functions,
-/// aliases, traps and options are dropped. Does not return.
+/// as if a new shell had been invoked with it as the operand. This process
+/// becomes that shell, built afresh from the environment, so that none of the
+/// caller's state (a suppressed `set -e`, loop depth, `getopts` position, job
+/// control...) reaches the script. Does not return.
 pub fn execScript(sh: *Shell, a: Allocator, path: []const u8, args: []const []const u8, assigns: []const ast.Assign, vals: []const []const u8) noreturn {
     const text = readFile(a, path) orelse {
         sh.diagK(.not_executable, args[0], "{s}: Permission denied", .{args[0]});
@@ -1505,38 +1508,50 @@ pub fn execScript(sh: *Shell, a: Allocator, path: []const u8, args: []const []co
         sh.diagK(.not_executable, args[0], "{s}: Exec format error", .{args[0]});
         sys.exit(126);
     }
-    // a new shell sees only the environment
-    var drop: std.ArrayList([]const u8) = .empty;
-    var it = sh.vars.iterator();
-    while (it.next()) |e| if (!e.value_ptr.exported) drop.append(a, e.key_ptr.*) catch {};
-    for (drop.items) |k| if (sh.vars.getPtr(k)) |v| {
-        v.readonly = false;
-        sh.unsetVar(k) catch {};
+    const fresh = newShell(sh, args[0], assigns, vals) catch {
+        sh.diagK(.other, null, "out of memory", .{});
+        sys.exit(2);
     };
-    var vit = sh.vars.valueIterator();
-    while (vit.next()) |v| v.readonly = false;
-    for (assigns, vals) |asg, v| {
-        sh.setVarRaw(asg.name, v) catch {};
-        sh.setExported(asg.name, true) catch {};
-    }
-    // the new shell inherits an ignored SIGCHLD as a program would
-    sh.inherited_ignore[sys.SIGCHLD] = childrenIgnoreChld(sh);
-    sh.funcs.clearRetainingCapacity();
-    sh.aliases.clearRetainingCapacity();
-    sh.clearHash();
+    fresh.setParams(args[1..]) catch sys.exit(2);
+    const st = runSource(fresh, text, .{}) catch 2;
+    childExit(fresh, if (fresh.flow == .exit_shell) fresh.status else st);
+}
+
+/// The shell a script without `#!` starts in.
+fn newShell(sh: *Shell, name: []const u8, assigns: []const ast.Assign, vals: []const []const u8) Allocator.Error!*Shell {
+    var environ = std.process.Environ.Map.init(sh.gpa);
+    defer environ.deinit();
+    var it = sh.vars.iterator();
+    while (it.next()) |e| if (e.value_ptr.exported) {
+        if (e.value_ptr.value) |v| try environ.put(e.key_ptr.*, v);
+    };
+    for (assigns, vals) |asg, v| try environ.put(asg.name, v);
+
+    // the dispositions a program would start with, which is what it inherits
+    const ignore_chld = childrenIgnoreChld(sh);
     var i: u8 = 1;
     while (i < sys.nsig) : (i += 1) {
         if (sh.traps[i]) |t| if (t.len > 0) {
             _ = sys.setSignal(i, .default);
         };
-        sh.traps[i] = null;
-        sh.trap_set[i] = false;
     }
-    sh.flags = .{};
-    sh.setParams(args[1..]) catch {};
-    sh.name = sh.gpa.dupe(u8, args[0]) catch sh.name;
-    const st = runSource(sh, text, .{}) catch 2;
-    childExit(sh, if (sh.flow == .exit_shell) sh.status else st);
+    if (ignore_chld) _ = sys.setSignal(sys.SIGCHLD, .ignore);
+    sys.clearPendingAny();
+    if (sh.tty_fd >= 0) sys.close(sh.tty_fd);
+
+    const fresh = try Shell.init(sh.env, .{
+        .name = name,
+        .prog = sh.prog,
+        .label = name,
+        .environ = &environ,
+        .diag_style = sh.diag_style,
+        .diag_color = sh.diag_color,
+        .reporter = sh.reporter,
+        .reporter_ctx = sh.reporter_ctx,
+    });
+    var hosts = sh.host_builtins.iterator();
+    while (hosts.next()) |e| try fresh.registerBuiltin(e.key_ptr.*, e.value_ptr.*);
+    return fresh;
 }
 
 /// Run an already-expanded command (used by `command`); with `no_func` shell
