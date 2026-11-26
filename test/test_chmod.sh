@@ -91,6 +91,8 @@ run_tree "-R unreadable subdir"    'mkdir -p t/u; touch t/u/f; chmod 000 t/u' -R
 root_sandboxed "$SCRATCH" run_tree "-R --preserve-root /"    "$R" -R --preserve-root 700 /
 root_sandboxed "$SCRATCH" run_tree "-R --preserve-root /."   "$R" -R --preserve-root 700 /.
 run_tree "--preserve-root not rec" "$R" --preserve-root 700 t
+root_sandboxed "$SCRATCH" run_tree "-R -L --preserve-root: link to / in the tree" "$R; ln -s / t/a/rootlink" -R -L --preserve-root u+rwx t
+root_sandboxed "$SCRATCH" run_tree "-R -L -f --preserve-root: link to / in the tree" "$R; ln -s / t/a/rootlink" -R -L -f --preserve-root u+rwx t
 # the guard must not depend on /proc (chroots and rescue systems often lack it)
 SANDBOX_EXTRA="--tmpfs /proc"
 for op in /. /.. /tmp/..; do

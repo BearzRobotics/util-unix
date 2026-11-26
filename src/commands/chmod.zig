@@ -127,7 +127,7 @@ pub fn main(ctx: cli.Context) u8 {
     }
 
     var rep: Reporter = .{ .ctx = ctx };
-    const opts: cm.Options = .{
+    var opts: cm.Options = .{
         .change = change,
         .umask = uu.proc.umask(),
         .recurse = p.recurse,
@@ -137,6 +137,18 @@ pub fn main(ctx: cli.Context) u8 {
         .quiet = p.quiet,
         .reporter = .{ .context = &rep, .on_event = Reporter.on },
     };
+
+    // The walk checks every directory it is about to enter, so that a link to
+    // "/" inside the tree is refused too (the check below sees operands only).
+    if (p.recurse and p.preserve_root) {
+        opts.preserve_root = uu.fsown.statAt(Io.Dir.cwd(), "/", true) catch |e| switch (e) {
+            error.Unsupported => null,
+            else => {
+                cli.warn(ctx, "failed to get attributes of {f}: {s}", .{ cli.quoteaf("/"), cli.errText(e) });
+                return 1;
+            },
+        };
+    }
 
     var status: u8 = 0;
     for (operands.items) |f| {
@@ -189,6 +201,7 @@ const Reporter = struct {
                     .changing_permissions => cli.warn(ctx, "changing permissions of {f}: {s}", .{ cli.quoteaf(p.path), cause }),
                     .cannot_read_directory => cli.warn(ctx, "cannot read directory {f}: {s}", .{ cli.quoteaf(p.path), cause }),
                     .read_failed => cli.warn(ctx, "fts_read failed: {s}", .{cause}),
+                    .dangerous_root => cli.warn(ctx, "it is dangerous to operate recursively on {f}{s}\nchmod: use --no-preserve-root to override this failsafe", .{ cli.quoteaf(p.path), if (std.mem.eql(u8, p.path, "/")) "" else " (same as '/')" }),
                     .directory_changed => cli.warn(ctx, "not descending into {f}: it was replaced during the walk", .{cli.quoteaf(p.path)}),
                 }
             },

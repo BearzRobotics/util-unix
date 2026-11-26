@@ -70,6 +70,9 @@ pub const ProblemKind = enum {
     /// What was opened is not the directory that was examined: another process
     /// replaced it during the walk. It is not descended into.
     directory_changed,
+    /// `preserve_root`: refused to change or enter "/" recursively. Reported
+    /// even with `quiet`.
+    dangerous_root,
 };
 
 pub const Problem = struct {
@@ -102,6 +105,10 @@ pub const Options = struct {
     /// The process umask, used by symbolic modes without a `who`.
     umask: u16 = 0,
     recurse: bool = false,
+    /// Identity of "/" for `--preserve-root` (`fsown.statAt(cwd, "/", true)`):
+    /// a recursive walk neither changes nor enters that directory, whether it is
+    /// the operand or is reached through a link. Null disables the check.
+    preserve_root: ?fsown.Stat = null,
     traversal: Traversal = .command_line,
     /// `-h`: do not look through symbolic links (they are then skipped, since
     /// their own mode cannot be changed).
@@ -206,6 +213,18 @@ const Engine = struct {
         // Which directory was examined, to compare with the one opened below.
         // Linux only; elsewhere the no-follow open is the whole protection.
         const examined: ?fsown.Stat = if (descend) fsown.statAt(parent, name, through_link) catch null else null;
+
+        if (descend) if (e.opts.preserve_root) |root| {
+            // not knowing which directory this is counts as a refusal
+            const seen = examined orelse {
+                e.problem(.cannot_access, error.Unexpected);
+                return false;
+            };
+            if (seen.sameFile(root)) {
+                e.emit(.{ .problem = .{ .kind = .dangerous_root, .path = e.path.items } });
+                return false;
+            }
+        };
 
         var ok = e.apply(parent, name, st, through_link);
 
@@ -480,6 +499,39 @@ test "isRoot recognises every spelling of the root directory" {
     defer tmp.cleanup();
     for ([_][]const u8{ "/", "//", "/.", "/..", "/./.", "/tmp/.." }) |path| try testing.expect(isRoot(testing.io, path));
     for ([_][]const u8{ "/tmp", ".", "/nonexistent-zz", "" }) |path| try testing.expect(!isRoot(testing.io, path));
+}
+
+test "preserve_root stops the walk at that directory however it is reached" {
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "tree");
+    try tmp.dir.createDir(testing.io, "other", .default_dir);
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "other/canary", .data = "" });
+    try tmp.dir.setFilePermissions(testing.io, "other/canary", .fromMode(0o600), .{});
+    try tmp.dir.setFilePermissions(testing.io, "other", .fromMode(0o700), .{});
+    try tmp.dir.symLink(testing.io, "../other", "tree/link", .{});
+    var log: Log = .{};
+    defer log.deinit();
+    var opts: Options = .{
+        .change = .{ .fixed = 0o755 },
+        .recurse = true,
+        .traversal = .logical,
+        .quiet = true, // the refusal is reported all the same
+        .preserve_root = try fsown.statAt(tmp.dir, "other", true), // pretend it is "/"
+        .reporter = log.reporter(),
+        .base = tmp.dir,
+    };
+    for ([_][]const u8{ "tree", "other" }) |operand| {
+        try testing.expect(!try run(testing.io, testing.allocator, operand, opts));
+        try testing.expectEqual(@as(u16, 0o700), try modeOf(tmp.dir, "other"));
+        try testing.expectEqual(@as(u16, 0o600), try modeOf(tmp.dir, "other/canary"));
+    }
+    try testing.expectEqualStrings("problem dangerous_root tree/link", log.list.items[0]);
+    try testing.expectEqualStrings("problem dangerous_root other", log.list.items[1]);
+    // without recursion the directory itself may be changed
+    opts.recurse = false;
+    try testing.expect(try run(testing.io, testing.allocator, "other", opts));
 }
 
 test "validMode accepts GNU forms and rejects junk" {
