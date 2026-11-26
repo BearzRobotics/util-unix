@@ -711,6 +711,8 @@ c "tilde in a function defined by dot and eval" '{ echo "f() { echo ~root/x; }";
 c "trim a variable that the pattern assigns" 'x=hello; echo "[${x#$((x=1))}]"; p=/usr/local/lib; echo "${p%/$((p=0))}" $p; y=abcabc; echo ${y##*$((y=7))} ${y%%b*$((y=8))}'
 c "default and alternate words that assign the variable" 'x=abc; echo "${x+$((x=2))}" $x; y=; echo "${y:-$((y=3))}" $y; z=long-value; echo "${z%"${z:=other}"}|$z"'
 
+c "jobs: one finished job named twice" 'true & sleep 0.3; jobs %1 %1 >/dev/null 2>&1; echo alive; sleep 0 & sleep 0.3; jobs %% %1 >/dev/null 2>&1; echo end' e
+
 # ---- a temporary PATH does not stay remembered (SHX-01) ----
 EVIL='mkdir evil; printf "#!/bin/sh\necho FROM-TEMPORARY-PATH\n" > evil/ls; chmod +x evil/ls; '
 c "temporary PATH for one command is forgotten" "$EVIL"'PATH=$PWD/evil ls; ls -d /'

@@ -51,6 +51,8 @@ pub fn jobsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 st = 1;
                 continue;
             };
+            // `%1 %1`, or `%1 %%`, is one job: it must be removed only once
+            if (std.mem.indexOfScalar(*jobs.Job, picked.items, j) != null) continue;
             picked.append(a, j) catch |oe| return sh.oom(oe);
         }
     } else {
