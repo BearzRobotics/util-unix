@@ -105,7 +105,7 @@ pub fn query(io: Io, gpa: Allocator, db: Database, key: ?[]const u8, opts: Optio
         .passwd => while (lines.next()) |line| {
             const e = userdb.parsePasswd(line) orelse continue;
             if (key) |k| {
-                if (!(if (isNumber(k)) e.uid == parseU32(k) else std.mem.eql(u8, e.name, k))) continue;
+                if (!keyNames(k, e.uid, e.name)) continue;
             }
             try w.print("{s}:{s}:{d}:{d}:{s}:{s}:{s}\n", .{ e.name, e.passwd, e.uid, e.gid, e.gecos, e.dir, e.shell });
             any = true;
@@ -114,7 +114,7 @@ pub fn query(io: Io, gpa: Allocator, db: Database, key: ?[]const u8, opts: Optio
         .group => while (lines.next()) |line| {
             const e = userdb.parseGroup(line) orelse continue;
             if (key) |k| {
-                if (!(if (isNumber(k)) e.gid == parseU32(k) else std.mem.eql(u8, e.name, k))) continue;
+                if (!keyNames(k, e.gid, e.name)) continue;
             }
             try w.print("{s}:{s}:{d}:{s}\n", .{ e.name, e.passwd, e.gid, e.members });
             any = true;
@@ -167,8 +167,26 @@ fn readFile(io: Io, gpa: Allocator, dir: Io.Dir, path: []const u8) Error![]u8 {
     };
 }
 
-/// glibc's getent decides "number or name" by the first character alone and
-/// then reads the number with atol(): "3270_mapper" is the number 3270.
+/// A user, group or service key is a number only when all of it is: "0abc" is
+/// a name, and must never stand for number 0. As in glibc's getent (strtoul),
+/// blanks and a "+" may come first. Returns the digits.
+fn wholeNumber(s: []const u8) ?[]const u8 {
+    var d = std.mem.trimStart(u8, s, " \t\n\r\x0b\x0c");
+    if (d.len > 0 and d[0] == '+') d = d[1..];
+    if (d.len == 0 or std.mem.indexOfNone(u8, d, "0123456789") != null) return null;
+    return d;
+}
+
+/// True when `key` names user or group `id` by number, or else `name`.
+fn keyNames(key: []const u8, id: u32, name: []const u8) bool {
+    // a number too large for an id matches nothing (glibc wraps it, which
+    // makes 4294967296 mean root)
+    if (wholeNumber(key)) |digits| return parseU32(digits) == id;
+    return std.mem.eql(u8, name, key);
+}
+
+/// For protocols and rpc, glibc's getent decides "number or name" by the first
+/// character alone and then reads the number with atol().
 fn isNumber(s: []const u8) bool {
     return s.len > 0 and s[0] >= '0' and s[0] <= '9';
 }
@@ -209,7 +227,10 @@ fn services(lines: *std.mem.SplitIterator(u8, .scalar), key: ?[]const u8, w: *Io
         const slash = std.mem.indexOfScalar(u8, k, '/');
         const head = if (slash) |s| k[0..s] else k;
         if (slash) |s| want_proto = k[s + 1 ..];
-        if (isNumber(head)) want_port = parseU32(head) else want_name = head;
+        if (wholeNumber(head)) |digits| {
+            // out of range: no port matches
+            want_port = parseU32(digits) orelse std.math.maxInt(u32);
+        } else want_name = head;
     }
     var any = false;
     while (lines.next()) |raw| {

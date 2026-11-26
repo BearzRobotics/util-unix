@@ -25,6 +25,7 @@ Lookups by name or number in the files backend for every database listed in `get
 1. **Files backend only** (decision 0004). Anything glibc answers from DNS, LDAP, NIS, systemd-userdb or another NSS module is "not found" here, and `nsswitch.conf` is not read. Entries that exist only in such sources are untested by design.
 2. **`-s`/`--service`:** only "files" returns anything; any other service answers as an empty source.
 3. **Shadow databases** read as empty for an unprivileged user, as glibc's files backend does.
+4. **Numbers too large for an id** (`passwd 4294967296`) are not found. glibc 2.43 wraps them, so that key prints root's entry. As in glibc, a passwd, group or services key is a number only when it is all digits, after optional blanks and "+"; "-0", which glibc reads as 0, is looked up as a name here.
 
 ## Platforms
 

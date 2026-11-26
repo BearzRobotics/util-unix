@@ -27,6 +27,15 @@ run_cmp "passwd key with leading zero"   passwd 00
 run_cmp "group all system names"         group $(awk -F: '$3 < 1000 {print $1}' /etc/group)
 run_cmp "group all system gids"          group $(awk -F: '$3 < 1000 {print $3}' /etc/group)
 run_cmp "group missing"                  group nosuchgroup
+# a key that only starts like a number is a name: it must not mean uid 0
+for k in 0abc 0x0 1000x " 0" "+0" "  00" "0 " 0.0 + 18446744073709551616; do
+    run_cmp "passwd key '$k'"            passwd "$k"
+    run_cmp "group key '$k'"             group "$k"
+done
+run_cmp "services keys that only start like a port" services 22abc 22abc/tcp 80x
+# 2^32 must not wrap to 0 (glibc's does, and prints root: not compared)
+if [ -z "$(ours passwd 4294967296)" ]; then PASS=$((PASS + 1)); echo "PASS passwd 4294967296 is not root"
+else FAIL=$((FAIL + 1)); echo "FAIL passwd 4294967296 is not root"; fi
 run_cmp "initgroups for current user"    initgroups "$(id -un)"
 run_cmp "initgroups unknown user"        initgroups nosuchuser
 run_cmp "initgroups enumeration"         initgroups
