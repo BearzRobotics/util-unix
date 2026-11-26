@@ -309,7 +309,9 @@ def job_cases():
     d("exit warns about stopped jobs", ["sleep 43", "^Z", "exit", "jobs", "kill -CONT %1", "kill %1", ("w", .4), "jobs"])
     d("wait for all", ["sleep 0.5 &", "wait", "echo done"])
     d("fg by spec", ["sleep 44 &", "sleep 45 &", "fg %1", "^Z", "jobs", "kill %1 %2", ("w", .4)])
-    d("kill -CONT resumes", ["sleep 46", "^Z", "kill -CONT %1", ("w", .3), "jobs", "kill %1"], collapse=True)
+    # dash does not notice that a stopped job was continued and still says
+    # Stopped, so the expectation is fixed rather than a reference's
+    has("kill -CONT resumes", ["sleep 46", "^Z", "kill -CONT %1", ("w", .3), "jobs", "kill %1"], ["+ Running"])
     d("killed by signal reported", ["sleep 47 &", "kill -9 %1", ("w", .4), "jobs"])
     d("two stops, current moves", ["sleep 48", "^Z", "sleep 49", "^Z", "jobs", "kill %1 %2", "kill -CONT %1 %2", ("w", .4)])
     d("flags show i and m", ["echo $- | grep -c i", "echo $- | grep -c m"])

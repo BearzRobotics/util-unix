@@ -57,7 +57,11 @@ sandbox_blocks_writes() {
 root_sandboxed() {
     scratch="$1"; helper="$2"; shift 2
     if ! sandbox_blocks_writes "$scratch"; then
-        skip_test "$1 (needs a working bwrap sandbox: it names the real /)"
+        if [ -n "${UU_REQUIRE_SANDBOX:-}" ]; then
+            FAIL=$((FAIL + 1)); printf "FAIL %s (UU_REQUIRE_SANDBOX is set and bwrap does not work here)\n" "$1"
+        else
+            skip_test "$1 (needs a working bwrap sandbox: it names the real /)"
+        fi
         return 0
     fi
     SANDBOX=$(sandbox_cmd "$scratch")

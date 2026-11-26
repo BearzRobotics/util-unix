@@ -18,6 +18,25 @@ jobs:
       - run: zig build
       - run: zig build test
 
+  suites:
+    # The differential, diagnostic and pty suites (see scripts/ci-suites.sh).
+    # Static binaries built here run in the container that holds the references.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - run: zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
+      - name: Allow the sandbox the root-directory tests need
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Run the suites
+        run: >-
+          docker run --rm
+          --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
+          -v "$PWD:/src:ro" ubuntu:26.04 sh /src/scripts/ci-suites.sh
+
   modes:
     runs-on: ubuntu-latest
     strategy:
