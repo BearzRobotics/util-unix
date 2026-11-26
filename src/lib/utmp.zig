@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! The login accounting file (utmp/wtmp), Linux layout.
 //!
-//! Records are the 384-byte `struct utmp` of glibc and musl on 64-bit and
-//! 32-bit Linux (`ut_tv` is two 32-bit integers on every Linux ABI, so the
-//! layout does not depend on the word size). Fields are little-endian on the
-//! machines this layout was checked on (x86-64); the file is read in the host's
-//! byte order, as every other program reading it does.
+//! The size of `struct utmp` depends on the architecture. Where glibc keeps the
+//! 32-bit layout of its time fields (`__WORDSIZE_TIME64_COMPAT32`: x86-64,
+//! RISC-V 64, PowerPC 64, and every 32-bit one) a record is 384 bytes, with a
+//! 32-bit session id and seconds. On AArch64, LoongArch 64 and s390x those are
+//! 64-bit and a record is 400 bytes. What matters is the program that wrote
+//! the file, which is the system's glibc tools whatever this one is built with:
+//! musl keeps no utmp of its own. The file is read in the host's byte order, as
+//! every other program reading it does.
 //!
 //! Reference: utmp(5), Linux man-pages.
 //!
@@ -21,7 +24,26 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 pub const default_path = "/var/run/utmp";
-pub const record_size = 384;
+/// Where the architecture-dependent fields are; those before them do not move.
+pub const Layout = struct {
+    size: usize,
+    /// The session id and the seconds are 64-bit.
+    wide: bool,
+
+    pub const compat: Layout = .{ .size = 384, .wide = false };
+    pub const wide64: Layout = .{ .size = 400, .wide = true };
+
+    pub fn of(arch: std.Target.Cpu.Arch) Layout {
+        return switch (arch) {
+            .aarch64, .aarch64_be, .loongarch64, .s390x => wide64,
+            else => compat,
+        };
+    }
+};
+
+/// The layout of the system this is built for.
+pub const native = Layout.of(builtin.cpu.arch);
+pub const record_size = native.size;
 
 pub const Type = enum(i16) {
     empty = 0,
@@ -49,7 +71,7 @@ pub const Record = struct {
     exit_termination: i16,
     exit_status: i16,
     session: i32,
-    /// ut_tv.tv_sec as stored (32 bits).
+    /// ut_tv.tv_sec as stored.
     time: i64,
     /// ut_addr_v6 (IPv4 in the first word).
     addr: [4]u32,
@@ -61,10 +83,18 @@ fn field(bytes: []const u8) []const u8 {
 
 /// Decode record `index` of `data`; null past the last whole record.
 pub fn record(data: []const u8, index: usize) ?Record {
-    const start = std.math.mul(usize, index, record_size) catch return null;
-    if (start > data.len or data.len - start < record_size) return null;
-    const r = data[start..][0..record_size];
+    return recordIn(native, data, index);
+}
+
+/// `record` for a file written with another architecture's layout.
+pub fn recordIn(layout: Layout, data: []const u8, index: usize) ?Record {
+    const start = std.math.mul(usize, index, layout.size) catch return null;
+    if (start > data.len or data.len - start < layout.size) return null;
+    const r = data[start..][0..layout.size];
     const endian = builtin.cpu.arch.endian();
+    const addr_at: usize = if (layout.wide) 360 else 348;
+    var addr: [4]u32 = undefined;
+    for (&addr, 0..) |*a, n| a.* = std.mem.readInt(u32, r[addr_at + 4 * n ..][0..4], endian);
     return .{
         .kind = @fromBackingInt(@intCast(std.mem.readInt(i16, r[0..2], endian))),
         .pid = std.mem.readInt(i32, r[4..8], endian),
@@ -74,15 +104,16 @@ pub fn record(data: []const u8, index: usize) ?Record {
         .host = field(r[76..][0..host_size]),
         .exit_termination = std.mem.readInt(i16, r[332..334], endian),
         .exit_status = std.mem.readInt(i16, r[334..336], endian),
-        .session = std.mem.readInt(i32, r[336..340], endian),
-        .time = std.mem.readInt(i32, r[340..344], endian),
-        .addr = .{
-            std.mem.readInt(u32, r[348..352], endian),
-            std.mem.readInt(u32, r[352..356], endian),
-            std.mem.readInt(u32, r[356..360], endian),
-            std.mem.readInt(u32, r[360..364], endian),
-        },
+        .session = if (layout.wide) @truncate(std.mem.readInt(i64, r[336..344], endian)) else std.mem.readInt(i32, r[336..340], endian),
+        .time = if (layout.wide) std.mem.readInt(i64, r[344..352], endian) else std.mem.readInt(i32, r[340..344], endian),
+        .addr = addr,
     };
+}
+
+/// Store the seconds of a record being built (for tests and fixtures).
+pub fn putTime(layout: Layout, rec: []u8, seconds: i32) void {
+    const endian = builtin.cpu.arch.endian();
+    if (layout.wide) std.mem.writeInt(i64, rec[344..352], seconds, endian) else std.mem.writeInt(i32, rec[340..344], seconds, endian);
 }
 
 pub fn count(data: []const u8) usize {
@@ -113,7 +144,7 @@ test "decoding a hand-built record" {
     @memcpy(buf[8..13], "pts/3");
     @memcpy(buf[44..49], "alice");
     @memcpy(buf[76..83], "example");
-    std.mem.writeInt(i32, buf[340..344], 1762500000, endian);
+    putTime(native, &buf, 1762500000);
     const r = record(&buf, 0).?;
     try std.testing.expectEqual(Type.user_process, r.kind);
     try std.testing.expectEqual(@as(i32, 4242), r.pid);
@@ -124,4 +155,29 @@ test "decoding a hand-built record" {
     try std.testing.expect(isUserProcess(r));
     try std.testing.expect(record(&buf, 1) == null);
     try std.testing.expect(record(buf[0 .. record_size - 1], 0) == null);
+}
+
+test "both record layouts, whatever this is built for" {
+    const t = std.testing;
+    const endian = builtin.cpu.arch.endian();
+    try t.expectEqual(@as(usize, 384), Layout.of(.x86_64).size);
+    try t.expectEqual(@as(usize, 384), Layout.of(.riscv64).size);
+    try t.expectEqual(@as(usize, 384), Layout.of(.arm).size);
+    try t.expectEqual(@as(usize, 400), Layout.of(.aarch64).size);
+    try t.expectEqual(@as(usize, 400), Layout.of(.loongarch64).size);
+    inline for (.{ Layout.compat, Layout.wide64 }) |layout| {
+        var data: [3 * layout.size]u8 = @splat(0);
+        for ([_][]const u8{ "alice", "bob", "carol" }, 0..) |name, n| {
+            const r = data[n * layout.size ..][0..layout.size];
+            std.mem.writeInt(i16, r[0..2], 7, endian);
+            @memcpy(r[44..][0..name.len], name);
+            putTime(layout, r, 1700000000 + @as(i32, @intCast(n)));
+            std.mem.writeInt(u32, r[if (layout.wide) 360 else 348..][0..4], 0x0100007f, endian);
+        }
+        const third = recordIn(layout, &data, 2).?;
+        try t.expectEqualStrings("carol", third.user);
+        try t.expectEqual(@as(i64, 1700000002), third.time);
+        try t.expectEqual(@as(u32, 0x0100007f), third.addr[0]);
+        try t.expect(recordIn(layout, &data, 3) == null);
+    }
 }

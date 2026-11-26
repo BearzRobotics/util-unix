@@ -201,7 +201,7 @@ test "short format golden output" {
     @memcpy(rec[8..16], "nosuchpt"); // no such terminal: '?' and unknown idle
     @memcpy(rec[44..49], "alice");
     @memcpy(rec[76..85], "h.example");
-    std.mem.writeInt(i32, rec[340..344], 1762518896, endian);
+    utmp.putTime(utmp.native, &rec, 1762518896);
     var zone: localtime.Zone = .{};
     var buf: [512]u8 = undefined;
     var w: Io.Writer = .fixed(&buf);

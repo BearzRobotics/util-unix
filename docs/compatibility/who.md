@@ -27,4 +27,4 @@ Every option of GNU who 9.7 except the name lookup: all record kinds (users, boo
 
 ## Platforms
 
-Linux only (the Linux `struct utmp` layout, 384 bytes). The executable is static and does not link libc. Tested on x86-64 Linux 6.18 (WSL2).
+Linux only (the Linux `struct utmp` layout: 384 bytes on x86-64, RISC-V 64, PowerPC 64 and 32-bit systems, 400 on AArch64, LoongArch 64 and s390x, following glibc). The executable is static and does not link libc. Tested on x86-64 Linux 6.18 (WSL2).

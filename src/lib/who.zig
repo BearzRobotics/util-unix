@@ -376,7 +376,7 @@ fn testRecord(buf: []u8, index: usize, kind: i16, user: []const u8, line: []cons
     std.mem.writeInt(i32, r[4..8], 99, endian);
     @memcpy(r[8..][0..line.len], line);
     @memcpy(r[44..][0..user.len], user);
-    std.mem.writeInt(i32, r[340..344], time, endian);
+    utmp.putTime(utmp.native, r, time);
 }
 
 test "json: selects the same records as write and escapes text" {

@@ -66,7 +66,7 @@ The file is read once, whole.
 
 Platforms
 
-Linux (the 384-byte `struct utmp`). Tested on Linux 6.18 (WSL2) against GNU coreutils 9.7.
+Linux (`struct utmp` as glibc lays it out: 384 bytes on x86-64, 400 on AArch64, LoongArch 64 and s390x). Tested on Linux 6.18 (WSL2) against GNU coreutils 9.7.
 
 Standards and references
 
