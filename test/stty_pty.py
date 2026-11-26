@@ -145,7 +145,52 @@ case("line missing", ["line"])
 # Save and restore.
 case("restore from -g", ["raw", "intr", "^A", "-echo"], ["-g"])
 case("-g string round trip", ["sane"], ["-g"])
-# the actual restore is done in the shell wrapper (needs the saved string)
+
+def restore_case(desc, changes):
+    """`stty "$(stty -g)"`: save a changed state, leave it, restore it. Both
+    programs must succeed, and the terminal must be back in the saved state
+    (which differs from the one restored from, or nothing is shown)."""
+    global passed, failed
+    env = {"LC_ALL": "C", "PATH": os.environ.get("PATH", "")}
+    problems = []
+    for name, prog in (("GNU", [GNU]), ("OURS", OURS)):
+        m, s = pty.openpty()
+        def run(cmd, args):
+            return subprocess.run(cmd + args, stdin=s, capture_output=True, env=env)
+        run([GNU], changes)
+        saved = run(prog, ["-g"]).stdout.decode().strip()
+        run([GNU], ["sane", "-echo" if "echo" in changes else "echo", "intr", "^K"])
+        other = run([GNU], ["-g"]).stdout.decode().strip()
+        p = run(prog, [saved])
+        back = run([GNU], ["-g"]).stdout.decode().strip()
+        if saved == other:
+            problems.append("%s: the case does not leave the saved state" % name)
+        if p.returncode != 0 or p.stdout or p.stderr:
+            problems.append("%s: restore gave status %d, %r %r" % (name, p.returncode, p.stdout, p.stderr))
+        if back != saved:
+            problems.append("%s: saved %s\n     but now %s" % (name, saved, back))
+        os.close(m); os.close(s)
+    if problems:
+        failed += 1
+        print("FAIL " + desc)
+        for line in problems:
+            print("     " + line)
+    else:
+        passed += 1
+        print("PASS " + desc)
+
+restore_case("restore: flags and a control character", ["raw", "intr", "^A", "-echo"])
+restore_case("restore: min, time and line settings", ["-icanon", "min", "3", "time", "7", "echo", "tostop", "ixany"])
+restore_case("restore: speed and output delays", ["9600", "cr3", "tab3", "ocrnl", "quit", "undef"])
+
+# strings that are not a saved state are rejected, and change nothing
+_m, _s = pty.openpty()
+_saved = subprocess.run([GNU, "-g"], stdin=_s, capture_output=True).stdout.decode().strip()
+os.close(_m); os.close(_s)
+for desc, bad in (("one field short", _saved.rsplit(":", 1)[0]), ("one field extra", _saved + ":0"),
+                  ("not hexadecimal", _saved.rsplit(":", 1)[0] + ":zz"), ("flag too large", "1ffffffff:" + _saved.split(":", 1)[1]),
+                  ("character too large", _saved.rsplit(":", 1)[0] + ":100"), ("only colons", ":::")):
+    case("restore rejects: " + desc, ["-echo"], [bad], ["-g"])
 
 # Errors and option parsing.
 case("bad setting", ["foo"])
