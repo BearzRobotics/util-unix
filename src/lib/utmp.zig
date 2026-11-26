@@ -13,6 +13,9 @@
 //! to them when /var/run/utmp is missing); the BSD utmpx layout.
 
 const std = @import("std");
+
+/// Bytes in the remote host field (`ut_host`).
+pub const host_size = 256;
 const builtin = @import("builtin");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
@@ -68,7 +71,7 @@ pub fn record(data: []const u8, index: usize) ?Record {
         .line = field(r[8..40]),
         .id = r[40..44], // not NUL-terminated by definition; trimmed on use
         .user = field(r[44..76]),
-        .host = field(r[76..332]),
+        .host = field(r[76..][0..host_size]),
         .exit_termination = std.mem.readInt(i16, r[332..334], endian),
         .exit_status = std.mem.readInt(i16, r[334..336], endian),
         .session = std.mem.readInt(i32, r[336..340], endian),

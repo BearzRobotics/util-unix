@@ -180,7 +180,8 @@ pub fn write(io: Io, w: *Io.Writer, data: []const u8, zone: *const localtime.Zon
     var tbuf: [64]u8 = undefined;
     var ibuf: [32]u8 = undefined;
     var pbuf: [32]u8 = undefined;
-    var cbuf: [64]u8 = undefined;
+    // "(" + ut_host (256 bytes) + ")"
+    var cbuf: [utmp.host_size + 2]u8 = undefined;
     var xbuf: [64]u8 = undefined;
     var i: usize = 0;
     while (utmp.record(data, i)) |r| : (i += 1) {
@@ -196,7 +197,7 @@ pub fn write(io: Io, w: *Io.Writer, data: []const u8, zone: *const localtime.Zon
                 const info = ttyInfo(io, r.line);
                 const state: u8 = if (!info.exists) '?' else if (info.group_writable) '+' else '-';
                 const idle = idleText(&ibuf, info.atime, o.now, boot);
-                const host = if (r.host.len > 0) std.fmt.bufPrint(&cbuf, "({s})", .{r.host}) catch "" else "";
+                const host = if (r.host.len > 0) std.fmt.bufPrint(&cbuf, "({s})", .{r.host}) catch unreachable else "";
                 try printLine(w, o, .{
                     .user = r.user,
                     .state = state,

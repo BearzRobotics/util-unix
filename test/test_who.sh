@@ -45,6 +45,8 @@ open(d + "/empty.utmp", "wb").write(b"")
 open(d + "/short.utmp", "wb").write(a[:200])
 open(d + "/partial.utmp", "wb").write(a[:384*9 + 100])
 open(d + "/boot_only.utmp", "wb").write(rec(2, 0, "~", "reboot", "6.1.0", now-1000))
+# remote host names up to the whole 256-byte field
+open(d + "/longhost.utmp", "wb").write(b"".join(rec(7, 2000 + n, "pts/99%02d" % (n % 100), "mallory", ("h" * n), now-50) for n in (61, 62, 63, 200, 255, 256)))
 open(d + "/ids.utmp", "wb").write(rec(7, 1, "pts/9997", "x", "h", now-10, b"ab") + rec(7, 2, "pts/9998", "y", "", now-20, b"abcd"))
 PY
 U="$D/all.utmp"
@@ -53,6 +55,8 @@ run_cmp "default"            "$U"
 for o in -s -u -T -w -H -a -b -d -l -p -r -t -q; do run_cmp "$o"  $o "$U"; done
 for o in -aH -uH -TH -bH -dH -lH -pH -rH -tH -qH -sH -uT -aT -su -sT -ab -dl -pr -ul -lp -bt; do run_cmp "$o" $o "$U"; done
 run_cmp "-H -u -T"           -H -u -T "$U"
+run_cmp "long host names"    "$D/longhost.utmp"
+run_cmp "long host names -a" -a "$D/longhost.utmp"
 run_cmp "--all"              --all "$U"
 run_cmp "--boot"             --boot "$U"
 run_cmp "--dead"             --dead "$U"
