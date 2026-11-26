@@ -175,3 +175,31 @@ test "a command is never run with what a failed allocation left behind" {
         if (!failing.failed) break;
     }
 }
+
+test "fc re-runs its own copy of a history line" {
+    const std = @import("std");
+    const Seen = struct {
+        text: [64]u8 = undefined,
+        len: usize = 0,
+        fn report(_: ?*anyopaque, _: *const shell.Diagnostic) void {}
+        fn see(ctx: ?*anyopaque, _: *shell.Shell, args: []const []const u8) u8 {
+            const c: *@This() = @ptrCast(@alignCast(ctx.?));
+            c.len = @min(args[1].len, c.text.len);
+            @memcpy(c.text[0..c.len], args[1][0..c.len]);
+            return 0;
+        }
+    };
+    var seen: Seen = .{};
+    const s = try shell.Shell.init(.{ .io = std.testing.io, .gpa = std.testing.allocator }, .{ .reporter = Seen.report });
+    defer s.deinit();
+    try s.registerBuiltin("see", .{ .ctx = &seen, .run = Seen.see });
+    var h = history.History.init(std.testing.allocator);
+    defer h.deinit();
+    h.setMax(3);
+    // the line to run is the oldest: adding it again to the full history drops
+    // the entry it came from (the testing allocator overwrites freed memory)
+    for ([_][]const u8{ "see first-entry", ": b", ": c" }) |line| try h.add(line);
+    s.history = &h;
+    _ = try s.runString("fc -s 1");
+    try std.testing.expectEqualStrings("first-entry", seen.text[0..seen.len]);
+}
