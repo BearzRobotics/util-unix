@@ -24,6 +24,7 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const fsown = @import("fsown.zig");
+const treewalk = @import("treewalk.zig");
 const userdb = @import("userdb.zig");
 
 pub const Verbosity = enum {
@@ -79,6 +80,9 @@ pub const ProblemKind = enum {
     read_failed,
     /// `--preserve-root`: refused to touch "/" recursively.
     dangerous_root,
+    /// A directory was replaced during the walk: it is not entered, or not
+    /// returned to.
+    directory_changed,
 };
 
 pub const Problem = struct {
@@ -126,17 +130,21 @@ pub const Options = struct {
     base: ?Io.Dir = null,
 };
 
-const max_depth_hint = 4096;
-
 const Engine = struct {
     io: Io,
     gpa: Allocator,
     opts: Options,
-    base: Io.Dir,
     /// Display path of the entry being processed ("dir/sub/file").
     path: std.ArrayList(u8) = .empty,
-    /// Device/inode of the directories on the way down, for cycle detection.
-    ancestors: std.ArrayList(fsown.Stat) = .empty,
+    /// The directories the walk is inside.
+    stack: treewalk.Stack(Pending),
+
+    /// What changing a directory on the way out needs.
+    const Pending = union(enum) {
+        /// Entered by the fast path: not examined, changed without looking.
+        unstatted,
+        examined: fsown.Stat,
+    };
 
     fn emit(e: *Engine, ev: Event) void {
         e.opts.reporter.on_event(e.opts.reporter.context, ev);
@@ -176,43 +184,77 @@ const Engine = struct {
             o.required_gid == null and o.preserve_root == null and o.traversal != .logical;
     }
 
-    /// Fast path of `visit` for an entry known only by its listed type.
-    fn visitUnstatted(e: *Engine, parent: Io.Dir, name: []const u8, kind: Io.File.Kind) Allocator.Error!bool {
-        var ok = true;
-        if (kind == .directory) {
-            var dir = parent.openDir(e.io, name, .{ .iterate = true, .follow_symlinks = false }) catch |err| {
-                e.problem(.cannot_read_directory, err);
-                return false;
+    /// Change the operand `path` and, with `recurse`, everything under it, a
+    /// directory's contents before the directory.
+    fn walk(e: *Engine, path: []const u8) Allocator.Error!bool {
+        var ok = try e.visit(e.stack.base, path, 0);
+        while (e.stack.depth() > 0) {
+            const top = e.stack.top();
+            e.path.shrinkRetainingCapacity(top.path_len);
+            const dir = e.stack.topDir() catch |err| {
+                e.lost(err);
+                ok = false;
+                e.stack.pop();
+                continue;
             };
-            defer dir.close(e.io);
-            const base_len = e.path.items.len;
-            var it = dir.iterate();
-            while (true) {
-                const entry = (it.next(e.io) catch |err| {
-                    e.problem(.read_failed, err);
-                    ok = false;
-                    break;
-                }) orelse break;
+            if (top.nextEntry()) |entry| {
+                // fts appends "/name", avoiding a doubled slash after "dir/".
                 if (e.path.items.len == 0 or e.path.items[e.path.items.len - 1] != '/') try e.path.append(e.gpa, '/');
                 try e.path.appendSlice(e.gpa, entry.name);
-                ok = (try e.visitListed(dir, entry)) and ok;
-                e.path.shrinkRetainingCapacity(base_len);
+                // the fast path starts below the operand's own entries
+                const level = e.stack.depth();
+                const listed = level == 1 or top.data == .unstatted;
+                ok = (if (listed) try e.visitListed(dir, entry, level) else try e.visit(dir, entry.name, level)) and ok;
+                continue;
             }
+            if (top.read_error) |err| {
+                e.problem(.read_failed, err);
+                ok = false;
+            }
+            // Post-order: the directory itself.
+            if (e.stack.parentDir()) |parent| {
+                ok = (switch (top.data) {
+                    .unstatted => e.chownUnstatted(parent, top.name),
+                    .examined => |st| e.changeOwner(parent, top.name, st, true),
+                }) and ok;
+            } else |err| {
+                e.lost(err);
+                ok = false;
+            }
+            e.stack.pop();
         }
-        fsown.chownAt(parent, name, e.opts.uid, e.opts.gid, false) catch |err| {
-            e.problem(if (e.opts.uid != null) .changing_ownership else .changing_group, err);
-            ok = false;
-        };
         return ok;
     }
 
-    /// One entry of a directory listing.
-    fn visitListed(e: *Engine, parent: Io.Dir, entry: Io.Dir.Entry) Allocator.Error!bool {
-        if (e.canSkipStat() and entry.kind != .unknown) return e.visitUnstatted(parent, entry.name, entry.kind);
-        return e.visit(parent, entry.name, 1);
+    /// A directory the walk had to open again is gone.
+    fn lost(e: *Engine, err: anyerror) void {
+        if (err == error.DirectoryChanged) e.problem(.directory_changed, null) else e.problem(.cannot_read_directory, err);
     }
 
-    /// Process one entry; for a directory with `recurse`, its contents first.
+    /// One entry of a directory listing.
+    fn visitListed(e: *Engine, parent: Io.Dir, entry: treewalk.Entry, level: usize) Allocator.Error!bool {
+        if (!e.canSkipStat() or entry.kind == .unknown) return e.visit(parent, entry.name, level);
+        // Fast path for an entry known only by its listed type.
+        if (entry.kind != .directory) return e.chownUnstatted(parent, entry.name);
+        const dir = e.stack.open(parent, entry.name, false) catch |err| {
+            e.problem(.cannot_read_directory, err);
+            return false;
+        };
+        const opened: ?fsown.Stat = fsown.statHandle(dir.handle) catch null;
+        try e.stack.push(dir, entry.name, false, opened, e.path.items.len, .unstatted);
+        return true;
+    }
+
+    fn chownUnstatted(e: *Engine, parent: Io.Dir, name: []const u8) bool {
+        fsown.chownAt(parent, name, e.opts.uid, e.opts.gid, false) catch |err| {
+            e.problem(if (e.opts.uid != null) .changing_ownership else .changing_group, err);
+            return false;
+        };
+        return true;
+    }
+
+    /// Process one entry. A directory to be walked is made the next one, and is
+    /// changed when `walk` leaves it.
     fn visit(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) Allocator.Error!bool {
         const st = e.examine(parent, name, level) catch |err| {
             e.problem(.cannot_access, err);
@@ -229,7 +271,7 @@ const Engine = struct {
         if (e.opts.traversal == .logical) {
             // A link back to a directory we are inside of: GNU (via fts) does
             // not descend and does not warn; the entry is changed like a leaf.
-            for (e.ancestors.items) |a| if (a.sameFile(st)) return e.changeOwner(parent, name, st, true);
+            if (e.stack.contains(st)) return e.changeOwner(parent, name, st, true);
         }
 
         const follow_open = switch (e.opts.traversal) {
@@ -237,34 +279,23 @@ const Engine = struct {
             .command_line => level == 0,
             .logical => true,
         };
-        var dir = parent.openDir(e.io, name, .{ .iterate = true, .follow_symlinks = follow_open }) catch |err| {
+        const dir = e.stack.open(parent, name, follow_open) catch |err| {
             e.problem(.cannot_read_directory, err);
             e.describeUnexamined();
             return false;
         };
-        defer dir.close(e.io);
-
-        try e.ancestors.append(e.gpa, st);
-        defer _ = e.ancestors.pop();
-
-        var ok = true;
-        const base_len = e.path.items.len;
-        var it = dir.iterate();
-        while (true) {
-            const entry = (it.next(e.io) catch |err| {
-                e.problem(.read_failed, err);
-                ok = false;
-                break;
-            }) orelse break;
-            // fts appends "/name", avoiding a doubled slash after "dir/".
-            if (e.path.items.len == 0 or e.path.items[e.path.items.len - 1] != '/') try e.path.append(e.gpa, '/');
-            try e.path.appendSlice(e.gpa, entry.name);
-            ok = (if (level == 0) try e.visitListed(dir, entry) else try e.visit(dir, entry.name, level + 1)) and ok;
-            e.path.shrinkRetainingCapacity(base_len);
+        const opened = fsown.statHandle(dir.handle) catch |err| {
+            dir.close(e.io);
+            e.problem(.cannot_read_directory, err);
+            return false;
+        };
+        if (!opened.sameFile(st)) {
+            dir.close(e.io);
+            e.problem(.directory_changed, null);
+            return false;
         }
-
-        // Post-order: the directory itself.
-        return (e.changeOwner(parent, name, st, true)) and ok;
+        try e.stack.push(dir, name, follow_open, st, e.path.items.len, .{ .examined = st });
+        return true;
     }
 
     const IdBuf = struct {
@@ -427,15 +458,14 @@ fn displayPath(path: []const u8) []const u8 {
 /// processed without error. Problems and (with `-c`/`-v`) changes are reported
 /// through `opts.reporter`; the only error is out-of-memory.
 pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) Allocator.Error!bool {
-    var e: Engine = .{ .io = io, .gpa = gpa, .opts = opts, .base = opts.base orelse Io.Dir.cwd() };
+    var e: Engine = .{ .io = io, .gpa = gpa, .opts = opts, .stack = .{ .io = io, .gpa = gpa, .base = opts.base orelse Io.Dir.cwd() } };
     defer e.path.deinit(gpa);
-    defer e.ancestors.deinit(gpa);
+    defer e.stack.deinit();
     var ok = true;
     for (paths) |p| {
         e.path.clearRetainingCapacity();
         try e.path.appendSlice(gpa, displayPath(p));
-        e.ancestors.clearRetainingCapacity();
-        ok = (try e.visit(e.base, p, 0)) and ok;
+        ok = (try e.walk(p)) and ok;
     }
     return ok;
 }

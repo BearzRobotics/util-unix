@@ -92,6 +92,11 @@ run_tree "-R -L with symlink loops"  "$LOOPS" -R -L -v u+rwx t
 # -v is left out here: ours does not yet report the links it skips (PERM-19)
 run_tree "-R -H with symlink loops"  "$LOOPS" -R -H u+rwx t
 TREE_PRE=
+
+printf "\n[ Deep trees ]\n"
+low_fd_tree "-R short of descriptors"              -R -v go-rwx w
+low_fd_tree "-R -L short of descriptors, links"    -R -L -v go-rwx links/0
+very_deep_case "-R 20000 levels" "-perm 0700" -R go-rwx deep
 run_tree "-R missing"              "$R" -R 700 nofile
 run_tree "--recursive"             "$R" --recursive 700 t
 run_tree "-R dangling in tree"     'mkdir t; ln -s nowhere t/dang; touch t/f' -R 700 t

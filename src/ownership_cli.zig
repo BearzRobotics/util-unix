@@ -278,6 +278,7 @@ const Reporter = struct {
             .changing_ownership => cli.warn(ctx, "changing ownership of {f}: {s}", .{ path, cause }),
             .changing_group => cli.warn(ctx, "changing group of {f}: {s}", .{ path, cause }),
             .read_failed => cli.warn(ctx, "error reading directory {f}: {s}", .{ cli.quotef(pr.path), cause }),
+            .directory_changed => cli.warn(ctx, "{f} was replaced during the walk: not changing it", .{path}),
             .dangerous_root => {
                 const same = if (std.mem.eql(u8, pr.path, "/")) "" else " (same as '/')";
                 cli.warn(ctx, "it is dangerous to operate recursively on {f}{s}", .{ path, same });

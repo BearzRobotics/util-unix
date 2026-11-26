@@ -21,6 +21,7 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const fsown = @import("fsown.zig");
+const treewalk = @import("treewalk.zig");
 const selinux = @import("selinux.zig");
 
 pub const Traversal = enum { physical, command_line, logical };
@@ -92,7 +93,12 @@ const Engine = struct {
     gpa: Allocator,
     opts: Options,
     path: std.ArrayList(u8) = .empty,
-    ancestors: std.ArrayList(fsown.Stat) = .empty,
+    /// The directories the walk is inside; each keeps what to change on the
+    /// way out.
+    stack: treewalk.Stack(Pending),
+
+    /// A `Subject` without the handle and name, which the stack supplies.
+    const Pending = struct { follow: bool, identity: ?fsown.Stat };
 
     fn emit(e: *Engine, ev: Event) void {
         e.opts.reporter.on_event(e.opts.reporter.context, ev);
@@ -134,6 +140,51 @@ const Engine = struct {
         return .{ .parent = parent, .name = name, .level = level, .follow = follow, .identity = if (level > 0) fsown.statAt(parent, name, follow) catch null else null };
     }
 
+    /// Change the operand `path` and, with `recurse`, everything under it, a
+    /// directory's contents before the directory.
+    fn walk(e: *Engine, path: []const u8) Allocator.Error!bool {
+        var ok = try e.visit(e.stack.base, path, 0);
+        while (e.stack.depth() > 0) {
+            const top = e.stack.top();
+            e.path.shrinkRetainingCapacity(top.path_len);
+            const dir = e.stack.topDir() catch |err| {
+                e.lost(err);
+                ok = false;
+                e.stack.pop();
+                continue;
+            };
+            if (top.nextEntry()) |entry| {
+                if (e.path.items.len == 0 or e.path.items[e.path.items.len - 1] != '/') try e.path.append(e.gpa, '/');
+                try e.path.appendSlice(e.gpa, entry.name);
+                ok = (try e.visit(dir, entry.name, e.stack.depth())) and ok;
+                continue;
+            }
+            if (top.read_error) |err| {
+                e.problem(.read_failed, err);
+                ok = false;
+            }
+            if (e.stack.parentDir()) |parent| {
+                ok = e.change(.{
+                    .parent = parent,
+                    .name = top.name,
+                    .level = e.stack.depth() - 1,
+                    .follow = top.data.follow,
+                    .identity = top.data.identity,
+                }) and ok;
+            } else |err| {
+                e.lost(err);
+                ok = false;
+            }
+            e.stack.pop();
+        }
+        return ok;
+    }
+
+    /// A directory the walk had to open again is gone.
+    fn lost(e: *Engine, err: anyerror) void {
+        if (err == error.DirectoryChanged) e.problem(.file_changed, null) else e.problem(.cannot_read_directory, err);
+    }
+
     /// `name` is relative to `parent`; `e.path` is the same entry for display.
     fn visit(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) Allocator.Error!bool {
         const target = e.subject(parent, name, level);
@@ -150,7 +201,7 @@ const Engine = struct {
             }
         }
         if (e.opts.traversal == .logical) {
-            for (e.ancestors.items) |a| if (a.sameFile(st)) return e.change(target);
+            if (e.stack.contains(st)) return e.change(target);
         }
 
         const follow_open = switch (e.opts.traversal) {
@@ -158,38 +209,22 @@ const Engine = struct {
             .command_line => level == 0,
             .logical => true,
         };
-        var dir = parent.openDir(e.io, name, .{ .iterate = true, .follow_symlinks = follow_open }) catch |err| {
+        const dir = e.stack.open(parent, name, follow_open) catch |err| {
             e.problem(.cannot_read_directory, err);
             return false;
         };
-        defer dir.close(e.io);
         const opened = fsown.statHandle(dir.handle) catch |err| {
+            dir.close(e.io);
             e.problem(.cannot_read_directory, err);
             return false;
         };
         if (!opened.sameFile(st)) {
+            dir.close(e.io);
             e.problem(.file_changed, null);
             return false;
         }
-
-        try e.ancestors.append(e.gpa, st);
-        defer _ = e.ancestors.pop();
-
-        var ok = true;
-        const base_len = e.path.items.len;
-        var it = dir.iterate();
-        while (true) {
-            const entry = (it.next(e.io) catch |err| {
-                e.problem(.read_failed, err);
-                ok = false;
-                break;
-            }) orelse break;
-            if (e.path.items.len == 0 or e.path.items[e.path.items.len - 1] != '/') try e.path.append(e.gpa, '/');
-            try e.path.appendSlice(e.gpa, entry.name);
-            ok = (try e.visit(dir, entry.name, level + 1)) and ok;
-            e.path.shrinkRetainingCapacity(base_len);
-        }
-        return e.change(target) and ok;
+        try e.stack.push(dir, name, follow_open, st, e.path.items.len, .{ .follow = target.follow, .identity = target.identity });
+        return true;
     }
 
     /// Change the context of the current entry.
@@ -282,15 +317,14 @@ fn displayPath(path: []const u8) []const u8 {
 /// Change the context of each of `paths`. True when every file was processed
 /// without a problem; the only error is out-of-memory.
 pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) Allocator.Error!bool {
-    var e: Engine = .{ .io = io, .gpa = gpa, .opts = opts };
+    var e: Engine = .{ .io = io, .gpa = gpa, .opts = opts, .stack = .{ .io = io, .gpa = gpa, .base = Io.Dir.cwd() } };
     defer e.path.deinit(gpa);
-    defer e.ancestors.deinit(gpa);
+    defer e.stack.deinit();
     var ok = true;
     for (paths) |p| {
         e.path.clearRetainingCapacity();
         try e.path.appendSlice(gpa, displayPath(p));
-        e.ancestors.clearRetainingCapacity();
-        ok = (try e.visit(Io.Dir.cwd(), p, 0)) and ok;
+        ok = (try e.walk(p)) and ok;
     }
     return ok;
 }

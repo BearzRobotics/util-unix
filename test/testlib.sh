@@ -180,6 +180,47 @@ run_cmp() {
 }
 TMPDIR_CMP="$(mktemp -d)/cmp"
 SCRATCH="$(dirname "$TMPDIR_CMP")"
+
+# Trees that a walk can only finish if it does not recurse on its own stack or
+# hold a descriptor for every level.
+# WIDE_DEEP: 30 levels with a file and a sibling directory at each, and a chain
+# of links for -L, so that a walk short of descriptors has to find its way back
+# up many times.
+WIDE_DEEP='mkdir w links; (cd w && i=0; while [ $i -lt 30 ]; do touch f; mkdir side n; touch side/g; cd n; i=$((i+1)); done)
+    i=0; while [ $i -lt 30 ]; do mkdir links/$i; touch links/$i/h; ln -s ../$((i+1)) links/$i/next; i=$((i+1)); done; mkdir links/30'
+
+# low_fd_tree DESC ARGS...: run_tree on WIDE_DEEP with 20 descriptors (the test
+# shell itself needs some above 9). GNU must succeed, so that two commands that
+# never ran cannot compare equal.
+low_fd_tree() {
+    lf_desc=$1; shift
+    TREE_PRE='ulimit -n 20'
+    run_tree "$lf_desc" "$WIDE_DEEP" "$@"
+    TREE_PRE=
+    lf_base="$(dirname "$TMPDIR_CMP")/tree"
+    [ "$(cat "$lf_base/g.rc" 2>/dev/null)" = 0 ] || { FAIL=$((FAIL + 1)); printf "FAIL %s (the reference did not succeed)\n" "$lf_desc"; }
+}
+
+# very_deep_case DESC PREDICATE ARGS...: our $UTIL runs ARGS on "deep", a
+# directory 20000 levels down, with 64 descriptors and an 8 MiB stack. It must
+# exit 0, and every one of the directories must then satisfy find's PREDICATE.
+very_deep_case() {
+    vd_desc=$1; vd_pred=$2; shift 2
+    vd="$SCRATCH/verydeep"; rm -rf "$vd"; mkdir -p "$vd"
+    (cd "$vd" && python3 -I -c 'import os
+os.mkdir("deep"); os.chdir("deep")
+for i in range(20000):
+    os.mkdir("a"); os.chdir("a")')
+    (cd "$vd" && ulimit -s 8192 && ulimit -c 0 && ulimit -n 64 && ours "$@" > /dev/null 2> ../verydeep.err)
+    vd_rc=$?
+    vd_n=$(cd "$vd" && find deep $vd_pred -printf 'x\n' | wc -l)
+    if [ "$vd_rc" -eq 0 ] && [ "$vd_n" -eq 20001 ]; then
+        PASS=$((PASS + 1)); printf "PASS %s\n" "$vd_desc"
+    else
+        FAIL=$((FAIL + 1)); printf "FAIL %s (rc=%s, %s of 20001 as expected) %s\n" "$vd_desc" "$vd_rc" "$vd_n" "$(head -c 300 "$SCRATCH/verydeep.err")"
+    fi
+    rm -rf "$vd"
+}
 trap 'chmod -R u+rwx "$(dirname "$TMPDIR_CMP")" 2>/dev/null; rm -rf "$(dirname "$TMPDIR_CMP")"' EXIT
 
 # run_tree DESC SETUP_CMD ARGS...   (stdin: file $TREE_STDIN, default /dev/null;

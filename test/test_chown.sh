@@ -99,5 +99,14 @@ g "-R unreadable dir"                    -R -v "$U:$G2" noread
 root_sandboxed "$SCRATCH" t "-R --preserve-root /"                 -R --preserve-root "$U" /
 t "-R failure inside tree (EPERM)"       -R -v root d
 
+printf "\n[ Deep trees ]\n"
+# a second group where there is one, so that an unchanged entry shows
+DG=${G2:-$G1}
+low_fd_tree "-R short of descriptors"              -R -v ":$DG" w
+low_fd_tree "-R -L short of descriptors, links"    -R -L -v ":$DG" links/0
+low_fd_tree "-R fast path short of descriptors"    -R ":$DG" w
+very_deep_case "-R 20000 levels (fast path)" "-group $DG" -R ":$DG" deep
+very_deep_case "-R -c 20000 levels" "-group $DG" -R -c ":$DG" deep
+
 print_summary
 [ "$FAIL" -eq 0 ]
