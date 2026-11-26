@@ -56,12 +56,14 @@ done
 [ -x "$OURS" ] || { echo "no sh at $OURS (build with zig build -Doptimize=ReleaseSafe -Dcommands=sh -Dmode=standalone)"; exit 1; }
 WANT="$*"
 want_corpus() { [ -z "$WANT" ] && return 0; case " $WANT " in *" $1 "*) return 0;; esac; return 1; }
+RAN=0 # corpora actually run
 
 # ---- yash ------------------------------------------------------------------
 corpus_yash() {
     d="$CORPORA/yash/tests"
     if [ ! -d "$d" ]; then echo "SKIP yash: not downloaded (tools/fetch-sh-corpora.sh)"; return; fi
     if [ -z "$RUNNER_SH" ]; then echo "SKIP yash: needs bash, yash or busybox to run the runner"; return; fi
+    RAN=$((RAN + 1))
     mkdir -p "$TMP/yash/ours" "$TMP/yash/dash"
     # The signal-disposition files (sig*-p) must start with every signal at its default
     # (yash starts its runner through its own compiled `resetsig`): test/sh_corpora/resetsig.c
@@ -125,6 +127,7 @@ RUN1
 corpus_freebsd() {
     d="$CORPORA/freebsd/bin/sh/tests"
     if [ ! -d "$d" ]; then echo "SKIP freebsd: not downloaded (tools/fetch-sh-corpora.sh)"; return; fi
+    RAN=$((RAN + 1))
     pass=0; fail=0; bug=0; oth=0
     find "$d" -type f | sort | while read -r f; do
         case "$f" in *.stdout|*.stderr|*/Makefile*|*/functional_test.sh) continue;; esac
@@ -162,6 +165,7 @@ corpus_oils() {
     d="$CORPORA/oils/spec"
     if [ ! -d "$d" ]; then echo "SKIP oils: not downloaded (tools/fetch-sh-corpora.sh)"; return; fi
     command -v python3 > /dev/null 2>&1 || { echo "SKIP oils: needs python3"; return; }
+    RAN=$((RAN + 1))
     python3 -I "$HERE/sh_corpora/run_oils.py" "$d" "$OURS" --jobs "$JOBS" --sandbox "$SANDBOX" --out "$TMP/oils.out" > /dev/null 2>&1
     grep -v '^SUMMARY' "$TMP/oils.out" | awk -F'\t' '{ c = ($1 == "BASH") ? "OTHER" : $1; printf "%s\toils\t%s\t%s\n", c, $2, $3 }' >> "$REPORT"
     echo "oils: $(grep '^SUMMARY' "$TMP/oils.out" | cut -f2,3 | tr '\t' ' ') (BUG = ours differs from the dash column that dash meets; DASH = ours equals dash)"
@@ -192,5 +196,8 @@ if [ -f "$KNOWN" ]; then
     [ "$fixed" -gt 0 ] && echo "note: $fixed recorded bugs no longer fail; refresh the list"
 fi
 [ "$REPORT" != "$TMP/report.txt" ] || true
-[ "$FAIL" -eq 0 ] && echo "All corpus checks passed (no new bugs)" || echo "corpus check failed"
+# run_all_tests.sh counts PASS and FAIL lines: this verdict is the suite's result
+if [ "$FAIL" -ne 0 ]; then echo "FAIL corpus check"
+elif [ "$RAN" -gt 0 ]; then echo "PASS corpus check: no new bugs in $RAN corpora"
+fi
 [ "$FAIL" -eq 0 ]
