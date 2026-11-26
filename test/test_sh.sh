@@ -700,8 +700,8 @@ E
 
 # ---- getopts when the argument list changes (SHX-03) ----
 c "getopts: operands change inside a group" 'getopts ab o -ab; echo "$o"; getopts ab o -x 2>/dev/null; echo "$o $?"' Pe "dash keeps its place in the old argument; bash and ours start the new one."
-c "getopts: function call changes the arguments" 'f() { getopts ab o; echo "$o"; }; f -ab; f -a; echo done'
-c "getopts: shift inside a group" 'set -- -ab -b; getopts ab o; echo "$o"; shift 2; getopts ab o; echo "$o $?"; echo done' e
+c "getopts: function call changes the arguments" 'f() { getopts ab o; echo "$o"; }; f -ab; f -a; echo end'
+c "getopts: shift inside a group" 'set -- -ab -b; getopts ab o; echo "$o"; shift 2; getopts ab o; echo "$o $?"; echo end' e
 c "getopts: new argument is not an option" 'getopts abc o -abc; getopts abc o word; echo "$o $?"; getopts abc o -- ; echo "$o $?"' Pe "dash reads on inside the new word; yash and ours see that it is no option."
 
 # ---- a temporary PATH does not stay remembered (SHX-01) ----
@@ -713,7 +713,7 @@ c "PATH changed inside a function called with a temporary PATH" "$EVIL"'f() { PA
 
 # ---- a script without #! starts as a new shell (SHX-04) ----
 NOBANG='nobang() { cat > "$1"; chmod +x "$1"; }; '
-c "script without #!: set -e works though the caller ignores errors" "$NOBANG"'printf "set -e\nfalse\necho SHOULD-NOT-PRINT\n" | nobang s; if ./s; then echo then; else echo else; fi; ./s || echo "or $?"; ! ./s; echo $?'
+c "script without #!: set -e works though the caller ignores errors" "$NOBANG"'printf "set -e\nfalse\necho SHOULD-NOT-PRINT\n" | nobang s; if ./s; then echo yes; else echo no; fi; ./s || echo "or $?"; ! ./s; echo $?'
 c "script without #!: loop depth is its own" "$NOBANG"'echo "break; echo after-break" | nobang s; for i in 1 2; do ./s 2>/dev/null; echo $i; done' e
 c "script without #!: variables, exports and OPTIND" "$NOBANG"'echo "echo \$# \${OPTIND-unset} \${V-unset} \${U-unset} \$E" | nobang s; U=1; export E=e; V=v ./s a b; getopts a o -a; ./s; (exec ./s z)'
 c "script without #!: no functions or aliases" "$NOBANG"'echo "f 2>/dev/null; echo \$?" | nobang s; f() { echo f; }; alias g=echo; ./s' e
