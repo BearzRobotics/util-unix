@@ -302,8 +302,9 @@ fn externalEdit(sh: *Shell, a: Allocator, text: []const u8) ?[]const u8 {
     sys.close(fd);
     const ed = sh.getVar("VISUAL") orelse sh.getVar("EDITOR") orelse "vi";
     const cmd = std.fmt.allocPrint(a, "{s} '{s}'", .{ ed, path }) catch return null;
-    _ = exec.runSource(sh, cmd, .{}) catch return null;
-    const out = exec.readFile(a, path);
+    // only what a successful editor leaves is run (POSIX fc and vi `v`)
+    const st = exec.runSource(sh, cmd, .{}) catch 2;
+    const out = if (st == 0) exec.readFile(a, path) else null;
     var buf: [4097]u8 = undefined;
     if (path.len < 4096) {
         @memcpy(buf[0..path.len], path);
@@ -349,6 +350,10 @@ pub fn loop(s: *Session) u8 {
                         text.clearRetainingCapacity();
                         text.appendSlice(a, e) catch return 2;
                         sh.errRaw(e);
+                    } else {
+                        // nothing runs, not even earlier lines of the command
+                        text.clearRetainingCapacity();
+                        first = true;
                     }
                     break;
                 },

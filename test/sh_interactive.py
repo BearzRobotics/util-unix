@@ -138,7 +138,6 @@ def emacs_cases():
     e("end of line key at end", "echo a" + END + END + "b", "ab")
     e("C-a C-k clears", "xx" + C("A") + C("K") + "echo ok", "ok")
     e("backspace at start", "\x7f\x7fecho ok", "ok")
-    # `#` submits the line itself: another newline would be a second, empty line
     e("M-# comments the line", "echo hi" + M("#"), "", enter="")
     ed.close()
     # history and search (fresh sessions with a known history)
@@ -415,6 +414,13 @@ def input_and_history_cases():
                        ("a pending operator", ["raw:echo no$((1))run", "raw:\x1bd", "^C"])):
         has("vi ^C cancels the line from " + name, keys + ["raw:\r", ALIVE], ["al1ve"], ["no1run"], argv=vi)
     leaves("vi ^D on an empty line in command mode leaves", ["set -o vi\r", "\x1b", "\x04"], 0)
+
+    # SHI-07: a failed edit runs nothing
+    for editor in ("false", "no-such-editor-here"):
+        d = tempfile.mkdtemp(dir=TMP)
+        mark = os.path.join(d, "EXECUTED")
+        has("vi v with a failing editor runs nothing (%s)" % editor, ["raw:touch %s" % mark, "raw:\x1b", "raw:v", ("sleep", 0.5), ALIVE], ["al1ve"], argv=vi, env={"EDITOR": editor, "VISUAL": editor})
+        ok("vi v with a failing editor leaves no trace (%s)" % editor, not os.path.exists(mark))
 
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
