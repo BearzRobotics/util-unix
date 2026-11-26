@@ -1038,6 +1038,9 @@ pub const Editor = struct {
         const a1 = self.wordBack(a2);
         if (a1 == a2 or a2 >= b2) return;
         const e1 = self.wordFwd(a1);
+        // with nothing but blanks or punctuation before the word, `a1` leads
+        // forward into that same word: there is nothing to swap it with
+        if (e1 > a2) return;
         const w1 = self.gpa.dupe(u8, s[a1..e1]) catch return;
         defer self.gpa.free(w1);
         const mid = self.gpa.dupe(u8, s[e1..a2]) catch return;
@@ -2381,6 +2384,16 @@ test "vi: an alias macro that runs itself stops" {
     }.get;
     ed.begin("$ ", &.{});
     try std.testing.expectEqual(Status.more, ed.feed("abcdef\x1b@a@b"));
+}
+
+test "emacs: M-t with no word before the first one does nothing" {
+    for ([_][]const u8{ " a\x1bt", "  abc\x1bt", ";;x\x1bt", " \x1bt", "\x1bt" }) |keys| {
+        var t: [256]u8 = undefined;
+        var n: usize = 0;
+        var c: usize = 0;
+        _ = try drive(.emacs, keys, &.{}, &t, &n, &c);
+        try std.testing.expectEqualStrings(keys[0 .. keys.len - 2], t[0..n]);
+    }
 }
 
 test "emacs: insertion and cursor movement" {
