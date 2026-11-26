@@ -558,16 +558,15 @@ pub fn enable(sh: *Shell, need_tty: bool) bool {
         tty = sys.dupAbove(fd, 10) catch -1;
         break;
     };
+    const orig_pgrp = sys.getpgrp();
+    if (tty >= 0 and !awaitForeground(sh, tty)) {
+        sys.close(tty);
+        tty = -1;
+    }
     if (tty < 0 and need_tty) return false;
     if (tty >= 0) {
         sys.setCloexec(tty, true);
-        // A shell in the background stops itself until it is foreground.
-        var tries: u8 = 0;
-        while (tries < 8) : (tries += 1) {
-            const fg = sys.tcgetpgrp(tty) catch break;
-            if (fg == sys.getpgrp()) break;
-            sys.kill(0, 21) catch break;
-        }
+        sh.orig_pgrp = orig_pgrp;
         sh.ignoreJobSignals();
         sys.setpgid(0, 0) catch {};
         sh.shell_pgid = sys.getpgrp();
@@ -581,13 +580,48 @@ pub fn enable(sh: *Shell, need_tty: bool) bool {
     return true;
 }
 
+/// Whether this shell may take the terminal: only from the foreground. An
+/// interactive shell in the background stops itself until it is brought there; a
+/// script does without the terminal.
+fn awaitForeground(sh: *Shell, tty: i32) bool {
+    var tries: u32 = 0;
+    while (true) {
+        const fg = sys.tcgetpgrp(tty) catch return false;
+        if (fg == sys.getpgrp()) return true;
+        // `tries`: the system does not stop an orphaned process group
+        if (!sh.flags.interactive or tries == 100) return false;
+        tries += 1;
+        // the signal must be able to stop us, whatever was inherited
+        const before = sys.getSignal(21);
+        _ = sys.setSignal(21, .default);
+        sys.kill(0, 21) catch {};
+        _ = sys.setSignal(21, before);
+    }
+}
+
+/// Turn job control off (`set +m`, or the shell is leaving), giving the
+/// terminal back to whoever had it.
 pub fn disable(sh: *Shell) void {
     if (!sh.jc) return;
     sh.jc = false;
-    if (sh.tty_fd >= 0) {
-        sys.close(sh.tty_fd);
-        sh.tty_fd = -1;
+    if (sh.tty_fd < 0) return;
+    // a subshell only forgets: the terminal is its parent's business
+    if (!sh.in_subshell) {
+        // the shell may have taken it from another group, which waits for it
+        if (sh.orig_pgrp != sh.shell_pgid) {
+            if (sys.setpgid(0, sh.orig_pgrp)) |_| {
+                const fg = sys.tcgetpgrp(sh.tty_fd) catch 0;
+                if (fg == sh.shell_pgid) sys.tcsetpgrp(sh.tty_fd, sh.orig_pgrp) catch {};
+                sh.shell_pgid = sh.orig_pgrp;
+            } else |_| {}
+        }
+        if (!sh.flags.interactive) for ([_]u8{ 20, 21, 22 }) |sig| {
+            const user_ignored = if (sh.traps[sig]) |t| t.len == 0 else false;
+            if (!sh.inherited_ignore[sig] and !user_ignored) _ = sys.setSignal(sig, .default);
+        };
     }
+    sys.close(sh.tty_fd);
+    sh.tty_fd = -1;
 }
 
 /// At exit: tell stopped jobs to hang up (they would never see the terminal

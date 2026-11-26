@@ -454,6 +454,16 @@ def input_and_history_cases():
     open(os.path.join(os.fsencode(d), b"caf\xe9"), "wb").close()
     has("completing a file name that is not UTF-8", ["raw:ls caf\t", "raw:\r", ALIVE], ["al1ve"], cwd=d)
 
+    # SHX-05: `set -m` in a script gives the terminal back
+    dash = "/usr/bin/dash"
+    for name, inner in (("at exit", "set -m; :"), ("at set +m", "set -m; set +m"), ("after a foreground job", "set -m; true; sleep 0")):
+        with Session([dash, "-c", "%s -c '%s'; read x; echo parent-got-$x-$((1+1))" % (SH, inner)]) as s:
+            s.settle(.8); s.send("hello\r")
+            ok("set -m in a script gives the terminal back " + name, s.expect("parent-got-hello-2", 6) is not None, s.take())
+
+    # JOB-05: an interactive shell started in the background waits its turn
+    has("sh -i in the background does not take the terminal", ["%s -i &" % SH, ("sleep", 1), ALIVE, "jobs", "kill -KILL %1", ALIVE], ["al1ve", "Stopped"])
+
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
         d = tempfile.mkdtemp(dir=TMP)

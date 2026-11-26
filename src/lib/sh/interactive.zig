@@ -208,12 +208,14 @@ pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
     if (!sh.inherited_ignore[3]) _ = sys.setSignal(3, .ignore);
     if (!sh.inherited_ignore[15]) _ = sys.setSignal(15, .ignore);
     _ = sys.setSignal(sys.SIGWINCH, .catch_flag);
-    sh.ignoreJobSignals();
     sh.flags.monitor = true;
+    // before the job signals are ignored: a shell started in the background
+    // has to be stoppable until it is brought to the foreground
     if (!jobs.enable(sh, true)) {
         sh.diagBareK(.no_job_control, null, "can't access tty; job control turned off");
         sh.flags.monitor = false;
     }
+    sh.ignoreJobSignals();
     if (!sh.flags.vi and !sh.flags.emacs) sh.flags.emacs = true;
     const term_env = sh.getVar("TERM") orelse "";
     s.use_editor = sys.isatty(0) and sys.isatty(2) and !std.mem.eql(u8, term_env, "dumb");

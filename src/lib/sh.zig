@@ -200,6 +200,7 @@ test "fc re-runs its own copy of a history line" {
     // the entry it came from (the testing allocator overwrites freed memory)
     for ([_][]const u8{ "see first-entry", ": b", ": c" }) |line| try h.add(line);
     s.history = &h;
-    _ = try s.runString("fc -s 1");
+    // `fc -s` echoes the command on descriptor 2, which the test runner shows
+    _ = try s.runString("exec 3>&2 2>/dev/null; fc -s 1; exec 2>&3 3>&-");
     try std.testing.expectEqualStrings("first-entry", seen.text[0..seen.len]);
 }

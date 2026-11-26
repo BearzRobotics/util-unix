@@ -147,6 +147,8 @@ pub const Shell = struct {
     /// Controlling terminal descriptor (>= 10, close-on-exec) or -1.
     tty_fd: i32 = -1,
     shell_pgid: i32 = 0,
+    /// The shell's process group before job control gave it one of its own.
+    orig_pgrp: i32 = 0,
     tty_modes: ?sys.Termios = null,
     /// `exit` was requested explicitly (an interactive shell survives other
     /// errors that end a script).
@@ -563,6 +565,7 @@ pub const Shell = struct {
     /// Run the EXIT trap and return the final exit status.
     pub fn finish(self: *Shell) u8 {
         exec.runExitTrap(self);
+        jobs_mod.disable(self);
         return self.status;
     }
 };
