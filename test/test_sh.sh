@@ -718,7 +718,7 @@ c "getopts OPTIND reset" 'set -- -a; getopts a o; OPTIND=1; getopts a o; echo $o
 c "cd and pwd" 'mkdir d; cd d; pwd | sed "s#.*/##"' B
 c "cd dot dot" 'mkdir -p a/b; cd a/b; cd ../..; pwd | sed "s#.*/##" | grep -c .' B
 c "cd empty operand is a no-op" 'mkdir d; cd d; cd ""; echo $?; pwd | sed "s#.*/##"' B
-c "cd with a read-only OLDPWD fails" 'mkdir d; readonly OLDPWD; cd d 2>/dev/null; echo $?; pwd | sed "s#.*/##" | grep -c d' B
+c "cd with a read-only OLDPWD fails" 'mkdir d; p=$(pwd); readonly OLDPWD; cd d 2>/dev/null; echo $?; if [ "$(pwd)" = "$p" ]; then echo stayed; else echo moved; fi' B
 c "glob directory order uses the slash" 'mkdir a a.b a-b; touch a/f a.b/f a-b/f; echo */f; echo */' B
 c "glob dot-star slash order" 'mkdir .h; echo .*/' B
 c "cd dash prints" 'mkdir d; cd d; cd - >/dev/null; echo $?' B
@@ -727,7 +727,7 @@ c "cd file" 'touch f; cd f; echo "rc=$?"' e
 c "cd sets PWD" 'mkdir d; cd d; case $PWD in */d) echo ok;; esac' B
 c "cd sets OLDPWD" 'p=$PWD; mkdir d; cd d; [ "$OLDPWD" = "$p" ] && echo ok' B
 c "cd HOME" 'HOME=/; cd; pwd' B
-c "cd logical symlink" 'mkdir d; ln -s d l; cd l; case $PWD in */l) echo logical;; esac; pwd -P | grep -c d' B
+c "cd logical symlink" 'mkdir d; ln -s d l; cd l; case $PWD in */l) echo logical;; esac; pwd -P | sed "s#.*/##"' B
 c "cd -P physical" 'mkdir d; ln -s d l; cd -P l; case $PWD in */d) echo physical;; esac' B
 c "pwd -L -P" 'mkdir d; ln -s d l; cd l; pwd -L | sed "s#.*/##"; pwd -P | sed "s#.*/##"' B
 c "cd CDPATH" 'mkdir -p base/sub; CDPATH=base; cd sub > /dev/null; pwd | sed "s#.*/##"' e
