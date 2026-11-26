@@ -1105,8 +1105,8 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
         }
         s.redirs = &.{};
     }
-    if (args.items.len > 0) {
-        for (s.assigns, vals) |asg, *v| v.* = expand.assignValue(sh, a, asg.value) catch |e| return xerr(sh, e);
+    if (args.items.len > 0 and s.assigns.len > 0) {
+        expandPrefix(sh, a, s.assigns, vals) catch |e| return xerr(sh, e);
     }
     if (args.items.len > 0) {
         const nm = args.items[0];
@@ -1201,6 +1201,53 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
         if (sh.flow != .none) return sh.status;
     }
     return st;
+}
+
+/// Expand the assignments in front of a command name. POSIX 2.9.1 (Issue 8):
+/// each is made before the next is expanded, so a later one sees an earlier
+/// one. They are made in a scope that ends here; the caller then applies `vals`
+/// in the way the kind of command calls for.
+fn expandPrefix(sh: *Shell, a: Allocator, assigns: []const ast.Assign, vals: [][]const u8) expand.Error!void {
+    var temps: std.ArrayList(shell.Saved) = .empty;
+    defer {
+        var i = temps.items.len;
+        while (i > 0) {
+            i -= 1;
+            restoreVar(sh, temps.items[i]);
+        }
+        temps.deinit(sh.gpa);
+    }
+    for (assigns, vals) |asg, *v| {
+        v.* = try expand.assignValue(sh, a, asg.value);
+        // the caller reports an assignment to a read-only variable
+        if (sh.vars.get(asg.name)) |ov| if (ov.readonly) continue;
+        try temps.ensureUnusedCapacity(sh.gpa, 1);
+        temps.appendAssumeCapacity(try saveVar(sh, asg.name));
+        try sh.setVarRaw(asg.name, v.*);
+        sh.vars.getPtr(asg.name).?.exported = true;
+    }
+    // an expansion may assign again to an earlier name: `a=1 b=$((a=5)) cmd`
+    for (assigns, vals, 0..) |asg, *v, i| {
+        const last = for (assigns[i + 1 ..]) |later| {
+            if (std.mem.eql(u8, later.name, asg.name)) break false;
+        } else true;
+        if (!last) continue;
+        const now = sh.getVar(asg.name) orelse continue;
+        if (sh.vars.get(asg.name).?.readonly) continue;
+        v.* = try a.dupe(u8, now);
+    }
+}
+
+/// What `restoreVar` needs to put variable `name` back as it is now.
+fn saveVar(sh: *Shell, name: []const u8) Allocator.Error!shell.Saved {
+    var old: ?shell.Var = null;
+    if (sh.vars.get(name)) |ov| old = .{
+        .value = if (ov.value) |x| try sh.gpa.dupe(u8, x) else null,
+        .exported = ov.exported,
+        .readonly = ov.readonly,
+    };
+    errdefer if (old) |o| if (o.value) |x| sh.gpa.free(x);
+    return .{ .name = try sh.gpa.dupe(u8, name), .old = old };
 }
 
 /// A word that reads `name=...` (the name literal and unquoted).

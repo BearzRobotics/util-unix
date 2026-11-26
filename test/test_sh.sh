@@ -548,6 +548,19 @@ c "inherited ignored CHLD keeps statuses" "$IGN_CHLD sh -c 'false; echo \$?; sh 
 c "inherited ignored CHLD keeps statuses with set -m" "$IGN_CHLD sh -c 'set -m; false; echo \$?; false && echo no; sh -c \"exit 3\"; echo \$?' 2>/dev/null" e
 c "inherited ignored CHLD reaches programs" "$IGN_CHLD sh -c 'grep SigIgn /proc/self/status; (grep SigIgn /proc/self/status; :); exec grep SigIgn /proc/self/status' | cut -c 20" eP "POSIX leaves a signal ignored on entry ignored in programs run; dash resets SIGCHLD, bash, busybox and yash pass it on."
 
+# ---- assignments before a command see one another (CONF-01) ----
+c "prefix assignment sees earlier, program" 'unset d; d=/tmp/x l=$d/log sh -c "echo \$l"; echo "${d-unset}"'
+c "prefix assignment sees new value" 'a=old; a=new b=$a env | grep "^b="; echo $a'
+c "prefix assignment sees earlier, command substitution" 'unset a; a=1 b=$(printenv a || echo none) env | grep "^b="'
+c "prefix assignment sees earlier, function" 'f() { echo "$b $a"; }; a=old; a=new b=$a f; echo "$a ${b-unset}"'
+c "prefix assignment sees earlier, regular builtin" 'a=old; a=new b=$a command eval "echo \$b"; echo "$a ${b-unset}"'
+c "prefix assignment sees earlier, special builtin" 'a=old; a=new b=$a :; echo "$a $b"'
+c "prefix assignment sees earlier, eval" 'a=new b=$a eval "echo \$b"'
+c "prefix assignment sees earlier arithmetic" 'n=1; n=$((n+1)) m=$n env | grep "^[mn]=" | sort; echo $n'
+c "prefix assignment colon-default sees earlier" 'a=; a=1 b=${a:-empty} env | grep "^b="'
+c "prefix assignment changed by a later expansion" 'unset a; a=1 b=$((a=5)) c=$a env | grep "^[abc]=" | sort; echo "${a-unset}"'
+c "prefix assignment sees earlier under set -u" 'set -u; unset d; d=/new f=$d/file env | grep "^f="'
+
 # ---- eval / dot / exec / command / type ----
 c "eval simple" 'eval echo hi' B
 c "eval concatenates args" 'eval "echo" "a" "b"' B
