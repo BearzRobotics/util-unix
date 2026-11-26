@@ -2,8 +2,7 @@
 
 Releases are built by `.github/workflows/release.yml` when a tag `v*` is pushed. It first
 runs every `ci.yml` job (unit tests, behavioural suites, build modes, cross builds) on the
-tagged commit and builds nothing unless all pass; the aarch64 binaries are also run under
-qemu-user. The workflow then installs Zig 0.17.1 (pinned), calls `scripts/package.sh` for each target, writes
+tagged commit and builds nothing unless all pass. The workflow then installs Zig 0.17.1 (pinned), calls `scripts/package.sh` for each target, writes
 `SHA256SUMS`, takes the release notes from the `CHANGELOG.md` section of the version and
 creates the GitHub release. Running the workflow by hand (workflow_dispatch) is a dry run:
 it builds the archives as workflow artifacts and publishes nothing.
@@ -13,14 +12,13 @@ it builds the archives as workflow artifacts and publishes nothing.
 | File | Target |
 |---|---|
 | `util-unix-VERSION-linux-x86_64.tar.gz` | x86_64-linux-musl (static) |
-| `util-unix-VERSION-linux-aarch64.tar.gz` | aarch64-linux-musl (static) |
-| `SHA256SUMS` | checksums of the above |
+| `SHA256SUMS` | checksum of the above |
 
 Each archive holds one directory with `bin/` (all standalone commands and the `util-unix`
 multicall binary), `share/man/man1/` (the manual pages), `LICENSE`, `README.md` and
 `CHANGELOG.md`. Built with `-Doptimize=ReleaseSafe -Dstrip=true`.
 
-Other targets (macOS, other architectures) build from source; no prebuilt macOS binaries are published
+x86_64 is the only prebuilt package. Other targets (Linux aarch64, macOS, other architectures) build from source; no prebuilt macOS binaries are published
 because no maintainer owns a Mac, and they will be offered once a volunteer with a Mac steps up to
 test and maintain that platform. `ci.yml` cross-compiles Linux and macOS (compile check only; nothing is run).
 
@@ -37,8 +35,7 @@ test and maintain that platform. `ci.yml` cross-compiles Linux and macOS (compil
    `scripts/release-notes.sh X.Y.Z`.
 6. Update README, and the docs if platform status changed.
 7. Test packaging locally: `scripts/package.sh x86_64-linux-musl linux-x86_64 dist` (runs the
-   binary), then unpack and try it. Other archive: `scripts/package.sh aarch64-linux-musl linux-aarch64 dist`
-   (built, not run).
+   binary), then unpack and try it.
 8. Commit, merge to `main`, then tag and push: `git tag -a vX.Y.Z -m "util-unix X.Y.Z"` and
    `git push origin main vX.Y.Z`. The workflow refuses a tag that differs from `build.zig.zon`.
 9. Watch the workflow; check the release page, `SHA256SUMS`, and download one Linux archive

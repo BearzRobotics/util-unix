@@ -32,16 +32,17 @@ manual pages (Markdown, dkman layout, `docs/manpages/`) go to `share/man/man1/NA
 
 ## Download
 
-Prebuilt archives are attached to each [release](https://github.com/BearzRobotics/util-unix/releases):
-`util-unix-VERSION-linux-x86_64.tar.gz` and `util-unix-VERSION-linux-aarch64.tar.gz` (static musl), with
-`SHA256SUMS`. Each holds `bin/` (every command plus the `util-unix` multicall binary) and
-`share/man/man1/`. Other targets build from source with `zig build -Dtarget=...`.
+A prebuilt Linux x86_64 archive is attached to each [release](https://github.com/BearzRobotics/util-unix/releases):
+`util-unix-VERSION-linux-x86_64.tar.gz` (static musl), with `SHA256SUMS`. It holds `bin/` (every command
+plus the `util-unix` multicall binary) and `share/man/man1/`. Other targets, Linux aarch64 included,
+build from source with `zig build -Dtarget=...`.
 
 ## Supported platforms
 
 | Platform | Prebuilt download | Status |
 |---|---|---|
-| Linux x86_64, aarch64 | yes (static musl) | reference platform, tested |
+| Linux x86_64 | yes (static musl) | reference platform, tested |
+| Linux aarch64 | no | compile-checked in CI only; builds from source |
 | macOS x86_64, aarch64 | no | compile-checked in CI only; builds from source |
 | Windows | no | not a target (these are Unix commands) |
 
