@@ -101,6 +101,18 @@ const Builder = struct {
     }
 };
 
+/// An alias whose text is being read: it is not expanded again before offset
+/// `end` of the source (POSIX 2.3.1).
+pub const ActiveAlias = struct { name: []const u8, end: usize };
+
+/// Alias text a parser had not used when its command ended. A caller that makes
+/// a new parser for the next command (a script read as a stream) hands it on.
+pub const Carry = struct {
+    text: []const u8 = "",
+    active: []const ActiveAlias = &.{},
+    blank_marks: []const usize = &.{},
+};
+
 pub const Parser = struct {
     a: Allocator,
     src: []const u8,
@@ -119,7 +131,9 @@ pub const Parser = struct {
     /// Last alias expanded; stops direct self-reference.
     /// Aliases being read: (name, end offset of its text in `src`); an alias
     /// is not expanded again inside its own text (POSIX 2.3.1).
-    active: std.ArrayList(struct { name: []const u8, end: usize }) = .empty,
+    active: std.ArrayList(ActiveAlias) = .empty,
+    /// `src[0..splice_end]` is alias text, not part of the original input.
+    splice_end: usize = 0,
     alias_budget: u32 = 200,
     blank_marks: std.ArrayList(usize) = .empty,
     /// Offsets (in `src`) where a backslash-newline was removed by `joinLines`,
@@ -143,10 +157,36 @@ pub const Parser = struct {
         return p;
     }
 
-    /// Length of the unread original text (undoing `joinLines`).
+    /// Read `c` before the rest of the source. Call it before parsing.
+    pub fn resumeAlias(self: *Parser, c: Carry) Allocator.Error!void {
+        if (c.text.len == 0) return;
+        self.src = try std.mem.concat(self.a, u8, &.{ c.text, self.src });
+        const moved = try self.a.alloc(usize, self.conts.len);
+        for (moved, self.conts) |*m, old| m.* = old + c.text.len;
+        self.conts = moved;
+        for (c.active) |ac| try self.active.append(self.a, .{ .name = try self.a.dupe(u8, ac.name), .end = ac.end });
+        try self.blank_marks.appendSlice(self.a, c.blank_marks);
+        self.splice_end = c.text.len;
+    }
+
+    /// The alias text left unread, copied into `a`; empty when none is left.
+    pub fn aliasCarry(self: *const Parser, a: Allocator) Allocator.Error!Carry {
+        // a token already looked at has not been used yet
+        const from = if (self.peeked) |t| t.start else self.pos;
+        if (from >= self.splice_end) return .{};
+        var active: std.ArrayList(ActiveAlias) = .empty;
+        for (self.active.items) |ac| if (ac.end > from) try active.append(a, .{ .name = try a.dupe(u8, ac.name), .end = ac.end - from });
+        var marks: std.ArrayList(usize) = .empty;
+        for (self.blank_marks.items) |m| if (m >= from) try marks.append(a, m - from);
+        return .{ .text = try a.dupe(u8, self.src[from..self.splice_end]), .active = active.items, .blank_marks = marks.items };
+    }
+
+    /// Length of the unread original text (undoing `joinLines`). Unread alias
+    /// text is not part of it.
     pub fn origTailLen(self: *const Parser) usize {
-        var n = self.src.len - @min(self.pos, self.src.len);
-        for (self.conts) |c| if (c >= self.pos) {
+        const from = @max(@min(self.pos, self.src.len), self.splice_end);
+        var n = self.src.len - from;
+        for (self.conts) |c| if (c >= from) {
             n += 2;
         };
         return n;
@@ -1092,6 +1132,7 @@ pub const Parser = struct {
             self.cont_idx = 0;
         }
         if (val.len > 0 and (val[val.len - 1] == ' ' or val[val.len - 1] == '\t')) try self.blank_marks.append(self.a, val.len);
+        self.splice_end = val.len + (self.splice_end -| self.pos);
         self.src = ns;
         self.pos = 0;
         self.peeked = null;

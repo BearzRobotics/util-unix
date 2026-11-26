@@ -110,6 +110,10 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
     const saved_src = sh.cur_src;
     defer sh.cur_src = saved_src;
     var chunk: [8192]u8 = undefined;
+    // alias text the last command's parser had not reached, and its storage
+    var carry: parser.Carry = .{};
+    var carry_store = std.heap.ArenaAllocator.init(gpa);
+    defer carry_store.deinit();
     while (true) {
         var arena = std.heap.ArenaAllocator.init(gpa);
         const a = arena.allocator();
@@ -125,6 +129,10 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
         };
         p.line = line;
         p.aliases = .{ .ctx = sh, .get = aliasGet };
+        p.resumeAlias(carry) catch {
+            arena.deinit();
+            return error.OutOfMemory;
+        };
         const maybe = p.nextCommand() catch |e| switch (e) {
             error.Syntax => {
                 if (!eof and p.pos >= p.src.len) {
@@ -163,6 +171,12 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
             break;
         };
         const consumed = text.len - @min(tail, text.len);
+        // `carry` was copied into this parser's arena, so its store can be reused
+        _ = carry_store.reset(.retain_capacity);
+        carry = p.aliasCarry(carry_store.allocator()) catch {
+            arena.deinit();
+            return error.OutOfMemory;
+        };
         sh.cur_src = buf.items;
         if (sh.flags.verbose and consumed > 0) sh.errRaw(std.mem.trimStart(u8, text[0..consumed], "\n"));
         start += consumed;

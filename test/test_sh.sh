@@ -1088,7 +1088,7 @@ c "scripts: NUL bytes are ignored" 'printf "echo a\0b\n" > s; . ./s' B "POSIX le
 stdin_case() {
     desc="$1"; input="$2"; shift 2
     shcmp_inner_sh "$OURS"
-    printf '%s' "$input" | (cd "$TEST_TMP" && PATH="$TEST_TMP/inner:$PATH" "$OURS" "$@") > "$TEST_TMP/si.ours" 2>&1; ro=$?
+    printf '%s' "$input" | (cd "$TEST_TMP" && ulimit -f 2000 && PATH="$TEST_TMP/inner:$PATH" timeout -s KILL 20 "$OURS" "$@") > "$TEST_TMP/si.ours" 2>&1; ro=$?
     shcmp_inner_sh /usr/bin/dash
     printf '%s' "$input" | (cd "$TEST_TMP" && PATH="$TEST_TMP/inner:$PATH" /usr/bin/dash "$@") > "$TEST_TMP/si.dash" 2>&1; rd=$?
     sed -e 's#^[^: ]*: [0-9]*: #sh: #' "$TEST_TMP/si.ours" > "$TEST_TMP/si.o2"
@@ -1131,6 +1131,33 @@ EOF
 echo after
 '
     stdin_case "no trailing newline" 'echo last'
+    # alias text left over when a command ends is not script input
+    stdin_case "alias with a newline runs once" 'alias two="echo one
+echo two"
+two
+echo three
+echo four
+'
+    stdin_case "alias with a newline does not expand itself again" 'alias echo="echo A
+echo B"
+echo C
+echo done
+'
+    stdin_case "nested aliases with newlines" 'alias inner="echo i1
+echo i2"
+alias outer="echo o1
+inner
+echo o2"
+outer
+echo end
+'
+    stdin_case "compound command that starts inside an alias" 'alias c="echo pre
+if true; then"
+c
+  echo body
+fi
+echo tail
+'
     stdin_case "exit status" 'echo x
 exit 7
 echo not reached
