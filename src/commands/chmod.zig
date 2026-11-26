@@ -189,6 +189,7 @@ const Reporter = struct {
                     .changing_permissions => cli.warn(ctx, "changing permissions of {f}: {s}", .{ cli.quoteaf(p.path), cause }),
                     .cannot_read_directory => cli.warn(ctx, "cannot read directory {f}: {s}", .{ cli.quoteaf(p.path), cause }),
                     .read_failed => cli.warn(ctx, "fts_read failed: {s}", .{cause}),
+                    .directory_changed => cli.warn(ctx, "not descending into {f}: it was replaced during the walk", .{cli.quoteaf(p.path)}),
                 }
             },
             .umask_kept => |u| {

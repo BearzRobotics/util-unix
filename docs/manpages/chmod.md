@@ -87,7 +87,7 @@ Copy the mode of one file onto another:
 
 # SECURITY CONSIDERATIONS
 
-Changing modes can expose or lock out files; **-R** on a wrong operand is hard to undo. **--preserve-root** guards "/". The walk works relative to open directories, so replacing a path component with a symbolic link during a long walk does not redirect a change. No privileges are needed beyond owning the files (or CAP_FOWNER).
+Changing modes can expose or lock out files; **-R** on a wrong operand is hard to undo. **--preserve-root** guards "/". The walk works relative to open directories and opens each one without following a link it did not find there: a subdirectory replaced during the walk, by a symbolic link or by another directory, is reported and not entered. This does not cover the operand's own path, or the links **-L** is asked to follow. No privileges are needed beyond owning the files (or CAP_FOWNER).
 
 # CONCURRENCY AND ATOMICITY
 

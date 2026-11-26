@@ -23,6 +23,7 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const mode_mod = @import("mode.zig");
+const fsown = @import("fsown.zig");
 
 pub const Verbosity = enum {
     off,
@@ -66,6 +67,9 @@ pub const ProblemKind = enum {
     cannot_read_directory,
     /// Reading a directory failed part-way.
     read_failed,
+    /// What was opened is not the directory that was examined: another process
+    /// replaced it during the walk. It is not descended into.
+    directory_changed,
 };
 
 pub const Problem = struct {
@@ -182,14 +186,34 @@ const Engine = struct {
         // chmod cannot change a symlink's own mode: leave it, as GNU does.
         if (lst.kind == .sym_link and !follow) return true;
 
-        var ok = e.apply(parent, name, st, follow);
+        // Links are looked through only for the operand the user named and for
+        // an entry that was a link when examined. Anything else that turns into
+        // a link before we act (another process can do that in a directory it
+        // may write to) must not lead the change somewhere else.
+        const through_link = follow and (is_arg or lst.kind == .sym_link);
+        const descend = e.opts.recurse and st.kind == .directory;
+        // Which directory was examined, to compare with the one opened below.
+        // Linux only; elsewhere the no-follow open is the whole protection.
+        const examined: ?fsown.Stat = if (descend) fsown.statAt(parent, name, through_link) catch null else null;
 
-        if (e.opts.recurse and st.kind == .directory) {
-            var dir = parent.openDir(e.io, name, .{ .iterate = true }) catch |err| {
+        var ok = e.apply(parent, name, st, through_link);
+
+        if (descend) {
+            var dir = parent.openDir(e.io, name, .{ .iterate = true, .follow_symlinks = through_link }) catch |err| {
                 e.problem(.cannot_read_directory, err);
                 return false;
             };
             defer dir.close(e.io);
+            if (examined) |before| {
+                const opened = fsown.statHandle(dir.handle) catch |err| {
+                    e.problem(.cannot_read_directory, err);
+                    return false;
+                };
+                if (!opened.sameFile(before)) {
+                    e.problem(.directory_changed, null);
+                    return false;
+                }
+            }
             const base_len = e.path.items.len;
             var it = dir.iterate();
             while (true) {
@@ -385,6 +409,59 @@ test "--reference style fixed bits and a dangling link argument" {
     try testing.expectEqualStrings("problem dangling_symlink dang", log.list.items[0]);
     opts.no_dereference = true; // -h: the link itself, silently left alone
     try testing.expect(try run(testing.io, testing.allocator, "dang", opts));
+}
+
+/// Replaces the directory `tree/sub` the moment its change is reported, which is
+/// after the walk examined and changed it and before it opens it.
+const Swap = struct {
+    dir: Io.Dir,
+    with: enum { link, other_directory },
+    done: bool = false,
+
+    fn on(ctx: ?*anyopaque, ev: Event) void {
+        const s: *Swap = @ptrCast(@alignCast(ctx.?));
+        if (s.done or ev != .changed or !std.mem.eql(u8, ev.changed.path, "tree/sub")) return;
+        s.done = true;
+        s.dir.rename("tree/sub", s.dir, "moved", testing.io) catch @panic("rename");
+        switch (s.with) {
+            .link => s.dir.symLink(testing.io, "../victim", "tree/sub", .{}) catch @panic("symlink"),
+            .other_directory => s.dir.rename("victim", s.dir, "tree/sub", testing.io) catch @panic("rename"),
+        }
+    }
+};
+
+fn expectSwapContained(traversal: Traversal, with: @TypeOf(@as(Swap, undefined).with)) !void {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "tree/sub");
+    try tmp.dir.createDir(testing.io, "victim", .default_dir);
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "victim/secret", .data = "" });
+    try tmp.dir.setFilePermissions(testing.io, "victim/secret", .fromMode(0o600), .{});
+    var swap: Swap = .{ .dir = tmp.dir, .with = with };
+    const ok = try run(testing.io, testing.allocator, "tree", .{
+        .change = .{ .fixed = 0o755 },
+        .recurse = true,
+        .traversal = traversal,
+        .verbosity = .verbose,
+        .reporter = .{ .context = &swap, .on_event = Swap.on },
+        .base = tmp.dir,
+    });
+    try testing.expect(swap.done);
+    try testing.expect(!ok);
+    const secret = if (with == .link) "victim/secret" else "tree/sub/secret";
+    try testing.expectEqual(@as(u16, 0o600), try modeOf(tmp.dir, secret));
+}
+
+test "a subdirectory swapped for a symlink during the walk is not followed" {
+    try expectSwapContained(.command_line, .link);
+    try expectSwapContained(.physical, .link);
+    // under -L too: the entry examined was a directory, not a link
+    try expectSwapContained(.logical, .link);
+}
+
+test "a subdirectory swapped for another directory during the walk is not entered" {
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
+    try expectSwapContained(.command_line, .other_directory);
 }
 
 test "validMode accepts GNU forms and rejects junk" {
