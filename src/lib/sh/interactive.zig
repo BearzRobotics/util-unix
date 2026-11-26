@@ -338,6 +338,8 @@ pub fn loop(s: *Session) u8 {
             const prompt = expandPrompt(sh, a, ps) catch ps;
             switch (readOne(s, a, prompt)) {
                 .text => |l| {
+                    // only input starts the count of ^D again
+                    s.ignoreeof_count = 0;
                     text.appendSlice(a, l) catch |oe| return sh.oom(oe);
                 },
                 .interrupted => {
@@ -380,7 +382,6 @@ pub fn loop(s: *Session) u8 {
             first = false;
             if (isComplete(sh, text.items)) break;
         }
-        s.ignoreeof_count = 0;
         const src = text.items;
         if (std.mem.trim(u8, src, " \t\n").len == 0) continue;
         sh.line = 0;

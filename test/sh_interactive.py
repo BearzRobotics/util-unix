@@ -422,6 +422,25 @@ def input_and_history_cases():
         has("vi v with a failing editor runs nothing (%s)" % editor, ["raw:touch %s" % mark, "raw:\x1b", "raw:v", ("sleep", 0.5), ALIVE], ["al1ve"], argv=vi, env={"EDITOR": editor, "VISUAL": editor})
         ok("vi v with a failing editor leaves no trace (%s)" % editor, not os.path.exists(mark))
 
+    # SHI-01: ignoreeof gives up after ten ends of input in a row
+    with Session([SH, "-i", "-o", "ignoreeof"]) as s:
+        s.expect(r"\$ ?$"); s.take()
+        for _ in range(11):
+            s.send("\x04"); s.settle(.15)
+        ok("ignoreeof leaves at the eleventh ^D", exit_status(s) == 0, s.take())
+    with Session([SH, "-i", "-o", "ignoreeof"]) as s:
+        s.expect(r"\$ ?$"); s.take()
+        for _ in range(3):
+            for _ in range(7):
+                s.send("\x04"); s.settle(.15)
+            s.send(ALIVE + "\r"); s.settle(.3)
+        ok("ignoreeof starts counting again after input", exit_status(s, .5) is None and "al1ve" in s.take())
+    try:
+        p = subprocess.run([SH, "-i", "-o", "ignoreeof"], input=b"", capture_output=True, timeout=20)
+        ok("ignoreeof ends when input is at end of file", p.stderr.count(b'to leave shell') == 10, "%d messages" % p.stderr.count(b"to leave shell"))
+    except subprocess.TimeoutExpired:
+        ok("ignoreeof ends when input is at end of file", False, "still running after 20 s")
+
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
         d = tempfile.mkdtemp(dir=TMP)
