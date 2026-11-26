@@ -742,8 +742,10 @@ c "wait unknown pid" 'wait 99999; echo $?' B
 c "kill 0 self-check" 'kill -0 $$; echo $?' B
 c "kill signal name" 'sh -c "kill -s TERM \$\$"; echo $?' e
 c "kill -l numbers" 'kill -l 15' e
-c "kill nonexistent" 'kill 99999 2>/dev/null; echo $?' B
-c "kill bad signal" 'kill -s NOSUCH 1 2>/dev/null; echo $?' B
+# 999999999 is above any pid_max (Linux caps it at 4194304): these snippets run
+# unsandboxed, so they must never name a process that could exist.
+c "kill nonexistent" 'kill 999999999 2>/dev/null; echo $?' B
+c "kill bad signal" 'kill -s NOSUCH 999999999 2>/dev/null; echo $?' B
 c "hash" 'hash ls; echo $?' B
 c "hash -r" 'hash -r; echo $?' B
 c "alias" 'alias x="echo aliased"; eval x' B

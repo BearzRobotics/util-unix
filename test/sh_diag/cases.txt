@@ -31,7 +31,7 @@ SH5004	trap : NOSUCH
 SH5005	export 1x=3
 SH5006	[ a b ]
 SH5007	printf %d abc
-SH5008	kill -s NOSUCH 1
+SH5008	kill -s NOSUCH 999999999
 SH5009	getopts a
 SH5010	echo hi >&-
 SH5011	unalias nosuch
