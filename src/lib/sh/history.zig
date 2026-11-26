@@ -326,9 +326,10 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 /// Run the commands (echoed to standard error for `-s`, as FreeBSD sh does)  as the shell's input,
 /// entering them in the history.
 fn runText(sh: *Shell, a: Allocator, text: []const u8, echo: bool) u8 {
-    _ = a;
     const h = sh.history.?;
-    const t = std.mem.trimEnd(u8, text, "\n");
+    // `text` may be a history entry, which adding to the history (here, or by
+    // the command being run) can free
+    const t = a.dupe(u8, std.mem.trimEnd(u8, text, "\n")) catch |oe| return sh.oom(oe);
     if (echo) {
         sh.errRaw(t);
         sh.errRaw("\n");

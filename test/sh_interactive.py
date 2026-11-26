@@ -441,6 +441,11 @@ def input_and_history_cases():
     except subprocess.TimeoutExpired:
         ok("ignoreeof ends when input is at end of file", False, "still running after 20 s")
 
+    # SHI-03: re-running the oldest entry of a full history
+    has("fc -s of the oldest entry when history is full",
+        ["HISTSIZE=3", "echo first$((1+1))-$((2+2))aaaaaaaaaaaaaaaaaaaaaaaa", "echo b", "echo c", "fc -s first", ALIVE],
+        ["first2-4aaaaaaaaaaaaaaaaaaaaaaaa\n$", "al1ve"])
+
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
         d = tempfile.mkdtemp(dir=TMP)
