@@ -374,7 +374,7 @@ def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
     has("PS1 command substitution", ["PS1='$(echo X)> '", "echo hi"], ["X> echo hi"])
     has("PS1 history number", ["PS1='! '", "echo a", "echo b"], ["2 echo a", "3 echo b"] if False else ["2 echo a"])
-    has("PS1 !! is a literal !", ["PS1='!!> '", "echo a"], ["!> echo a"])
+    has("PS1 !! is a literal !", ["PS1='!!> '", "echo a"], ["!> echo a"], ["!!> echo a"])
     has("PS1 expands variables", ["X=zz", "PS1='$X> '", "echo a"], ["zz> echo a"])
     has("PS2 continuation after a quote", ["echo 'a", "b'"], ["> b'", "a\nb"], argv=[SH, "-i"])
     has("custom PS2", ["PS2='more: '", "echo 'a", "b'"], ["more: b'"])
@@ -402,7 +402,7 @@ def prompt_cases():
     open(envf, "w").write("PS1='ENV> '\nENVRAN=1\n")
     has("ENV file is run", ["echo $ENVRAN"], ["ENV> echo $ENVRAN", "1"], env={"ENV": envf})
     open(os.path.join(TMP, "envrel"), "w").write("echo hi\n")
-    has("ENV that is not absolute is ignored", ["echo $ENVRAN"], [], ["ENV> "], env={"ENV": "envfile"})
+    has("ENV that is not absolute is ignored", ['echo "[$ENVRAN]"'], ["[]"], ["ENV> "], env={"ENV": "envfile"}, cwd=TMP)
     has("ENV expands parameters", ["echo $ENVRAN"], ["ENV> "], env={"ENV": "$HOME/envfile", "HOME": TMP})
     # HISTFILE save and load
     hf = os.path.join(TMP, "histsave")
@@ -471,7 +471,8 @@ def signal_cases():
     has("stopped job warning on exit", ["sleep 31", "^Z", "exit", "jobs"], ["You have stopped jobs.", "Stopped"], env={"SH_DIAGNOSTICS": "posix"})
     has("second exit leaves", ["sleep 32", "^Z", "exit", "exit", "echo notrun"], ["You have stopped jobs."], ["\nnotrun"], env={"SH_DIAGNOSTICS": "posix"})
     has("EOF at the prompt exits", ["^D", "echo notrun"], [], ["\nnotrun"])
-    has("EOF with stopped jobs warns once", ["sleep 33", "^Z", "^D"], ["You have stopped jobs."], env={"SH_DIAGNOSTICS": "posix"})
+    out = run_steps(["sleep 33", "^Z", "^D", "^D", "echo notrun-$((1+1))"], env={"SH_DIAGNOSTICS": "posix"})
+    ok("EOF with stopped jobs warns once, the next one leaves", out.count("You have stopped jobs.") == 1 and "notrun-2" not in out, out)
     has("read from the terminal", ["read x", "typed", "echo got $x"], ["got typed"])
     has("background job reading the terminal is stopped", ["cat &", ("w", .4), "jobs", "kill -CONT %1; kill %1"], ["Stopped(SIGTTIN)"]) if False else None
     has("subshell pipeline in job control", ["echo a | cat | cat"], ["\na\n"])
@@ -515,7 +516,13 @@ def completion_cases():
     h("command after a semicolon", ["true; ech" + T + "ok"], ["echo ok"])
     h("variable name", ["FOOBARBAZ=1", "echo $FOOBARB" + T + "x"], ["$FOOBARBAZ x"])
     h("braced variable", ["FOOBARBAZ=1", "echo ${FOOBARB" + T + "x"], ["${FOOBARBAZ} x"]) if False else None
-    h("no candidates alerts", ["echo zzzz" + T + "x"], ["echo zzzzx"])
+    h("no candidates leaves the line alone", ["echo zzzz" + T + "x"], ["echo zzzzx"])
+    with Session([SH, "-i"]) as s:
+        s.expect(r"\$ ?$")
+        s.send("echo zzzz"); s.settle(.3)
+        before = len(s.raw)
+        s.send(T); s.settle(.4)
+        ok("no candidates alerts", "\x07" in s.raw[before:], repr(s.raw[before:]))
     h("tab with nothing typed lists files", ["raw:\t\t"], []) if False else None
     h("after a redirection", ["echo hi > be" + T + "x"], ["> beta x"])
     h("tab inside a recalled line", ["echo hi", "raw:" + UP + HOME + RIGHT * 5 + "\x15echo be" + T + "\n"], ["beta"]) if False else None
@@ -530,7 +537,10 @@ def paste_render_cases():
     P0, P1 = "\x1b[200~", "\x1b[201~"
     has("bracketed paste inserts text", ["raw:" + P0 + "echo pasted" + P1 + "\n"], ["pasted"])
     has("paste keeps tabs literal (no completion)", ["raw:" + P0 + "echo a\tb" + P1 + "\n"], ["a b"])
-    has("paste with a newline does not run early", ["raw:" + P0 + "echo 'a\nb'" + P1 + "\n"], ["a\nb"])
+    has("paste with a newline keeps both lines", ["raw:" + P0 + "echo 'a\nb'" + P1 + "\n"], ["a\nb"])
+    paste = "raw:" + P0 + "echo ran-$((40+1))\necho second" + P1
+    has("paste with a newline does not run early", [paste], ["echo second"], ["ran-41"])
+    has("the pasted lines run on Enter", [paste, "raw:\r"], ["ran-41", "\nsecond"])
     has("paste then edit", ["raw:" + P0 + "echo abc" + P1 + LEFT + "X\n"], ["abXc"])
     has("paste enable sequence is sent", [], [], [], ) if False else None
     out = run_steps([], rows=24, cols=80)
@@ -555,7 +565,8 @@ def paste_render_cases():
         s.send("echo 中文字"); s.settle(.3)
         ok("render: wide characters", "echo 中文字" in s.take())
         s.send(C("A")); s.send("\x04"); s.settle(.3)
-        ok("render: C-d at line start with text deletes", "cho" in s.take())
+        t = s.take()
+        ok("render: C-d at line start with text deletes", "$ cho " in t and "$ echo" not in t.split("\n")[-1], t)
     with Session([SH, "-i"], env={"PS1": "line1\n$ "}) as s:
         s.expect(r"\$ ?$"); s.take()
         s.send("echo hi\n"); s.settle(.3)
@@ -574,8 +585,10 @@ def paste_render_cases():
     with Session([SH, "-i"]) as s:
         s.expect(r"\$ ?$"); s.take()
         s.send("set +o emacs\n"); s.settle(.3); s.take()
-        s.send("echo plain\x7f\n"); s.settle(.3)
-        ok("no editing mode: the tty's own line discipline", "plai" in s.take())
+        before = len(s.raw)
+        s.send("echo plain\x7f\x01Z\n"); s.settle(.3)
+        got = s.raw[before:]
+        ok("no editing mode: the tty's own line discipline", "plai\x01Z\r\n" in got and "\x1b[?2004h" not in got, repr(got))
 
 EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases}
 
