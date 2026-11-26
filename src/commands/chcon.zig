@@ -226,6 +226,8 @@ const Reporter = struct {
                     .get_failed => cli.warn(ctx, "failed to get security context of {f}: {s}", .{ cli.quoteaf(p.path), cause }),
                     .create_failed => cli.warn(ctx, "failed to create security context: {f}: {s}", .{ cli.quoteC(p.detail), cause }),
                     .set_component_failed => cli.warn(ctx, "failed to set {s} security context component to {f}: {s}", .{ @tagName(p.component.?), cli.quoteC(p.detail), cause }),
+                    .file_changed => cli.warn(ctx, "not changing {f}: it was replaced during the walk", .{cli.quoteaf(p.path)}),
+                    .proc_unavailable => cli.warn(ctx, "cannot safely change {f}: /proc is not available", .{cli.quoteaf(p.path)}),
                     .change_failed => cli.warn(ctx, "failed to change context of {f} to {f}: {s}", .{ cli.quoteaf(p.path), cli.quoteC(p.detail), cause }),
                 }
             },

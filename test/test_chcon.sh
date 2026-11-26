@@ -76,6 +76,42 @@ ctree "-R --dereference"             -R --dereference a:b:c:d d
 ctree "-R --dereference -L"          -R --dereference -L a:b:c:d dlink
 root_sandboxed "$BASE" ctree "-R --preserve-root /"         -R --preserve-root a:b:c:d /
 ctree "-R --no-preserve-root nofile" -R --no-preserve-root a:b:c:d nofile
+# links met during the walk: to a file, to a directory, to nothing
+PLAIN_SETUP=$SETUP
+SETUP="$SETUP && ln -s ../e/h d/to_file && ln -s ../../e d/sub/to_dir && ln -s nowhere d/sub/to_nothing"
+ctree "links in the tree, -R"                 -R -v a:b:c:d d
+ctree "links in the tree, -R -h"              -R -h -v a:b:c:d d
+ctree "links in the tree, -R -L"              -R -L -v a:b:c:d d
+ctree "links in the tree, partial -R -L"      -R -L -v -t newt d
+ctree "links in the tree, -R with trailing slash" -R -v a:b:c:d d/
+SETUP=$PLAIN_SETUP
+
+# A directory replaced by a link while the walk is under way must not send the
+# change outside the tree: strace holds the first attribute change open while the
+# swap is made.
+race_case() {
+    description="$1"; shift
+    if ! command -v strace >/dev/null 2>&1; then skip_test "$description (strace needed)"; return; fi
+    w="$BASE/race"; rm -rf "$w"; mkdir -p "$w/t/sub" "$w/victim"; : > "$w/t/sub/f"; : > "$w/victim/f"
+    /usr/bin/chcon -h u:r:orig:s0 "$w/t/sub/f" "$w/victim/f"
+    (cd "$w" && exec timeout -s KILL 30 strace -f -o trace -e trace=setxattr,lsetxattr \
+        -e inject=setxattr,lsetxattr:delay_enter=2000000:when=1 "$BIN_DIR/chcon" "$@" t > out 2> err) &
+    tries=0
+    while ! grep -q 'setxattr' "$w/trace" 2>/dev/null && [ $tries -lt 200 ]; do tries=$((tries + 1)); sleep 0.05; done
+    mv "$w/t/sub" "$w/t/moved" && ln -s ../victim "$w/t/sub"
+    wait
+    got=$(python3 -c 'import os,sys; print(os.getxattr(sys.argv[1], "security.selinux").decode().rstrip(chr(0)))' "$w/victim/f")
+    moved=$(python3 -c 'import os,sys; print(os.getxattr(sys.argv[1], "security.selinux").decode().rstrip(chr(0)))' "$w/t/moved/f")
+    # the file the walk was working on gets the change wherever it has moved to
+    if [ "$got" = u:r:orig:s0 ] && [ "$moved" != u:r:orig:s0 ]; then
+        PASS=$((PASS + 1)); printf "PASS %s\n" "$description"
+    else
+        FAIL=$((FAIL + 1)); printf "FAIL %s\n     outside the tree: %s, the walked file: %s\n     %s\n" "$description" "$got" "$moved" "$(cat "$w/err")"
+    fi
+}
+race_case "a directory swapped for a link, -R"          -R u:r:new:s0
+race_case "a directory swapped for a link, partial -R"  -R -t newt
+
 ctree "type only"                    -t newtype d/f
 ctree "type, -v"                     -v -t newtype d/f
 ctree "user role range"              -u nu -r nr -l s0:c1.c9 d/f

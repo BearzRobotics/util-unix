@@ -9,8 +9,13 @@
 //!
 //! Like ownership, the walk handles a directory's contents before the
 //! directory itself. Everything is reported through `Reporter`; nothing is
-//! printed. The path of each entry is built as text and used with the
-//! path-based xattr calls, relative to the current directory.
+//! printed.
+//!
+//! The operand is used by its path. Everything below it is reached relative to
+//! open directories: each entry is opened with `O_PATH`, checked to be the file
+//! that was examined, and its attribute is read and set through
+//! `/proc/self/fd`, so that renaming or replacing a directory during the walk
+//! cannot send a change somewhere else. A recursive walk therefore needs /proc.
 
 const std = @import("std");
 const Io = std.Io;
@@ -43,6 +48,12 @@ pub const ProblemKind = enum {
     set_component_failed,
     /// Storing the context failed (`cause`); `detail` is the context.
     change_failed,
+    /// What was opened is not what was examined: another process replaced it
+    /// during the walk. It is neither changed nor entered.
+    file_changed,
+    /// An entry below the operand cannot be changed safely without
+    /// /proc/self/fd.
+    proc_unavailable,
 };
 
 pub const Problem = struct {
@@ -91,26 +102,46 @@ const Engine = struct {
         e.emit(.{ .problem = .{ .kind = kind, .path = e.path.items, .cause = cause } });
     }
 
-    fn examine(e: *Engine, path: []const u8, level: usize) fsown.Error!fsown.Stat {
+    fn examine(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) fsown.Error!fsown.Stat {
         const follow = switch (e.opts.traversal) {
             .physical => false,
             .command_line => level == 0,
             .logical => true,
         };
-        const cwd = Io.Dir.cwd();
-        return fsown.statAt(cwd, path, follow) catch |err| {
-            if (follow and err == error.FileNotFound) return fsown.statAt(cwd, path, false) catch err;
+        return fsown.statAt(parent, name, follow) catch |err| {
+            if (follow and err == error.FileNotFound) return fsown.statAt(parent, name, false) catch err;
             return err;
         };
     }
 
-    fn visit(e: *Engine, level: usize) Allocator.Error!bool {
-        const path = e.path.items;
-        const st = e.examine(path, level) catch |err| {
+    /// Which file a change of `name` is meant for, as found before anything
+    /// else happens to it.
+    const Subject = struct {
+        parent: Io.Dir,
+        name: []const u8,
+        level: usize,
+        /// Look through a final link when changing: only where it was one.
+        follow: bool,
+        /// Null when it cannot be examined (a dangling link to be followed).
+        identity: ?fsown.Stat,
+    };
+
+    fn subject(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) Subject {
+        var follow = e.opts.dereference;
+        if (level > 0 and follow) {
+            follow = if (fsown.statAt(parent, name, false)) |own| own.isLink() else |_| false;
+        }
+        return .{ .parent = parent, .name = name, .level = level, .follow = follow, .identity = if (level > 0) fsown.statAt(parent, name, follow) catch null else null };
+    }
+
+    /// `name` is relative to `parent`; `e.path` is the same entry for display.
+    fn visit(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) Allocator.Error!bool {
+        const target = e.subject(parent, name, level);
+        const st = e.examine(parent, name, level) catch |err| {
             e.problem(.cannot_access, err);
             return false;
         };
-        if (!(e.opts.recurse and st.isDir())) return e.change(st, false);
+        if (!(e.opts.recurse and st.isDir())) return e.change(target);
 
         if (e.opts.preserve_root) |root| {
             if (st.sameFile(root)) {
@@ -119,7 +150,7 @@ const Engine = struct {
             }
         }
         if (e.opts.traversal == .logical) {
-            for (e.ancestors.items) |a| if (a.sameFile(st)) return e.change(st, true);
+            for (e.ancestors.items) |a| if (a.sameFile(st)) return e.change(target);
         }
 
         const follow_open = switch (e.opts.traversal) {
@@ -127,11 +158,19 @@ const Engine = struct {
             .command_line => level == 0,
             .logical => true,
         };
-        var dir = Io.Dir.cwd().openDir(e.io, path, .{ .iterate = true, .follow_symlinks = follow_open }) catch |err| {
+        var dir = parent.openDir(e.io, name, .{ .iterate = true, .follow_symlinks = follow_open }) catch |err| {
             e.problem(.cannot_read_directory, err);
             return false;
         };
         defer dir.close(e.io);
+        const opened = fsown.statHandle(dir.handle) catch |err| {
+            e.problem(.cannot_read_directory, err);
+            return false;
+        };
+        if (!opened.sameFile(st)) {
+            e.problem(.file_changed, null);
+            return false;
+        }
 
         try e.ancestors.append(e.gpa, st);
         defer _ = e.ancestors.pop();
@@ -147,30 +186,55 @@ const Engine = struct {
             }) orelse break;
             if (e.path.items.len == 0 or e.path.items[e.path.items.len - 1] != '/') try e.path.append(e.gpa, '/');
             try e.path.appendSlice(e.gpa, entry.name);
-            ok = (try e.visit(level + 1)) and ok;
+            ok = (try e.visit(dir, entry.name, level + 1)) and ok;
             e.path.shrinkRetainingCapacity(base_len);
         }
-        return e.change(st, true) and ok;
+        return e.change(target) and ok;
     }
 
     /// Change the context of the current entry.
-    fn change(e: *Engine, st: fsown.Stat, is_dir: bool) bool {
-        _ = st;
-        _ = is_dir;
+    fn change(e: *Engine, target: Subject) bool {
         const path = e.path.items;
-        const follow = e.opts.dereference;
         if (e.opts.verbose) e.emit(.{ .changing = path });
+
+        // What the attribute calls are given: the operand's own path, or below
+        // it the magic link of a descriptor for the file that was examined.
+        var at: []const u8 = path;
+        var follow = target.follow;
+        var proc_buf: [32]u8 = undefined;
+        var handle: ?std.posix.fd_t = null;
+        defer if (handle) |h| fsown.closeHandle(h);
+        if (target.level > 0) {
+            const h = fsown.openPath(target.parent, target.name, target.follow) catch |err| {
+                if (e.opts.target == .full) {
+                    e.emit(.{ .problem = .{ .kind = .change_failed, .path = path, .cause = err, .detail = e.opts.target.full } });
+                } else e.problem(.get_failed, err);
+                return false;
+            };
+            handle = h;
+            const now = fsown.statHandle(h) catch null;
+            if (now == null or target.identity == null or !now.?.sameFile(target.identity.?)) {
+                e.problem(.file_changed, null);
+                return false;
+            }
+            at = std.fmt.bufPrint(&proc_buf, "/proc/self/fd/{d}", .{h}) catch unreachable; // an i32 fits
+            _ = fsown.statAt(Io.Dir.cwd(), at, false) catch {
+                e.problem(.proc_unavailable, null);
+                return false;
+            };
+            follow = true; // the magic link itself; it stops at the opened file
+        }
 
         switch (e.opts.target) {
             .full => |ctx| {
-                selinux.setFileContext(path, ctx, follow) catch |err| {
+                selinux.setFileContext(at, ctx, follow) catch |err| {
                     e.emit(.{ .problem = .{ .kind = .change_failed, .path = path, .cause = err, .detail = ctx } });
                     return false;
                 };
                 return true;
             },
             .partial => |comps| {
-                const old = selinux.getFileContext(e.gpa, path, follow) catch |err| {
+                const old = selinux.getFileContext(e.gpa, at, follow) catch |err| {
                     if (err == error.NoContext) {
                         e.problem(.unlabeled, null);
                     } else {
@@ -198,7 +262,7 @@ const Engine = struct {
                     return false;
                 };
                 defer e.gpa.free(new);
-                selinux.setFileContext(path, new, follow) catch |err| {
+                selinux.setFileContext(at, new, follow) catch |err| {
                     e.emit(.{ .problem = .{ .kind = .change_failed, .path = path, .cause = err, .detail = new } });
                     return false;
                 };
@@ -226,7 +290,7 @@ pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) All
         e.path.clearRetainingCapacity();
         try e.path.appendSlice(gpa, displayPath(p));
         e.ancestors.clearRetainingCapacity();
-        ok = (try e.visit(0)) and ok;
+        ok = (try e.visit(Io.Dir.cwd(), p, 0)) and ok;
     }
     return ok;
 }

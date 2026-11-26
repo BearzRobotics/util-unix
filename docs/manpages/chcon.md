@@ -52,7 +52,7 @@ Sets the `security.selinux` attribute of each FILE to CONTEXT, to RFILE's contex
 
 # SECURITY CONSIDERATIONS
 
-Changing a context needs the permission the policy requires; the kernel decides. This program does not check a context against a policy.
+Changing a context needs the permission the policy requires; the kernel decides. This program does not check a context against a policy. With **-R**, each file below the operand is opened relative to its parent directory and changed through that descriptor, so replacing a directory during the walk does not redirect a change; this needs /proc. The operand's own path, and the links **-L** is asked to follow, are not covered.
 
 # CONCURRENCY AND ATOMICITY
 

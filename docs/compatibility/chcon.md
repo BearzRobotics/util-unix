@@ -1,6 +1,6 @@
 # chcon: compatibility record
 
-Status: implemented; 54 differential cases pass against GNU chcon 9.7 in individual and multicall mode. Date: 2026-11-07. Ownership: decision 0006.
+Status: implemented; 59 differential cases and 2 race cases pass against GNU chcon 9.7 in individual and multicall mode. Date: 2026-11-07. Ownership: decision 0006.
 
 ## References
 
@@ -14,14 +14,14 @@ Status: implemented; 54 differential cases pass against GNU chcon 9.7 in individ
 
 ## How it is tested
 
-The host kernel has no SELinux, so `security.selinux` is an ordinary extended attribute; an unprivileged user may set it on tmpfs and ext4. GNU chcon (via libselinux) then also just stores the string, which is what is compared. The suite skips itself where the scratch file system refuses `security.*`.
+The host kernel has no SELinux, so `security.selinux` is an ordinary extended attribute; an unprivileged user may set it on a tmpfs in a user namespace of their own. GNU chcon (via libselinux) then also just stores the string, which is what is compared. Where the scratch directory refuses `security.*`, the suite runs itself on such a tmpfs, and is skipped only where that is impossible. The race cases need strace.
 
 ## Deliberate deviations and gaps
 
 1. **Contexts are not validated against a policy.** A complete CONTEXT is stored as given; on an SELinux kernel the kernel accepts or refuses it, as for GNU. Behaviour under a loaded policy (including the kernel's refusal texts) was not run.
 2. **The stored value ends with a NUL**, as libselinux writes it, so a file labelled by one program reads back correctly with the other (checked).
 3. **A range that is set to an empty string leaves its colon** (`u:r:t:s0` with `-l ''` becomes `u:r:t:`), as GNU does.
-4. **Paths are used relative to the current directory** with the path-based attribute calls (there are no `*at` forms), like GNU's fts walk.
+4. **Attributes below the operand are set through `/proc/self/fd`** (Linux has no `*at` forms of the attribute calls before 6.13). Each entry is opened relative to its parent directory and checked to be the file that was examined, so a directory replaced during the walk cannot send a change elsewhere. A recursive run therefore needs /proc and refuses without it. The operand itself is used by its path.
 5. **`--version`** prints `chcon (util-unix) VERSION`.
 
 ## Platforms

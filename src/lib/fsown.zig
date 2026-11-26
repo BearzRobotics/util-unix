@@ -119,6 +119,26 @@ pub fn statHandle(handle: std.posix.fd_t) Error!Stat {
     return fromStatx(sx);
 }
 
+/// An `O_PATH` descriptor for `name` relative to `dir`: it pins down one file,
+/// whatever happens to the name afterwards. With `follow` false a final symbolic
+/// link is opened itself. Close it with `closeHandle`.
+pub fn openPath(dir: Io.Dir, name: []const u8, follow: bool) Error!std.posix.fd_t {
+    if (comptime builtin.os.tag != .linux) return error.Unsupported;
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    if (name.len >= buf.len) return error.NameTooLong;
+    @memcpy(buf[0..name.len], name);
+    buf[name.len] = 0;
+    const rc = linux.openat(dir.handle, @ptrCast(&buf), .{ .PATH = true, .NOFOLLOW = !follow, .CLOEXEC = true }, 0);
+    const e = linux.errno(rc);
+    if (e != .SUCCESS) return toError(e);
+    return @intCast(rc);
+}
+
+pub fn closeHandle(handle: std.posix.fd_t) void {
+    if (comptime builtin.os.tag != .linux) return;
+    _ = linux.close(handle);
+}
+
 /// fchownat(2): change owner and/or group (null leaves it alone) of `name`
 /// relative to `dir`. With `follow` false a final symbolic link is changed
 /// itself (lchown).

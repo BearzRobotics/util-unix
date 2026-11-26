@@ -16,7 +16,7 @@ set -eu
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -qq -y --no-install-recommends bash bubblewrap busybox-static dash ncurses-base \
-    procps python3 shellcheck util-linux >/dev/null
+    procps python3 shellcheck strace util-linux >/dev/null
 # 26.04 ships the Rust coreutils by default: swap in GNU, as testlib.sh requires
 apt-get install -qq -y --no-install-recommends --allow-remove-essential \
     coreutils-from-gnu coreutils-from-uutils- >/dev/null
