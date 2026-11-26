@@ -4,6 +4,14 @@
 # pseudo-terminal (test/stty_pty.py); the no-terminal cases run here.
 UTIL="stty"
 . "$(dirname "$0")/testlib.sh"
+# musl words "Inappropriate ioctl for device" its own way; ours uses glibc's
+if ldd --version 2>&1 | grep -q '^musl'; then
+    gnu() {
+        "/usr/bin/stty" "$@" 2> "$TMPDIR_CMP.stderr"; st_rc=$?
+        sed 's/: Not a tty$/: Inappropriate ioctl for device/' "$TMPDIR_CMP.stderr" >&2
+        return $st_rc
+    }
+fi
 
 if command -v python3 >/dev/null 2>&1; then
     if [ -n "${OURS_MULTICALL:-}" ]; then OURS_CMD="$BIN_DIR/util-unix stty"; else OURS_CMD="$BIN_DIR/stty"; fi

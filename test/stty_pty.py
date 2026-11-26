@@ -16,8 +16,32 @@ passed = failed = 0
 
 def norm(text, prog):
     text = text.replace(prog, "stty")
+    # musl words two errors differently; ours uses glibc's wording
+    text = text.replace(": Not a tty\n", ": Inappropriate ioctl for device\n")
+    text = text.replace(": Value too large for data type\n", ": Value too large for defined data type\n")
     text = re.sub(r"Try '[^']*'", "Try 'PROG'", text)
     return text
+
+# glibc 2.42 and later also record the input speed in c_cflag (CIBAUD) when it is
+# the output speed, which the same kernel setting; ours does as they do. A GNU
+# stty built on musl does not, so against one that field is dropped from both.
+def fresh_cflag():
+    m, s = pty.openpty()
+    out = subprocess.run([GNU, "-g"], stdin=s, capture_output=True).stdout.decode()
+    os.close(m); os.close(s)
+    return int(out.split(":")[2], 16)
+
+REF_OMITS_ISPEED = fresh_cflag() & 0x100f0000 == 0
+
+def same_speed_dropped(text):
+    if not REF_OMITS_ISPEED:
+        return text
+    def one(m):
+        cflag = int(m.group(2), 16)
+        if (cflag >> 16) & 0x100f == cflag & 0x100f:
+            cflag &= ~0x100f0000
+        return m.group(1) + "%x" % cflag + ":"
+    return re.sub(r"(?m)^([0-9a-f]+:[0-9a-f]+:)([0-9a-f]+):(?=(?:[0-9a-f]+:){3})", one, text)
 
 def run_steps(prog, steps, env, rows, cols):
     m, s = pty.openpty()
@@ -25,11 +49,11 @@ def run_steps(prog, steps, env, rows, cols):
     results = []
     for step in steps:
         p = subprocess.run(prog + step, stdin=s, capture_output=True, env=env)
-        results.append((p.stdout.decode(errors="replace"), norm(p.stderr.decode(errors="replace"), prog[0]), p.returncode))
+        results.append((same_speed_dropped(p.stdout.decode(errors="replace")), norm(p.stderr.decode(errors="replace"), prog[0]), p.returncode))
     final = []
     for extra in (["-g"], ["-a"]):
         p = subprocess.run([GNU] + extra, stdin=s, capture_output=True, env={"LC_ALL": "C", "COLUMNS": "200"})
-        final.append(p.stdout.decode(errors="replace"))
+        final.append(same_speed_dropped(p.stdout.decode(errors="replace")))
     os.close(m); os.close(s)
     return results, final
 
@@ -119,8 +143,14 @@ case("two invocations", ["-echo"], ["-icanon"], ["-a"])
 # Speeds.
 for sp in "0 50 75 110 134 134.5 150 200 300 600 1200 1800 2400 4800 9600 19200 38400 57600 115200 230400 460800 500000 576000 921600 1000000 1152000 1500000 2000000 2500000 3000000 3500000 4000000".split():
     case("speed " + sp, [sp], ["speed"], [], ["-a"], ["-g"])
-case("ispeed", ["ispeed", "9600"], [], ["speed"], ["-a"], ["-g"])
-case("ospeed", ["ospeed", "19200"], [], ["speed"], ["-a"], ["-g"])
+# musl cannot set the two speeds apart (its cfsetispeed sets both), so a GNU
+# stty built on it is no reference for these
+if REF_OMITS_ISPEED:
+    for name in ("ispeed", "ospeed"):
+        print("SKIP %s (the reference cannot set input and output speeds apart)" % name)
+else:
+    case("ispeed", ["ispeed", "9600"], [], ["speed"], ["-a"], ["-g"])
+    case("ospeed", ["ospeed", "19200"], [], ["speed"], ["-a"], ["-g"])
 case("ispeed then both", ["ispeed", "9600"], ["19200"], ["-a"])
 case("bad speed", ["12345"])
 case("bad ispeed", ["ispeed", "12345"])
@@ -163,11 +193,11 @@ def restore_case(desc, changes):
         other = run([GNU], ["-g"]).stdout.decode().strip()
         p = run(prog, [saved])
         back = run([GNU], ["-g"]).stdout.decode().strip()
-        if saved == other:
+        if same_speed_dropped(saved + "\n") == same_speed_dropped(other + "\n"):
             problems.append("%s: the case does not leave the saved state" % name)
         if p.returncode != 0 or p.stdout or p.stderr:
             problems.append("%s: restore gave status %d, %r %r" % (name, p.returncode, p.stdout, p.stderr))
-        if back != saved:
+        if same_speed_dropped(back + "\n") != same_speed_dropped(saved + "\n"):
             problems.append("%s: saved %s\n     but now %s" % (name, saved, back))
         os.close(m); os.close(s)
     if problems:

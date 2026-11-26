@@ -27,10 +27,17 @@ rc_cmp() { # description, args...
     fi
 }
 
-rc_cmp "current context"
-rc_cmp "-c only"                 -c
-rc_cmp "-t only"                 -t x
-rc_cmp "-u -r -t -l only"        -u u -r r -t t -l s0
+# A coreutils built without SELinux (Alpine) cannot print the current context at
+# all; ours prints what the kernel reports, as an SELinux-aware build does.
+no_context=""
+gnu 2>&1 | grep -q 'failed to get current context' && no_context=1
+ctx_cmp() {
+    if [ -n "$no_context" ]; then skip_test "$1 (the reference cannot print a context)"; else rc_cmp "$@"; fi
+}
+ctx_cmp "current context"
+ctx_cmp "-c only"                 -c
+ctx_cmp "-t only"                 -t x
+ctx_cmp "-u -r -t -l only"        -u u -r r -t t -l s0
 rc_cmp "context without command" ctx
 rc_cmp "context and command"     ctx true
 rc_cmp "-t and command"          -t foo true
@@ -46,7 +53,7 @@ rc_cmp "attached option values"  -tfoo -ubar true
 rc_cmp "long options"            --type=a --user=b --role=c --range=d true
 rc_cmp "long options, separate values" --type a --user b true
 rc_cmp "abbreviations"           --ty x --us y true
-rc_cmp "--co (abbreviation)"     --co
+ctx_cmp "--co (abbreviation)"     --co
 rc_cmp "-z"                      -z
 rc_cmp "-t without value"        -t
 rc_cmp "--bogus"                 --bogus

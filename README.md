@@ -41,7 +41,7 @@ build from source with `zig build -Dtarget=...`.
 
 | Platform | Prebuilt download | Status |
 |---|---|---|
-| Linux x86_64 | yes (static musl) | reference platform, tested |
+| Linux x86_64 | yes (static musl) | tested on glibc (Ubuntu 26.04) and natively on musl (Alpine 3.22) |
 | Linux aarch64 | no | compile-checked in CI only; builds from source |
 | macOS x86_64, aarch64 | no | compile-checked in CI only; builds from source |
 | Windows | no | not a target (these are Unix commands) |

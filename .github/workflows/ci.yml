@@ -39,6 +39,24 @@ jobs:
           --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
           -v "$PWD:/src:ro" ubuntu:26.04 sh /src/scripts/ci-suites.sh
 
+  musl:
+    # Build, unit tests and suites natively on a musl system (see scripts/ci-musl.sh).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Allow the sandbox the root-directory tests need
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Build and test on Alpine
+        run: >-
+          docker run --rm
+          --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
+          -v "$PWD:/src:ro" -v "$(dirname "$(readlink -f "$(command -v zig)")"):/zig:ro"
+          alpine:3.22 sh /src/scripts/ci-musl.sh
+
   modes:
     runs-on: ubuntu-latest
     strategy:

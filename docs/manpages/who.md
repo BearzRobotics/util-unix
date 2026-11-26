@@ -74,7 +74,7 @@ See docs/compatibility/who.md. Decision 0006 records why this command is here.
 
 # LIMITATIONS
 
-Reads the utmp file, not systemd-logind sessions.
+Reads the utmp file, not systemd-logind sessions. The musl C library keeps no utmp, so on a musl distribution there may be no file to read; 'who' then lists nobody, as GNU who built on musl does even when there is one.
 
 # PERFORMANCE
 

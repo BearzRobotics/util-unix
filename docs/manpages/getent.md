@@ -63,7 +63,7 @@ None.
 
 Platforms
 
-Linux. Tested on Linux 6.18 (WSL2) against GNU coreutils 9.7 (getent: glibc 2.43). The executables are static and do not link libc, so musl or glibc matters only for the host's account files. Built for x86_64-linux-musl, the suite passes on a glibc host; a real musl distribution has not been tried. Other Unix-like systems are not supported yet: only Linux has been exercised.
+Linux. Tested on Linux 6.18 (WSL2) against GNU coreutils 9.7 (getent: glibc 2.43). The executables are static and do not link libc, so musl or glibc matters only for the host's account files. The prebuilt binaries are static x86_64-linux-musl builds. On 2026-11-26 the build and the unit tests also passed natively on Alpine 3.22 (musl), which CI repeats (scripts/ci-musl.sh); it has no reference command for this one, so the comparison suite runs on glibc only. Other Unix-like systems are not supported yet: only Linux has been exercised.
 
 Standards and references
 

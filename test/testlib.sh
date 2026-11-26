@@ -23,6 +23,11 @@ BIN_DIR="$(cd "$(dirname "$0")/../zig-out/bin" 2>/dev/null && pwd)"
 # The reference must be GNU: a different implementation (e.g. uutils) would make
 # every differential comparison below meaningless.
 # (getent is glibc's, not GNU coreutils': a test sets REF_PATTERN=GLIBC.)
+# UU_NO_REFERENCE names the commands this system has no usable reference for
+# (scripts/ci-musl.sh); their suites are reported as skipped.
+case " ${UU_NO_REFERENCE:-} " in
+    *" $UTIL "*) echo "SKIP $UTIL: no usable reference command on this system"; exit 0 ;;
+esac
 if ! "/usr/bin/$UTIL" --version 2>/dev/null | head -n 1 | grep -q "${REF_PATTERN:-GNU}"; then
     echo "FATAL: /usr/bin/$UTIL is not a ${REF_PATTERN:-GNU} implementation; refusing to run." >&2
     exit 2

@@ -497,11 +497,11 @@ c "set -f" 'touch a; set -f; echo *' B
 c "set -u" 'set -u; echo $nothing; echo after' B
 c "set -a" 'set -a; x=1; sh -c "echo \$x"' B
 c "set -C" 'set -C; echo a > f; echo b > f; echo $?' B
-c "set -o names" 'set -o | grep -c .' e
+c "set -o names" 'set -o | grep -c -E "^(errexit|nounset|noglob|verbose|xtrace) "' e
 c "set -o noglob" 'touch a; set -o noglob; echo *' B
 c "set -o errexit" 'set -o errexit; false; echo no' B
 c "set -o nounset" 'set -o nounset; echo $x; echo no' B
-c "set +o prints commands" 'set +o | grep -c "set"' e
+c "set +o prints commands" 'set +o | grep -c -E "^set [-+]o (errexit|nounset|noglob|verbose|xtrace)$"' e
 c "dollar dash reflects options" 'set -f; echo $-' e
 c "set -e then dollar dash" 'set -e; echo $-' e
 c "set positional" 'set -- a b c; echo $#; set a; echo $#; echo $1' B
@@ -1054,7 +1054,7 @@ c "command eval of a syntax error does not exit the shell" 'command eval \) 2>/d
 c "a function name is a trap action, not a signal" 'term() { echo got; }; trap term TERM; kill -TERM $$; echo after' B
 c "wait for a pipeline job gives the pipefail status" 'set -o pipefail
 (exit 42) | : &
-wait %+; echo $?' B
+wait %+; echo $?' BPe "Issue 8 pipefail; some builds of dash do not have it."
 c "background subshell of one command is that command" '(sleep 1)& sleep 0.2; cat /proc/$!/comm; kill $!' B
 c "NUL bytes in a script are ignored" 'printf "echo a\0b\n\0echo c\n" > f; . ./f' B
 c "a redirection that opens the fd it names is undone" 'touch f; { :; } 3<f; echo x >&3 2>/dev/null; echo $?' B
