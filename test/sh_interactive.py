@@ -408,6 +408,24 @@ def input_and_history_cases():
     has("typing ahead while a command runs", ["raw:sleep 1\r", "raw:echo A$((1))\recho B$((2))\recho C$((3))\r", ("sleep", 1.5)], ["A1", "B2", "C3"])
     has("typed ahead lines reach a command that reads", ["raw:read v; echo got-$v-$((1+1))\rtyped\n"], ["got-typed-2"])
 
+    # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
+    def history_after(lines, env_extra, rc):
+        d = tempfile.mkdtemp(dir=TMP)
+        hist = os.path.join(d, "hist")
+        with open(hist, "w") as f:
+            f.write("".join("echo old%d\n" % i for i in range(lines)))
+        rcpath = os.path.join(d, "rc")
+        with open(rcpath, "w") as f:
+            f.write(rc.replace("@H@", hist))
+        env = {"ENV": rcpath, **{k: v.replace("@H@", hist) for k, v in env_extra.items()}}
+        run_steps(["echo new", "exit"], env=env)
+        with open(hist) as f:
+            return f.read().split("\n")
+    got = history_after(5, {}, "HISTFILE=@H@\n")
+    ok("HISTFILE set in ENV keeps the saved history", "echo old0" in got and "echo new" in got, repr(got))
+    got = history_after(500, {"HISTFILE": "@H@"}, "HISTSIZE=1000\n")
+    ok("HISTSIZE set in ENV applies when history is loaded", "echo old0" in got and len(got) >= 502, "%d lines" % len(got))
+
 def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
     has("PS1 command substitution", ["PS1='$(echo X)> '", "echo hi"], ["X> echo hi"])

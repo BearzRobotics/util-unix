@@ -229,8 +229,6 @@ pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
     } else |_| {};
     s.editor = ed;
     if (sys.geteuid() == 0 and sh.getVar("PS1") != null and std.mem.eql(u8, sh.getVar("PS1").?, "$ ")) sh.setVarRaw("PS1", "# ") catch {};
-    s.hist.setMax(varNum(sh, "HISTSIZE") orelse history.default_size);
-    if (sh.getVar("HISTFILE")) |hf| s.hist.load(hf);
 }
 
 /// Source the file named by ENV (after parameter expansion) as POSIX
@@ -319,6 +317,10 @@ fn externalEdit(sh: *Shell, a: Allocator, text: []const u8) ?[]const u8 {
 /// status.
 pub fn loop(s: *Session) u8 {
     const sh = s.sh;
+    // Loaded here, after the ENV file: it may set HISTFILE and HISTSIZE, and
+    // the file is rewritten at exit from what was loaded.
+    s.hist.setMax(varNum(sh, "HISTSIZE") orelse history.default_size);
+    if (sh.getVar("HISTFILE")) |hf| s.hist.load(hf);
     while (true) {
         var arena = std.heap.ArenaAllocator.init(sh.gpa);
         defer arena.deinit();
