@@ -715,6 +715,8 @@ c "jobs: one finished job named twice" 'true & sleep 0.3; jobs %1 %1 >/dev/null 
 
 c "redirection that assigns PATH after the command was found" 'mkdir d; cd d; ls -d / >/dev/null; ls -d / >f$((PATH=5)); echo $?; cat f5' Pe "dash looks the command up again under the new PATH; bash and busybox run the one found."
 
+c "read into IFS splits with the IFS it started with" 'printf "a:b c d\n" | { read IFS x y; echo "[$IFS][$x][$y]"; }; printf "a:b c d\n" | { IFS=" :"; read IFS x y; echo "[$IFS][$x][$y]"; }'
+
 # ---- a temporary PATH does not stay remembered (SHX-01) ----
 EVIL='mkdir evil; printf "#!/bin/sh\necho FROM-TEMPORARY-PATH\n" > evil/ls; chmod +x evil/ls; '
 c "temporary PATH for one command is forgotten" "$EVIL"'PATH=$PWD/evil ls; ls -d /'

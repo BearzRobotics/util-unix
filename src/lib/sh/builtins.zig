@@ -1350,7 +1350,8 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         bytes.append(a, c) catch |oe| return sh.oom(oe);
         esc.append(a, false) catch |oe| return sh.oom(oe);
     }
-    const ifs: []const u8 = sh.getVar("IFS") orelse " \t\n";
+    // a copy: IFS may be one of the names being read
+    const ifs: []const u8 = a.dupe(u8, sh.getVar("IFS") orelse " \t\n") catch |oe| return sh.oom(oe);
     const isIfs = struct {
         fn f(s: []const u8, c: u8) bool {
             return std.mem.indexOfScalar(u8, s, c) != null;
