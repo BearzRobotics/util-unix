@@ -702,7 +702,7 @@ E
 c "getopts: operands change inside a group" 'getopts ab o -ab; echo "$o"; getopts ab o -x 2>/dev/null; echo "$o $?"' Pe "dash keeps its place in the old argument; bash and ours start the new one."
 c "getopts: function call changes the arguments" 'f() { getopts ab o; echo "$o"; }; f -ab; f -a; echo end'
 c "getopts: shift inside a group" 'set -- -ab -b; getopts ab o; echo "$o"; shift 2; getopts ab o; echo "$o $?"; echo end' e
-c "getopts: new argument is not an option" 'getopts abc o -abc; getopts abc o word; echo "$o $?"; getopts abc o -- ; echo "$o $?"' Pe "dash reads on inside the new word; yash and ours see that it is no option."
+c "getopts: new argument shorter than the place in the old one" 'getopts abc o -abc; getopts abc o x >/dev/null 2>&1; getopts abc o -- >/dev/null 2>&1; echo alive'
 
 # ---- a temporary PATH does not stay remembered (SHX-01) ----
 EVIL='mkdir evil; printf "#!/bin/sh\necho FROM-TEMPORARY-PATH\n" > evil/ls; chmod +x evil/ls; '
