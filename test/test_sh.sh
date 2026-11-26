@@ -713,6 +713,8 @@ c "default and alternate words that assign the variable" 'x=abc; echo "${x+$((x=
 
 c "jobs: one finished job named twice" 'true & sleep 0.3; jobs %1 %1 >/dev/null 2>&1; echo alive; sleep 0 & sleep 0.3; jobs %% %1 >/dev/null 2>&1; echo end' e
 
+c "redirection that assigns PATH after the command was found" 'mkdir d; cd d; ls -d / >/dev/null; ls -d / >f$((PATH=5)); echo $?; cat f5' Pe "dash looks the command up again under the new PATH; bash and busybox run the one found."
+
 # ---- a temporary PATH does not stay remembered (SHX-01) ----
 EVIL='mkdir evil; printf "#!/bin/sh\necho FROM-TEMPORARY-PATH\n" > evil/ls; chmod +x evil/ls; '
 c "temporary PATH for one command is forgotten" "$EVIL"'PATH=$PWD/evil ls; ls -d /'

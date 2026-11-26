@@ -1079,7 +1079,11 @@ pub fn resolve(sh: *Shell, a: Allocator, name: []const u8) Resolved {
     if (sh.host_builtins.get(name)) |h| return .{ .host = h };
     // a remembered location is used as it is, even if the file went away
     // (dash, FreeBSD sh: the command is then not found until `hash -r`)
-    if (sh.hash.get(name)) |p| return .{ .external = p };
+    // a copy: a redirection's expansion may assign PATH, which empties the table
+    if (sh.hash.get(name)) |p| return .{ .external = a.dupe(u8, p) catch |oe| {
+        _ = sh.oom(oe);
+        return .not_found;
+    } };
     if (pathFind(sh, a, name, true)) |p| {
         // remember the location, as dash and FreeBSD sh do (POSIX `hash`);
         // entries from a relative PATH entry are dropped again by `cd`
