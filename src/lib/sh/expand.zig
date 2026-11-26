@@ -321,6 +321,19 @@ fn emit(x: *X, pv: PV, name: []const u8, is_quoted: bool) Error!void {
     }
 }
 
+/// `pv` with its text in the expansion's arena.
+fn owned(x: *X, pv: PV) Error!PV {
+    return switch (pv) {
+        .unset => .unset,
+        .one => |v| .{ .one = try x.a.dupe(u8, v) },
+        .many => |list| blk: {
+            const copy = try x.a.alloc([]const u8, list.len);
+            for (copy, list) |*c, v| c.* = try x.a.dupe(u8, v);
+            break :blk .{ .many = copy };
+        },
+    };
+}
+
 fn joined(x: *X, pv: PV) Error![]const u8 {
     switch (pv) {
         .unset => return "",
@@ -345,7 +358,9 @@ fn param(x: *X, p: *const ast.Param, text_flag: u8) Error!void {
         sh.flow = .exit_shell;
         return error.Fatal;
     }
-    const pv = try lookup(x, p.name);
+    // A copy: expanding the word of `${x#word}` and the like can assign the
+    // variable, which frees the value it had.
+    const pv = try owned(x, try lookup(x, p.name));
     const multi = p.name.len > 0 and (p.name[0] == '@' or p.name[0] == '*');
     const is_unset = switch (pv) {
         .unset => true,

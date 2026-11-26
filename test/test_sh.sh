@@ -707,6 +707,10 @@ c "getopts: new argument shorter than the place in the old one" 'getopts abc o -
 # ---- a function from eval, dot or a trap outlives its source text (MEM-01) ----
 c "tilde in a function defined by dot and eval" '{ echo "f() { echo ~root/x; }"; printf "# %070000d\n" 0; } > big.sh; . ./big.sh; f; big=$(printf "%070000d" 0); eval ": $big; g() { p=a:~root; echo \$p ~root; }"; g'
 
+# ---- values stay usable while the word beside them assigns them (MEM-04) ----
+c "trim a variable that the pattern assigns" 'x=hello; echo "[${x#$((x=1))}]"; p=/usr/local/lib; echo "${p%/$((p=0))}" $p; y=abcabc; echo ${y##*$((y=7))} ${y%%b*$((y=8))}'
+c "default and alternate words that assign the variable" 'x=abc; echo "${x+$((x=2))}" $x; y=; echo "${y:-$((y=3))}" $y; z=long-value; echo "${z%"${z:=other}"}|$z"'
+
 # ---- a temporary PATH does not stay remembered (SHX-01) ----
 EVIL='mkdir evil; printf "#!/bin/sh\necho FROM-TEMPORARY-PATH\n" > evil/ls; chmod +x evil/ls; '
 c "temporary PATH for one command is forgotten" "$EVIL"'PATH=$PWD/evil ls; ls -d /'
