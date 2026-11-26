@@ -28,11 +28,41 @@ if ! "/usr/bin/$UTIL" --version 2>/dev/null | head -n 1 | grep -q "${REF_PATTERN
     exit 2
 fi
 
-gnu() { "/usr/bin/$UTIL" "$@"; }
+# SANDBOX is empty except inside root_sandboxed (below).
+SANDBOX=""
+gnu() { $SANDBOX "/usr/bin/$UTIL" "$@"; }
 # OURS_MULTICALL=1 runs the same tests through the multicall binary
 # (`util-unix <command> ...`), SPEC §8 mode 3.
 ours() {
-    if [ -n "${OURS_MULTICALL:-}" ]; then "$BIN_DIR/util-unix" "$UTIL" "$@"; else "$BIN_DIR/$UTIL" "$@"; fi
+    if [ -n "${OURS_MULTICALL:-}" ]; then $SANDBOX "$BIN_DIR/util-unix" "$UTIL" "$@"; else $SANDBOX "$BIN_DIR/$UTIL" "$@"; fi
+}
+
+# root_sandboxed SCRATCH HELPER DESCRIPTION ARG...
+# For cases that name the real "/": the only thing between such a case and the
+# host is the guard under test (--preserve-root), so a regression there must not
+# be able to change anything. HELPER runs with the whole file system read-only
+# except SCRATCH, an existing directory that holds the case's fixtures. The
+# sandbox is first shown to block a mode change outside SCRATCH; without that
+# proof the case is skipped, never run unprotected.
+sandbox_cmd() { printf 'timeout -s KILL 60 bwrap --ro-bind / / --dev /dev --bind %s %s --die-with-parent' "$1" "$1"; }
+sandbox_blocks_writes() {
+    probe_dir=$(mktemp -d) || return 1
+    : > "$probe_dir/victim" && chmod 600 "$probe_dir/victim"
+    result=1
+    if $(sandbox_cmd "$1") sh -c ': > "$1/inside" && ! chmod 777 "$2" 2>/dev/null' sh "$1" "$probe_dir/victim" >/dev/null 2>&1 &&
+        [ "$(stat -c %a "$probe_dir/victim")" = 600 ]; then result=0; fi
+    rm -f "$1/inside"; rm -rf "$probe_dir"
+    return $result
+}
+root_sandboxed() {
+    scratch="$1"; helper="$2"; shift 2
+    if ! sandbox_blocks_writes "$scratch"; then
+        skip_test "$1 (needs a working bwrap sandbox: it names the real /)"
+        return 0
+    fi
+    SANDBOX=$(sandbox_cmd "$scratch")
+    "$helper" "$@"
+    SANDBOX=""
 }
 
 run_test() {
@@ -144,6 +174,7 @@ run_cmp() {
     fi
 }
 TMPDIR_CMP="$(mktemp -d)/cmp"
+SCRATCH="$(dirname "$TMPDIR_CMP")"
 trap 'chmod -R u+rwx "$(dirname "$TMPDIR_CMP")" 2>/dev/null; rm -rf "$(dirname "$TMPDIR_CMP")"' EXIT
 
 # run_tree DESC SETUP_CMD ARGS...   (stdin: file $TREE_STDIN, default /dev/null;

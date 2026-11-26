@@ -95,14 +95,14 @@ g "-H without -R is ignored"             -H -v "$G2" dl
 g "-L without -R is ignored"             -L -v "$G2" l
 
 printf "\n[ --preserve-root ]\n"
-t "-R --preserve-root /"                 -R --preserve-root "$G1" /
-t "-R --preserve-root /."                -R --preserve-root "$G1" /.
-t "-R --preserve-root //"                -R --preserve-root "$G1" //
+root_sandboxed "$SCRATCH" t "-R --preserve-root /"                 -R --preserve-root "$G1" /
+root_sandboxed "$SCRATCH" t "-R --preserve-root /."                -R --preserve-root "$G1" /.
+root_sandboxed "$SCRATCH" t "-R --preserve-root //"                -R --preserve-root "$G1" //
 g "--preserve-root without -R is fine"   --preserve-root "$G2" f
 t "--no-preserve-root accepted"          --no-preserve-root "$G1" f
-t "-RL --preserve-root on link to /"     -RL --preserve-root "$G1" rootlink
-run_tree "-RL --preserve-root link to /" "$SETUP; ln -s / rootlink" -RL --preserve-root "$G1" rootlink
-run_tree "-RH --preserve-root link to /" "$SETUP; ln -s / rootlink" -RH --preserve-root "$G1" rootlink
+root_sandboxed "$SCRATCH" t "-RL --preserve-root on link to /"     -RL --preserve-root "$G1" rootlink
+root_sandboxed "$SCRATCH" run_tree "-RL --preserve-root link to /" "$SETUP; ln -s / rootlink" -RL --preserve-root "$G1" rootlink
+root_sandboxed "$SCRATCH" run_tree "-RH --preserve-root link to /" "$SETUP; ln -s / rootlink" -RH --preserve-root "$G1" rootlink
 
 print_summary
 [ "$FAIL" -eq 0 ]

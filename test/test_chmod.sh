@@ -88,8 +88,8 @@ run_tree "-R missing"              "$R" -R 700 nofile
 run_tree "--recursive"             "$R" --recursive 700 t
 run_tree "-R dangling in tree"     'mkdir t; ln -s nowhere t/dang; touch t/f' -R 700 t
 run_tree "-R unreadable subdir"    'mkdir -p t/u; touch t/u/f; chmod 000 t/u' -R 755 t
-run_tree "-R --preserve-root /"    "$R" -R --preserve-root 700 /
-run_tree "-R --preserve-root /."   "$R" -R --preserve-root 700 /.
+root_sandboxed "$SCRATCH" run_tree "-R --preserve-root /"    "$R" -R --preserve-root 700 /
+root_sandboxed "$SCRATCH" run_tree "-R --preserve-root /."   "$R" -R --preserve-root 700 /.
 run_tree "--preserve-root not rec" "$R" --preserve-root 700 t
 printf "\n[ Symbolic links ]\n"
 run_tree "symlink arg"             "$S" 600 sl

@@ -96,7 +96,7 @@ g "-R -h"                                -R -h -v "$U:$G2" d
 g "-h on link"                           -h -v "$U:$G2" l
 g "link default dereferences"            -v "$U:$G2" l
 g "-R unreadable dir"                    -R -v "$U:$G2" noread
-t "-R --preserve-root /"                 -R --preserve-root "$U" /
+root_sandboxed "$SCRATCH" t "-R --preserve-root /"                 -R --preserve-root "$U" /
 t "-R failure inside tree (EPERM)"       -R -v root d
 
 print_summary

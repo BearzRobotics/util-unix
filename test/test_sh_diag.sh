@@ -25,7 +25,7 @@ run_case() {
     rm -rf "$TMP/w"; mkdir -p "$TMP/w"
     case "$3" in
     SH7*) printf '%s\n' "$1" > "$TMP/w/s.sh"
-          (cd "$TMP/w" && SH_DIAGNOSTICS= NO_COLOR=1 "$OURS" --diagnostics="$2" --check s.sh > "$TMP/out" 2> "$TMP/err" < /dev/null; echo $? > "$TMP/rc");;
+          (cd "$TMP/w" && SH_DIAGNOSTICS= NO_COLOR=1 "$OURS" --diagnostics="$2" --check -n s.sh > "$TMP/out" 2> "$TMP/err" < /dev/null; echo $? > "$TMP/rc");;
     *) (cd "$TMP/w" && SH_DIAGNOSTICS= NO_COLOR=1 "$OURS" --diagnostics="$2" -c "$1" > "$TMP/out" 2> "$TMP/err" < /dev/null; echo $? > "$TMP/rc");;
     esac
 }

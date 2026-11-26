@@ -35,9 +35,9 @@ ctree() { # description, args...
     description="$1"; shift
     rm -rf "$BASE/g" "$BASE/o"; mkdir -p "$BASE/g" "$BASE/o"
     for x in g o; do (cd "$BASE/$x" && eval "$SETUP"); done
-    (cd "$BASE/g" && /usr/bin/chcon "$@" > "$BASE/g.out" 2> "$BASE/g.err"; echo $? > "$BASE/g.rc")
-    if [ -n "${OURS_MULTICALL:-}" ]; then (cd "$BASE/o" && "$BIN_DIR/util-unix" chcon "$@" > "$BASE/o.out" 2> "$BASE/o.err"; echo $? > "$BASE/o.rc")
-    else (cd "$BASE/o" && "$BIN_DIR/chcon" "$@" > "$BASE/o.out" 2> "$BASE/o.err"; echo $? > "$BASE/o.rc"); fi
+    (cd "$BASE/g" && $SANDBOX /usr/bin/chcon "$@" > "$BASE/g.out" 2> "$BASE/g.err"; echo $? > "$BASE/g.rc")
+    if [ -n "${OURS_MULTICALL:-}" ]; then (cd "$BASE/o" && $SANDBOX "$BIN_DIR/util-unix" chcon "$@" > "$BASE/o.out" 2> "$BASE/o.err"; echo $? > "$BASE/o.rc")
+    else (cd "$BASE/o" && $SANDBOX "$BIN_DIR/chcon" "$@" > "$BASE/o.out" 2> "$BASE/o.err"; echo $? > "$BASE/o.rc"); fi
     norm_err < "$BASE/g.err" > "$BASE/g.err2"; norm_err < "$BASE/o.err" > "$BASE/o.err2"
     dump "$BASE/g" > "$BASE/g.tree"; dump "$BASE/o" > "$BASE/o.tree"
     if cmp -s "$BASE/g.out" "$BASE/o.out" && cmp -s "$BASE/g.err2" "$BASE/o.err2" && cmp -s "$BASE/g.rc" "$BASE/o.rc" && cmp -s "$BASE/g.tree" "$BASE/o.tree"; then
@@ -64,7 +64,7 @@ ctree "-R -L on a link to a directory" -R -L -v a:b:c:d dlink
 ctree "-R -P on a link to a directory" -R -P -v a:b:c:d dlink
 ctree "-R --dereference"             -R --dereference a:b:c:d d
 ctree "-R --dereference -L"          -R --dereference -L a:b:c:d dlink
-ctree "-R --preserve-root /"         -R --preserve-root a:b:c:d /
+root_sandboxed "$BASE" ctree "-R --preserve-root /"         -R --preserve-root a:b:c:d /
 ctree "-R --no-preserve-root nofile" -R --no-preserve-root a:b:c:d nofile
 ctree "type only"                    -t newtype d/f
 ctree "type, -v"                     -v -t newtype d/f
