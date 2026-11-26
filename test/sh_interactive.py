@@ -238,7 +238,6 @@ def vi_cases():
     h("failed search leaves the line", "echo keep" + ESC + "/zzz\r", "keep")
     h("_ appends last word of previous line", "echo" + ESC + "_", "three")
     h("U undoes all changes", ESC + "kxxxU", "three")
-    h("edit a recalled line", ESC + "k0xxiX", "Xho three".replace("Xho three", "Xcho") if False else None) if False else None
 
 # ---------------------------------------------------------------------------
 # transcripts compared with dash and FreeBSD sh
@@ -341,10 +340,10 @@ def fc_cases():
     f("FCEDIT", ["fc 2"], env={"FCEDIT": "./ed.sh"})
     f("unknown pattern", ["fc -l nosuch"])
     f("illegal option", ["fc -x"])
-    f("-l after fc -s", ["fc -s two=zwei two" if False else "fc -s", "fc -l"])
+    f("-l after fc -s", ["fc -s", "fc -l"])
     f("HISTSIZE", ["HISTSIZE=2", "echo four", "fc -l"])
     f("history does not list fc itself", ["fc -l", "fc -l"])
-    f("-r with edit range", ["fc -s -r" if False else "fc -lr 2 3"])
+    f("-r with edit range", ["fc -lr 2 3"])
 
 # ---------------------------------------------------------------------------
 # prompts, startup, signals, completion, paste, rendering: fixed expectations
@@ -370,10 +369,40 @@ def has(name, steps, want=(), absent=(), **kw):
     good = all(w in out for w in want) and not any(a in out for a in absent)
     ok(name, good, "want %r absent %r\nscreen:\n%s" % (want, absent, out))
 
+# `has` sees the echo of the typed keys too, so what a case expects must be text
+# the shell has to compute: ALIVE prints "al1ve", which is never typed.
+ALIVE = "echo al$((1))ve"
+
+def exit_status(s, timeout=4.0):
+    """The shell's exit status once it has left on its own, else None."""
+    end = time.time() + timeout
+    while time.time() < end:
+        pid, st = os.waitpid(s.pid, os.WNOHANG)
+        if pid == s.pid:
+            return os.waitstatus_to_exitcode(st)
+        s._read(0.05)
+    return None
+
+def leaves(name, keys, want_status, env=None, want=()):
+    with Session([SH, "-i"], env=env) as s:
+        s.expect(r"\$ ?$"); s.take()
+        for k in keys:
+            s.send(k); s.settle(.3)
+        got = exit_status(s)
+        screen = s.take()
+        ok(name, got == want_status and all(w in screen for w in want), "status %r, screen:\n%s" % (got, screen))
+
+def ignored_signals(pid):
+    with open("/proc/%d/status" % pid) as f:
+        for l in f:
+            if l.startswith("SigIgn:"):
+                return int(l.split()[1], 16)
+    return 0
+
 def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
     has("PS1 command substitution", ["PS1='$(echo X)> '", "echo hi"], ["X> echo hi"])
-    has("PS1 history number", ["PS1='! '", "echo a", "echo b"], ["2 echo a", "3 echo b"] if False else ["2 echo a"])
+    has("PS1 history number", ["PS1='! '", "echo a", "echo b"], ["2 echo a"])
     has("PS1 !! is a literal !", ["PS1='!!> '", "echo a"], ["!> echo a"], ["!!> echo a"])
     has("PS1 expands variables", ["X=zz", "PS1='$X> '", "echo a"], ["zz> echo a"])
     has("PS2 continuation after a quote", ["echo 'a", "b'"], ["> b'", "a\nb"], argv=[SH, "-i"])
@@ -384,19 +413,20 @@ def prompt_cases():
     has("PS2 inside if", ["if true; then", "echo yes", "fi"], ["> echo yes", "\nyes"])
     has("PS2 inside a function definition", ["f() {", "echo in f", "}", "f"], ["> echo in f", "in f\n"])
     has("loop over lines", ["for i in 1 2; do", "echo $i", "done"], ["1\n", "2\n"])
-    has("syntax error keeps the shell", ["echo )", "echo alive"], ["alive"])
-    has("special builtin error keeps the shell", ["shift 9", "echo alive"], ["alive"])
-    has("readonly assignment keeps the shell", ["readonly r=1", "r=2", "echo alive"], ["alive"])
-    has("expansion error keeps the shell", ["echo ${x?msg}", "echo alive"], ["alive"])
-    has("dot of a missing file keeps the shell", [". /nonexistent/file", "echo alive"], ["alive"])
+    has("syntax error keeps the shell", ["echo )", ALIVE], ["al1ve"])
+    has("special builtin error keeps the shell", ["shift 9", ALIVE], ["al1ve"])
+    has("readonly assignment keeps the shell", ["readonly r=1", "r=2", ALIVE], ["al1ve"])
+    has("expansion error keeps the shell", ["echo ${x?msg}", ALIVE], ["al1ve"])
+    has("dot of a missing file keeps the shell", [". /nonexistent/file", ALIVE], ["al1ve"])
     has("$- has i", ["echo $-"], ["i"])
-    has("exit status", ["exit 3"], [], [])
-    has("set -o shows monitor on", ["set -o"], ["monitor", "on"])
-    has("set -o emacs is the default", ["set -o"], ["emacs"])
+    leaves("exit status", ["exit 3\n"], 3)
+    out = run_steps(["set -o"])
+    ok("set -o shows monitor on", re.search(r"(?m)^monitor +on$|^set -o monitor$", out) is not None, out)
+    ok("set -o emacs is the default", re.search(r"(?m)^emacs +on$|^set -o emacs$", out) is not None, out)
     has("PS4 in xtrace", ["PS4='TRACE '", "set -x", "echo hi"], ["TRACE echo hi"])
-    has("ignoreeof", ["set -o ignoreeof", "^D", "echo alive"], ["Use \"exit\" to leave shell.", "alive"])
+    has("ignoreeof", ["set -o ignoreeof", "^D", ALIVE], ["Use \"exit\" to leave shell.", "al1ve"])
     has("prompt for a failed command substitution", ["PS1='$(false)> '", "echo a"], ["> echo a"])
-    has("echo $0", ["echo $0"], ["sh"]) if False else None
+    has("$0 names the shell", ["echo zero=$0"], ["zero=" + SH])
     # ENV and HISTFILE
     envf = os.path.join(TMP, "envfile")
     open(envf, "w").write("PS1='ENV> '\nENVRAN=1\n")
@@ -416,7 +446,7 @@ def prompt_cases():
     ok("HISTFILE is written at exit", "echo saved1\necho saved2\nexit" in saved or "echo saved1\necho saved2\n" in saved, repr(saved))
     has("HISTFILE is read at start", ["fc -l"], ["echo saved1", "echo saved2"], env={"HISTFILE": hf})
     has("up arrow recalls the file's history", ["raw:" + UP + UP + "\n"], ["saved2"], env={"HISTFILE": hf})
-    has("HISTSIZE limits the history", ["fc -l"], ["echo saved2"], ["echo saved1"], env={"HISTFILE": hf, "HISTSIZE": "2"}) if False else None
+    has("HISTSIZE limits the history", ["fc -l"], ["echo saved2"], ["echo saved1"], env={"HISTFILE": hf, "HISTSIZE": "3"})
     # input that is not a terminal
     p = subprocess.run([SH, "-i"], input=b"echo a\necho b\nexit 4\n", capture_output=True, env={"PATH": os.environ["PATH"], "PS1": "P> ", "ENV": "/dev/null"})
     ok("-i with piped input: prompts go to stderr", p.stdout == b"a\nb\n" and b"P> " in p.stderr and p.returncode == 4, repr((p.stdout, p.stderr, p.returncode)))
@@ -428,8 +458,8 @@ def prompt_cases():
     ok("-i without a terminal says job control is off", b"job control turned off" in p.stderr, repr(p.stderr))
     p = subprocess.run([SH, "-i", "--diagnostics=rich"], input=b"echo x\n", capture_output=True, env={"PATH": os.environ["PATH"], "ENV": "/dev/null"})
     ok("-i without a terminal: rich diagnostic SH5015", b"SH5015" in p.stderr, repr(p.stderr))
-    p = subprocess.run([SH, "-c", "echo $-"], capture_output=True)
-    ok("-c is not interactive", b"i" not in p.stdout, repr(p.stdout))
+    p = subprocess.run([SH, "-c", "echo flags=$-"], capture_output=True)
+    ok("-c is not interactive", p.returncode == 0 and p.stdout.startswith(b"flags=") and b"i" not in p.stdout[6:], repr(p.stdout))
     p = subprocess.run([SH, "-i", "-c", "echo $-"], capture_output=True, env={"PATH": os.environ["PATH"], "ENV": "/dev/null"})
     ok("-i -c sets the i flag", b"i" in p.stdout, repr(p.stdout))
     p = subprocess.run([SH, "-c", "set -m; sleep 0.1 & jobs; wait"], capture_output=True)
@@ -452,32 +482,33 @@ def prompt_cases():
 def signal_cases():
     has("^C abandons the line", ["echo abc", "raw:echo xyz\x03", "echo after"], ["xyz^C", "after"])
     has("^C kills the foreground job, shell survives", ["sleep 30", ("w", .3), "^C", "echo status=$?"], ["status=130"])
-    has("^\\ is ignored at the prompt", ["^\\", "echo alive"], ["alive"])
-    s = Session([SH, "-i"]); s.expect(r"\$ ?$")
+    has("^\\ is ignored at the prompt", ["^\\", ALIVE], ["al1ve"])
     import signal as sg
-    os.kill(s.pid, sg.SIGTERM); s.settle(.3); s.send("echo alive\n"); s.settle(.3)
-    ok("SIGTERM is ignored by the interactive shell", "alive" in s.take()); s.close()
-    s = Session([SH, "-i"]); s.expect(r"\$ ?$")
-    os.kill(s.pid, sg.SIGINT); s.settle(.3); s.send("echo alive\n"); s.settle(.3)
-    ok("SIGINT does not end the interactive shell", "alive" in s.take()); s.close()
-    s = Session([SH, "-i"]); s.expect(r"\$ ?$")
-    os.kill(s.pid, sg.SIGTSTP); s.settle(.3); s.send("echo alive\n"); s.settle(.3)
-    ok("SIGTSTP is ignored by the interactive shell", "alive" in s.take()); s.close()
-    has("trap on INT runs in the interactive shell", ["trap 'echo caught' INT", "kill -INT $$", ("w", .3), "echo after"], ["caught", "after"])
+    # SIGTSTP: this shell leads an orphaned process group, where the kernel drops
+    # a default-action stop, so surviving it proves nothing: read the mask too.
+    for signame, num in (("SIGTERM", sg.SIGTERM), ("SIGINT", sg.SIGINT), ("SIGTSTP", sg.SIGTSTP)):
+        with Session([SH, "-i"]) as s:
+            s.expect(r"\$ ?$")
+            masked = signame == "SIGINT" or bool(ignored_signals(s.pid) >> (num - 1) & 1)
+            os.kill(s.pid, num); s.settle(.3); s.send(ALIVE + "\n"); s.settle(.3)
+            screen = s.take()
+            what = "does not end the interactive shell" if signame == "SIGINT" else "is ignored by the interactive shell"
+            ok("%s %s" % (signame, what), masked and "al1ve" in screen, "ignored mask ok: %r\n%s" % (masked, screen))
+    has("trap on INT runs in the interactive shell", ["trap 'echo caught$((1+1))' INT", "kill -INT $$", ("w", .3), ALIVE], ["caught2", "al1ve"])
     has("sh on PATH is the shell under test", ["test \"$(command -v sh)\" -ef " + SH + " && echo inner-$((1+1))"], ["inner-2"])
     has("child gets default SIGINT", ["sh -c 'kill -INT $$; echo not-$((1+1))'; echo st=$?"], ["st=130"], ["not-2"])
     has("^C interrupts wait", ["sleep 20 &", "wait", ("w", .2), "^C", "echo st=$?", "kill %1"], ["st=130"])
     has("^Z stops and the shell continues", ["sleep 30", "^Z", "echo back"], ["Stopped", "back"])
     has("stopped job warning on exit", ["sleep 31", "^Z", "exit", "jobs"], ["You have stopped jobs.", "Stopped"], env={"SH_DIAGNOSTICS": "posix"})
     has("second exit leaves", ["sleep 32", "^Z", "exit", "exit", "echo notrun"], ["You have stopped jobs."], ["\nnotrun"], env={"SH_DIAGNOSTICS": "posix"})
-    has("EOF at the prompt exits", ["^D", "echo notrun"], [], ["\nnotrun"])
+    leaves("EOF at the prompt exits", [ALIVE + "\n", "\x04"], 0, want=["al1ve"])
     out = run_steps(["sleep 33", "^Z", "^D", "^D", "echo notrun-$((1+1))"], env={"SH_DIAGNOSTICS": "posix"})
     ok("EOF with stopped jobs warns once, the next one leaves", out.count("You have stopped jobs.") == 1 and "notrun-2" not in out, out)
     has("read from the terminal", ["read x", "typed", "echo got $x"], ["got typed"])
-    has("background job reading the terminal is stopped", ["cat &", ("w", .4), "jobs", "kill -CONT %1; kill %1"], ["Stopped(SIGTTIN)"]) if False else None
+    has("background job reading the terminal is stopped", ["cat &", ("w", .6), "jobs", "kill -CONT %1; kill %1"], ["Stopped(SIGTTIN)"])
     has("subshell pipeline in job control", ["echo a | cat | cat"], ["\na\n"])
     has("job finished before the prompt is announced", ["true &", ("w", .3), "echo next"], ["Done", "true"])
-    has("trap EXIT runs when the interactive shell exits", ["trap 'echo bye' EXIT", "exit"], ["bye"])
+    leaves("trap EXIT runs when the interactive shell exits", ["trap 'echo by$((1+1))e' EXIT\n", "exit\n"], 0, want=["by2e"])
     # SIGWINCH redraw
     with Session([SH, "-i"], cols=40) as s:
         s.expect(r"\$ ?$")
@@ -501,7 +532,6 @@ def completion_cases():
     env = {"PATH": os.environ["PATH"] + ":" + os.path.join(d, "bin")}
     T = "\t"
     h = lambda n, st, want, absent=(), **kw: has("completion: " + n, st, want, absent, cwd=d, env=dict(env, **kw.pop("env", {})), **kw)
-    h("unique file", ["echo be" + T + "x"], ["beta x"]) if False else None
     h("unique file completes with a blank", ["echo be" + T + "!"], ["echo beta !"])
     h("directory gets a slash", ["echo alpi" + T + "x"], ["alpine/x"])
     h("common prefix", ["echo al" + T + "x"], ["echo alpx"])
@@ -510,12 +540,12 @@ def completion_cases():
     h("hidden files need a dot", ["echo ." + T + "!"], ["echo .hidden !"])
     h("hidden files are not offered", ["raw:echo \t\t"], ["alpha.txt", "beta"], [".hidden"])
     h("blank in a name is escaped", ["echo sp" + T + "!"], ["sp\\ ace !"])
-    h("completed escaped name works", ["echo sp" + T + "\n"], ["sp ace"]) if False else None
+    h("completed escaped name works", ["echo sp" + T + "\n"], ["sp ace"])
     h("command from PATH", ["zzf" + T + "\n"], ["zzfoo ran"])
     h("builtin name", ["ech" + T + "hi"], ["echo hi", "\nhi\n"])
     h("command after a semicolon", ["true; ech" + T + "ok"], ["echo ok"])
     h("variable name", ["FOOBARBAZ=1", "echo $FOOBARB" + T + "x"], ["$FOOBARBAZ x"])
-    h("braced variable", ["FOOBARBAZ=1", "echo ${FOOBARB" + T + "x"], ["${FOOBARBAZ} x"]) if False else None
+    h("braced variable", ["FOOBARBAZ=1", "echo ${FOOBARB" + T + "x"], ["${FOOBARBAZ} x"])
     h("no candidates leaves the line alone", ["echo zzzz" + T + "x"], ["echo zzzzx"])
     with Session([SH, "-i"]) as s:
         s.expect(r"\$ ?$")
@@ -523,26 +553,32 @@ def completion_cases():
         before = len(s.raw)
         s.send(T); s.settle(.4)
         ok("no candidates alerts", "\x07" in s.raw[before:], repr(s.raw[before:]))
-    h("tab with nothing typed lists files", ["raw:\t\t"], []) if False else None
+    h("tab with nothing typed lists files", ["raw:\t\t"], ["alpha.txt", "beta"])
     h("after a redirection", ["echo hi > be" + T + "x"], ["> beta x"])
-    h("tab inside a recalled line", ["echo hi", "raw:" + UP + HOME + RIGHT * 5 + "\x15echo be" + T + "\n"], ["beta"]) if False else None
+    h("tab inside a recalled line", ["echo hi", "raw:" + UP + HOME + RIGHT * 5 + "\x15echo be" + T + "\n"], ["beta"])
     # vi mode completion commands
     h("vi: \\ completes", ["set -o vi", "raw:echo be" + ESC + "\\\n"], ["echo beta"], absent=[])
     h("vi: * expands all", ["set -o vi", "raw:echo al" + ESC + "*\n"], ["alpha.txt alpine/"])
     h("vi: = lists", ["set -o vi", "raw:echo al" + ESC + "="], ["alpha.txt", "alpine/"])
     h("emacs: M-? lists", ["raw:echo al" + M("?")], ["alpha.txt", "alpine/"])
-    h("unicode file name", ["echo ü" + T + "!"], ["echo ü !"]) if False else None
+    os.makedirs(os.path.join(d, "uni"), exist_ok=True)
+    open(os.path.join(d, "uni", "\u00fcber"), "w").close()
+    h("unicode file name", ["echo uni/\u00fc" + T + "!"], ["echo uni/\u00fcber !"])
 
 def paste_render_cases():
     P0, P1 = "\x1b[200~", "\x1b[201~"
-    has("bracketed paste inserts text", ["raw:" + P0 + "echo pasted" + P1 + "\n"], ["pasted"])
+    has("bracketed paste inserts text", ["raw:" + P0 + "echo pas$((1))ted" + P1 + "\n"], ["pas1ted"])
     has("paste keeps tabs literal (no completion)", ["raw:" + P0 + "echo a\tb" + P1 + "\n"], ["a b"])
-    has("paste with a newline keeps both lines", ["raw:" + P0 + "echo 'a\nb'" + P1 + "\n"], ["a\nb"])
+    has("paste with a newline keeps both lines", ["raw:" + P0 + "echo 'a\nb'" + P1 + "\n"], ["\na\nb\n"])
     paste = "raw:" + P0 + "echo ran-$((40+1))\necho second" + P1
-    has("paste with a newline does not run early", [paste], ["echo second"], ["ran-41"])
-    has("the pasted lines run on Enter", [paste, "raw:\r"], ["ran-41", "\nsecond"])
+    with Session([SH, "-i"]) as s:
+        s.expect(r"\$ ?$"); s.take()
+        s.send(P0 + "echo ran-$((40+1))\necho second" + P1); s.settle(.5)
+        before = s.take()
+        s.send("\r"); s.settle(.5)
+        after = s.take()
+        ok("paste with a newline does not run early", "ran-41" not in before and "ran-41" in after, "before Enter:\n%s\nafter:\n%s" % (before, after))
     has("paste then edit", ["raw:" + P0 + "echo abc" + P1 + LEFT + "X\n"], ["abXc"])
-    has("paste enable sequence is sent", [], [], [], ) if False else None
     out = run_steps([], rows=24, cols=80)
     with Session([SH, "-i"]) as s:
         s.expect(r"\$ ?$")
@@ -555,15 +591,18 @@ def paste_render_cases():
         ok("render: long line wraps at the terminal width", scr.split("\n")[0] == "$ echo " + "a" * 13 and scr.split("\n")[1] == "a" * 17, scr)
         s.send("\x7f" * 20); s.settle(.3)
         scr = s.take()
-        ok("render: backspace across the wrap redraws", scr.split("\n")[-1].endswith("echo aaaaaaaaaa"[:0]) or "aaaaaaaaaa" in scr, scr)
+        ok("render: backspace across the wrap redraws", scr.split("\n")[-1] == "$ echo " + "a" * 10, repr(scr))
         s.send(C("A")); s.settle(.2); s.send("XY"); s.settle(.3)
         scr = s.take()
         ok("render: insert at start of a wrapped line", "$ XYecho" in scr, scr)
         s.send(C("U")); s.settle(.2)
     with Session([SH, "-i"], cols=30) as s:
         s.expect(r"\$ ?$"); s.take()
-        s.send("echo 中文字"); s.settle(.3)
-        ok("render: wide characters", "echo 中文字" in s.take())
+        s.send("echo 中文字"); s.settle(.3); s.take()
+        # only an editor moves left over a wide character and redraws
+        s.send(LEFT + "Z"); s.settle(.3)
+        t = s.take()
+        ok("render: wide characters", "$ echo 中文Z字" in t, repr(t))
         s.send(C("A")); s.send("\x04"); s.settle(.3)
         t = s.take()
         ok("render: C-d at line start with text deletes", "$ cho " in t and "$ echo" not in t.split("\n")[-1], t)
@@ -579,9 +618,9 @@ def paste_render_cases():
         ok("render: escape sequences in the prompt have no width", "> Xecho hi" in t, t)
     with Session([SH, "-i"], env={"TERM": "dumb"}) as s:
         s.expect(r"\$ ?$"); s.take()
-        s.send("echo dumb\n"); s.settle(.3)
+        s.send("echo du$((1))mb\n"); s.settle(.3)
         t = s.take()
-        ok("TERM=dumb uses plain line input", "dumb" in t and "\x1b[?2004h" not in s.raw, t)
+        ok("TERM=dumb uses plain line input", "du1mb" in t and "\x1b[?2004h" not in s.raw, t)
     with Session([SH, "-i"]) as s:
         s.expect(r"\$ ?$"); s.take()
         s.send("set +o emacs\n"); s.settle(.3); s.take()
