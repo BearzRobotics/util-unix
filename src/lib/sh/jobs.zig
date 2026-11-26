@@ -89,10 +89,14 @@ pub fn create(sh: *Shell) ?*Job {
     const gpa = sh.gpa;
     var id: u32 = 1;
     while (find(sh, id) != null) id += 1;
-    const j = gpa.create(Job) catch return null;
+    const j = gpa.create(Job) catch |oe| {
+        _ = sh.oom(oe);
+        return null;
+    };
     sh.job_stamp += 1;
     j.* = .{ .id = id, .pgid = 0, .stamp = sh.job_stamp };
-    sh.jobs.append(gpa, j) catch {
+    sh.jobs.append(gpa, j) catch |oe| {
+        _ = sh.oom(oe);
         gpa.destroy(j);
         return null;
     };

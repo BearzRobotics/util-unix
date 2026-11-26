@@ -315,6 +315,25 @@ pub const Shell = struct {
         gpa.destroy(self);
     }
 
+    /// An allocation failed while a command was being run: say so (without
+    /// allocating) and end the script with a failure. Carrying on would run
+    /// later commands with values that are missing or cut short, whatever
+    /// `set -e` says. (An interactive shell goes back to its prompt.)
+    pub fn oom(self: *Shell, _: Allocator.Error) u8 {
+        self.errRaw("sh: out of memory\n");
+        self.flow = .exit_shell;
+        self.status = 2;
+        return 2;
+    }
+
+    /// `setVar` failed: status 2 for a read-only variable, `oom` otherwise.
+    pub fn setFailed(self: *Shell, e: SetError) u8 {
+        return switch (e) {
+            error.ReadOnly => 2,
+            error.OutOfMemory => self.oom(error.OutOfMemory),
+        };
+    }
+
     // --- variables ---------------------------------------------------------
 
     pub fn getVar(self: *const Shell, name: []const u8) ?[]const u8 {
@@ -415,7 +434,8 @@ pub const Shell = struct {
             for (fresh.items) |p| self.gpa.free(p);
             fresh.deinit(self.gpa);
         }
-        for (args) |a| try fresh.append(self.gpa, try self.gpa.dupe(u8, a));
+        try fresh.ensureTotalCapacityPrecise(self.gpa, args.len);
+        for (args) |a| fresh.appendAssumeCapacity(try self.gpa.dupe(u8, a));
         for (self.params.items) |p| self.gpa.free(p);
         self.params.deinit(self.gpa);
         self.params = fresh;

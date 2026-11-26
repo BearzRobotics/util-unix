@@ -81,15 +81,15 @@ fn listOrExplain(ctx: cli.Context, list: bool, want: ?[]const u8, json: bool) u8
             sys.writeAll(2, m) catch {};
             return 2;
         };
-        writeOut((if (json) diag.explainJson(a, e) else diag.explain(a, e)) catch return 2);
+        writeOut((if (json) diag.explainJson(a, e) else diag.explain(a, e)) catch return outOfMemory(ctx));
         return 0;
     }
     if (list and json) {
-        writeOut(diag.catalogJson(a) catch return 2);
+        writeOut(diag.catalogJson(a) catch return outOfMemory(ctx));
         return 0;
     }
     var out: std.ArrayList(u8) = .empty;
-    for (&diag.catalog) |*e| out.print(a, "SH{d} {s}\n", .{ e.code, @tagName(e.kind) }) catch return 2;
+    for (&diag.catalog) |*e| out.print(a, "SH{d} {s}\n", .{ e.code, @tagName(e.kind) }) catch return outOfMemory(ctx);
     writeOut(out.items);
     return 0;
 }
@@ -147,7 +147,7 @@ pub fn main(ctx: cli.Context) u8 {
             } else if (std.mem.eql(u8, a, "--diagnostics-catalog")) {
                 var arena = std.heap.ArenaAllocator.init(gpa);
                 defer arena.deinit();
-                writeOut(diag.catalogMarkdown(arena.allocator()) catch return 2);
+                writeOut(diag.catalogMarkdown(arena.allocator()) catch return outOfMemory(ctx));
                 return 0;
             } else if (std.mem.eql(u8, a, "--list-diagnostics")) {
                 list_diag = true;
@@ -198,7 +198,7 @@ pub fn main(ctx: cli.Context) u8 {
                         argError(ctx, style_opt orelse .posix, .missing_argument, "-o requires an argument", "-o requires an argument");
                         return 2;
                     }
-                    pending_opts.append(gpa, .{ .name = args[i], .on = on }) catch return 2;
+                    pending_opts.append(gpa, .{ .name = args[i], .on = on }) catch return outOfMemory(ctx);
                 },
                 else => {
                     const ok = switch (a[j]) {
@@ -338,7 +338,7 @@ pub fn main(ctx: cli.Context) u8 {
         .diag_style = style,
         .diag_color = color,
         .label = label,
-    }) catch return 2;
+    }) catch return outOfMemory(ctx);
     defer shell.deinit();
     for (pending_opts.items) |o| {
         if (!sh.builtins.setNamedOption(shell, o.name, o.on)) {
@@ -346,7 +346,7 @@ pub fn main(ctx: cli.Context) u8 {
             return 2;
         }
     }
-    shell.setParams(rest) catch return 2;
+    shell.setParams(rest) catch return outOfMemory(ctx);
     if (login) runProfiles(shell);
     var session: sh.interactive.Session = undefined;
     var have_session = false;
@@ -373,7 +373,7 @@ pub fn main(ctx: cli.Context) u8 {
         return 2;
     });
     if (check_mode) return runCheck(ctx, shell, text, label, if (style == .posix) .gcc else style);
-    _ = shell.runString(text) catch return 2;
+    _ = shell.runString(text) catch return outOfMemory(ctx);
     return shell.finish();
 }
 
@@ -387,6 +387,11 @@ fn runProfiles(shell: *sh.Shell) void {
         const p = std.fmt.allocPrint(a, "{s}/.profile", .{h}) catch return;
         if (sh.exec.readFile(a, p)) |t| _ = sh.exec.runSource(shell, t, .{}) catch {};
     }
+}
+
+fn outOfMemory(ctx: cli.Context) u8 {
+    cli.warn(ctx, "out of memory", .{});
+    return 2;
 }
 
 fn reportFinding(ctx: cli.Context, f: sh.lint.Finding, label: []const u8, text: []const u8, style: diag.Style) void {
@@ -413,17 +418,17 @@ fn reportFinding(ctx: cli.Context, f: sh.lint.Finding, label: []const u8, text: 
 /// Exit 0 when clean, 1 with findings, 2 on a syntax error.
 fn runCheck(ctx: cli.Context, shell: *sh.Shell, text: []const u8, label: []const u8, style: diag.Style) u8 {
     shell.flags.noexec = true;
-    const st = shell.runString(text) catch return 2;
+    const st = shell.runString(text) catch return outOfMemory(ctx);
     if (st != 0) {
         if (sh.lint.functionKeywordLine(text)) |f| reportFinding(ctx, f, label, text, style);
         return 2;
     }
     var d: sh.parser.Diag = .{};
-    var prog = shell.parse(text, &d) catch return 2;
+    var prog = shell.parse(text, &d) catch return outOfMemory(ctx);
     defer prog.deinit();
     var findings: std.ArrayList(sh.lint.Finding) = .empty;
     defer findings.deinit(ctx.gpa);
-    sh.lint.check(ctx.gpa, prog.commands, &findings) catch return 2;
+    sh.lint.check(ctx.gpa, prog.commands, &findings) catch return outOfMemory(ctx);
     for (findings.items) |f| reportFinding(ctx, f, label, text, style);
     return if (findings.items.len > 0) 1 else 0;
 }

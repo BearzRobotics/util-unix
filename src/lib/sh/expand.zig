@@ -193,7 +193,10 @@ fn homeOf(sh: *Shell, a: Allocator, user: []const u8) ?[]const u8 {
     while (true) {
         const n = sys.read(fd, &buf) catch return null;
         if (n == 0) break;
-        data.appendSlice(a, buf[0..n]) catch return null;
+        data.appendSlice(a, buf[0..n]) catch |oe| {
+            _ = sh.oom(oe);
+            return null;
+        };
     }
     var lines = std.mem.splitScalar(u8, data.items, '\n');
     while (lines.next()) |ln| {

@@ -230,7 +230,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         var text: []const u8 = h.get(num) orelse return 1;
         if (old) |o| if (o.len > 0) {
             if (std.mem.indexOf(u8, text, o)) |at| {
-                text = std.mem.concat(a, u8, &.{ text[0..at], new, text[at + o.len ..] }) catch return 2;
+                text = std.mem.concat(a, u8, &.{ text[0..at], new, text[at + o.len ..] }) catch |oe| return sh.oom(oe);
             }
         };
         return runText(sh, a, text, true);
@@ -273,9 +273,9 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         while (n <= last_n) : (n += 1) {
             const num = if (reverse) last_n - (n - first_n) else n;
             const t = h.get(num) orelse continue;
-            if (no_num) {} else out.print(a, "{d: >5} ", .{num}) catch return 2;
-            out.appendSlice(a, t) catch return 2;
-            out.append(a, '\n') catch return 2;
+            if (no_num) {} else out.print(a, "{d: >5} ", .{num}) catch |oe| return sh.oom(oe);
+            out.appendSlice(a, t) catch |oe| return sh.oom(oe);
+            out.append(a, '\n') catch |oe| return sh.oom(oe);
         }
         _ = sh.out(out.items);
         return 0;
@@ -288,12 +288,12 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     while (n <= last_n) : (n += 1) {
         const num = if (reverse) last_n - (n - first_n) else n;
         const t = h.get(num) orelse continue;
-        body.appendSlice(a, t) catch return 2;
-        body.append(a, '\n') catch return 2;
+        body.appendSlice(a, t) catch |oe| return sh.oom(oe);
+        body.append(a, '\n') catch |oe| return sh.oom(oe);
     }
     const ed = editor orelse sh.getVar("FCEDIT") orelse "ed";
     const tmpdir = sh.getVar("TMPDIR") orelse "/tmp";
-    const path = std.fmt.allocPrint(a, "{s}/sh-fc.{d}", .{ tmpdir, sys.getpid() }) catch return 2;
+    const path = std.fmt.allocPrint(a, "{s}/sh-fc.{d}", .{ tmpdir, sys.getpid() }) catch |oe| return sh.oom(oe);
     const fd = sys.open(path, .{ .read = false, .write = true, .create = true, .trunc = true, .cloexec = true }, 0o600) catch {
         sh.diagCmdK(.cannot_create, path, "fc", "cannot create {s}", .{path});
         return 1;
@@ -308,8 +308,8 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             _ = std.os.linux.unlink(@ptrCast(&buf));
         }
     }
-    const cmd = std.fmt.allocPrint(a, "{s} '{s}'", .{ ed, path }) catch return 2;
-    const st = exec.runSource(sh, cmd, .{}) catch return 2;
+    const cmd = std.fmt.allocPrint(a, "{s} '{s}'", .{ ed, path }) catch |oe| return sh.oom(oe);
+    const st = exec.runSource(sh, cmd, .{}) catch |oe| return sh.oom(oe);
     if (st != 0) return st;
     const rfd = sys.open(path, .{ .cloexec = true }, 0) catch return 1;
     defer sys.close(rfd);
@@ -318,7 +318,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     while (true) {
         const k = sys.read(rfd, &chunk) catch break;
         if (k == 0) break;
-        data.appendSlice(a, chunk[0..k]) catch return 2;
+        data.appendSlice(a, chunk[0..k]) catch |oe| return sh.oom(oe);
     }
     return runText(sh, a, data.items, false);
 }

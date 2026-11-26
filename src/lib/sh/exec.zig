@@ -277,7 +277,10 @@ pub fn checkTraps(sh: *Shell) void {
         const cmd = sh.traps[sig] orelse continue;
         if (cmd.len == 0) continue;
         const saved = sh.status;
-        const copy = sh.gpa.dupe(u8, cmd) catch continue;
+        const copy = sh.gpa.dupe(u8, cmd) catch |oe| {
+            _ = sh.oom(oe);
+            return;
+        };
         defer sh.gpa.free(copy);
         const prev_ts = sh.trap_status;
         sh.trap_status = saved;
@@ -285,7 +288,7 @@ pub fn checkTraps(sh: *Shell) void {
         sh.in_trap += 1;
         const saved_flow = sh.flow;
         sh.flow = .none;
-        _ = runSource(sh, copy, .{}) catch {};
+        _ = runSource(sh, copy, .{}) catch |oe| sh.oom(oe);
         sh.in_trap -= 1;
         if (sh.flow == .none) {
             sh.flow = saved_flow;
@@ -303,7 +306,7 @@ pub fn runExitTrap(sh: *Shell) void {
     const saved = sh.status;
     sh.flow = .none;
     sh.trap_status = saved;
-    _ = runSource(sh, cmd, .{}) catch {};
+    _ = runSource(sh, cmd, .{}) catch |oe| sh.oom(oe);
     if (sh.flow != .exit_shell) sh.status = saved;
 }
 
@@ -532,8 +535,8 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
         .case_clause => |c| return execCase(sh, c.word, c.items),
         .function => |f| {
             // every running script may have to keep its arena for this
-            sh.pinned.ensureUnusedCapacity(sh.gpa, sh.arenas_running) catch return 2;
-            _ = shell.putOwned(*const Node, sh.gpa, &sh.funcs, f.name, f.body) catch return 2;
+            sh.pinned.ensureUnusedCapacity(sh.gpa, sh.arenas_running) catch |oe| return sh.oom(oe);
+            _ = shell.putOwned(*const Node, sh.gpa, &sh.funcs, f.name, f.body) catch |oe| return sh.oom(oe);
             sh.funcs_defined += 1;
             return 0;
         },
@@ -588,7 +591,7 @@ fn runStages(sh: *Shell, cmds: []const *const Node) u8 {
 
 fn runStagesImpl(sh: *Shell, cmds: []const *const Node, bg: bool) u8 {
     const gpa = sh.gpa;
-    var pids = gpa.alloc(i32, cmds.len) catch return 2;
+    var pids = gpa.alloc(i32, cmds.len) catch |oe| return sh.oom(oe);
     defer gpa.free(pids);
     var fds: std.ArrayList(i32) = .empty;
     defer fds.deinit(gpa);
@@ -603,17 +606,20 @@ fn runStagesImpl(sh: *Shell, cmds: []const *const Node, bg: bool) u8 {
                 break;
             };
         }
-        var closes: std.ArrayList(i32) = .empty;
-        defer closes.deinit(gpa);
-        if (prev_read) |r| closes.append(gpa, r) catch {};
-        if (next_pipe) |np| {
-            closes.append(gpa, np[0]) catch {};
-            closes.append(gpa, np[1]) catch {};
+        var closes: [3]i32 = undefined;
+        var nclose: usize = 0;
+        if (prev_read) |r| {
+            closes[nclose] = r;
+            nclose += 1;
         }
+        if (next_pipe) |np| for (np) |fd| {
+            closes[nclose] = fd;
+            nclose += 1;
+        };
         const pid = forkRun(sh, c, .{
             .stdin = prev_read,
             .stdout = if (next_pipe) |np| np[1] else null,
-            .close = closes.items,
+            .close = closes[0..nclose],
             .job = job,
             .bg = bg,
             .devnull_stdin = bg and !sh.jc and i == 0,
@@ -719,7 +725,7 @@ fn execFor(sh: *Shell, name: []const u8, words: ?[]const ast.Word, body: ?*const
     if (words) |w| {
         expand.fields(sh, a, w, &list) catch |e| return xerr(sh, e);
     } else {
-        for (sh.params.items) |p| list.append(a, a.dupe(u8, p) catch return 2) catch return 2;
+        for (sh.params.items) |p| list.append(a, a.dupe(u8, p) catch |oe| return sh.oom(oe)) catch |oe| return sh.oom(oe);
     }
     var st: u8 = 0;
     sh.loop_depth += 1;
@@ -732,7 +738,7 @@ fn execFor(sh: *Shell, name: []const u8, words: ?[]const ast.Word, body: ?*const
                 sh.flow = .exit_shell;
                 return 2;
             },
-            error.OutOfMemory => return 2,
+            error.OutOfMemory => return sh.oom(error.OutOfMemory),
         };
         st = if (body) |b| execNode(sh, b) else 0;
         checkTraps(sh);
@@ -1049,10 +1055,14 @@ fn pathFind(sh: *Shell, a: Allocator, name: []const u8, want_exec: bool) ?[]cons
     const path = sh.getVar("PATH") orelse "";
     var it = std.mem.splitScalar(u8, path, ':');
     while (it.next()) |dir| {
-        const full = if (dir.len == 0)
-            std.fmt.allocPrint(a, "./{s}", .{name}) catch return null
+        const full = (if (dir.len == 0)
+            std.fmt.allocPrint(a, "./{s}", .{name})
         else
-            std.fmt.allocPrint(a, "{s}/{s}", .{ dir, name }) catch return null;
+            std.fmt.allocPrint(a, "{s}/{s}", .{ dir, name })) catch |oe| {
+            // not the same as "not found"
+            _ = sh.oom(oe);
+            return null;
+        };
         const info = sys.stat(full, true) catch continue;
         if (info.kind == .dir) continue;
         if (want_exec and !sys.access(full, 1)) continue;
@@ -1120,10 +1130,10 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
     for (s.words, 0..) |w, i| {
         if (decl != null and i >= decl.? and isAssignWord(w)) {
             const v = expand.assignValue(sh, a, w) catch |e| return xerr(sh, e);
-            args.append(a, v) catch return 2;
+            args.append(a, v) catch |oe| return sh.oom(oe);
         } else expand.fields(sh, a, &.{w}, &args) catch |e| return xerr(sh, e);
     }
-    const vals = a.alloc([]const u8, s.assigns.len) catch return 2;
+    const vals = a.alloc([]const u8, s.assigns.len) catch |oe| return sh.oom(oe);
     // `export x=~` style operands expand tildes after `=` like assignments.
     for (vals) |*v| v.* = "";
     // POSIX 2.9.1: the redirections are performed before the assignments of a
@@ -1177,7 +1187,7 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
             }
             sh.setVar(asg.name, v) catch |e| switch (e) {
                 error.ReadOnly => return assignError(sh, asg.name),
-                error.OutOfMemory => return 2,
+                error.OutOfMemory => return sh.oom(error.OutOfMemory),
             };
         }
         const ast_st = sh.last_subst_status orelse 0;
@@ -1191,10 +1201,13 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
     for (s.assigns, vals) |asg, v| if (std.mem.eql(u8, asg.name, "PATH")) {
         // saved once: restoring then brings back the value from before the line
         if (path_saved == null) {
-            const saved = saveVar(sh, "PATH") catch return 2;
+            const saved = saveVar(sh, "PATH") catch |oe| return sh.oom(oe);
             path_saved = saved;
         }
-        sh.setVarRaw("PATH", v) catch {};
+        sh.setVarRaw("PATH", v) catch |oe| {
+            restoreVar(sh, path_saved.?);
+            return sh.oom(oe);
+        };
     };
     const r = resolve(sh, a, name);
     if (path_saved) |ps| restoreVar(sh, ps);
@@ -1357,15 +1370,15 @@ fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s
     for (s.assigns, vals) |asg, v| {
         if (!is_special) {
             // room first, so that what is saved cannot be dropped
-            temps.ensureUnusedCapacity(sh.gpa, 1) catch return 2;
-            temps.appendAssumeCapacity(saveVar(sh, asg.name) catch return 2);
+            temps.ensureUnusedCapacity(sh.gpa, 1) catch |oe| return sh.oom(oe);
+            temps.appendAssumeCapacity(saveVar(sh, asg.name) catch |oe| return sh.oom(oe));
         }
         sh.setVar(asg.name, v) catch |e| switch (e) {
             error.ReadOnly => {
                 saved.restore(sh.gpa);
                 return assignError(sh, asg.name);
             },
-            error.OutOfMemory => return 2,
+            error.OutOfMemory => return sh.oom(error.OutOfMemory),
         };
         if (!is_special or is_exec) sh.vars.getPtr(asg.name).?.exported = true;
     }
@@ -1434,9 +1447,9 @@ pub fn callFunction(sh: *Shell, body: *const Node, args: []const []const u8) u8 
     const gpa = sh.gpa;
     var old_params = sh.params;
     sh.params = .empty;
-    sh.setParams(args) catch {
+    sh.setParams(args) catch |oe| {
         sh.params = old_params;
-        return 2;
+        return sh.oom(oe);
     };
     const mark = sh.locals.items.len;
     const saved_base = sh.locals_base;

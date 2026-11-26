@@ -229,7 +229,7 @@ fn exitCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
 
 fn eval(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     if (args.len < 2) return 0;
-    const text = std.mem.join(a, " ", args[1..]) catch return 2;
+    const text = std.mem.join(a, " ", args[1..]) catch |oe| return sh.oom(oe);
     const saved_line = sh.line;
     defer sh.line = saved_line;
     return exec.runSource(sh, text, .{ .prefix = "eval" }) catch 2;
@@ -249,7 +249,7 @@ fn dot(sh: *Shell, a: Allocator, args_in: []const []const u8) u8 {
             const pv = sh.getVar("PATH") orelse "";
             var it = std.mem.splitScalar(u8, pv, ':');
             while (it.next()) |dir| {
-                const full = std.fmt.allocPrint(a, "{s}/{s}", .{ if (dir.len == 0) "." else dir, name }) catch return 2;
+                const full = std.fmt.allocPrint(a, "{s}/{s}", .{ if (dir.len == 0) "." else dir, name }) catch |oe| return sh.oom(oe);
                 const info = sys.stat(full, true) catch continue;
                 if (info.kind == .dir) continue;
                 break :blk full;
@@ -274,7 +274,7 @@ fn dot(sh: *Shell, a: Allocator, args_in: []const []const u8) u8 {
     if (have_args) {
         old = sh.params;
         sh.params = .empty;
-        sh.setParams(args[2..]) catch return 2;
+        sh.setParams(args[2..]) catch |oe| return sh.oom(oe);
     }
     const saved_line = sh.line;
     sh.source_depth += 1;
@@ -305,7 +305,7 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         sh.diagCmdK(.not_found, name, "exec", "{s}: not found", .{name});
         return die(sh, 127);
     };
-    const env = sh.environ(a) catch return 2;
+    const env = sh.environ(a) catch |oe| return sh.oom(oe);
     var i: u8 = 1;
     while (i < sys.nsig) : (i += 1) {
         if (sh.traps[i]) |t| if (t.len > 0) {
@@ -339,18 +339,18 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 // --- variables ---------------------------------------------------------------------------
 
 fn printVars(sh: *Shell, a: Allocator, prefix: []const u8, want_export: bool, want_ro: bool) u8 {
-    const keys = sortedKeys(a, sh.vars) catch return 2;
+    const keys = sortedKeys(a, sh.vars) catch |oe| return sh.oom(oe);
     var out: std.ArrayList(u8) = .empty;
     for (keys) |k| {
         const v = sh.vars.get(k).?;
         if (want_export and !v.exported) continue;
         if (want_ro and !v.readonly) continue;
         const val = v.value orelse {
-            out.print(a, "{s}{s}\n", .{ prefix, k }) catch return 2;
+            out.print(a, "{s}{s}\n", .{ prefix, k }) catch |oe| return sh.oom(oe);
             continue;
         };
-        const q = quoteSingle(a, val) catch return 2;
-        out.print(a, "{s}{s}={s}\n", .{ prefix, k, q }) catch return 2;
+        const q = quoteSingle(a, val) catch |oe| return sh.oom(oe);
+        out.print(a, "{s}{s}={s}\n", .{ prefix, k, q }) catch |oe| return sh.oom(oe);
     }
     _ = sh.out(out.items);
     return 0;
@@ -386,10 +386,10 @@ fn declare(sh: *Shell, a: Allocator, args: []const []const u8, comptime cmd: []c
                     sh.diagCmdK(.readonly_assignment, name, cmd, "{s}: is read only", .{name});
                     return die(sh, 2);
                 },
-                error.OutOfMemory => return 2,
+                error.OutOfMemory => return sh.oom(error.OutOfMemory),
             };
         }
-        if (ro) sh.setReadonly(name) catch return 2 else sh.setExported(name, true) catch return 2;
+        if (ro) sh.setReadonly(name) catch |oe| return sh.oom(oe) else sh.setExported(name, true) catch |oe| return sh.oom(oe);
     }
     st = 0;
     return st;
@@ -412,8 +412,8 @@ fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
         // `local -` restores the shell options when the function returns
         // (dash, FreeBSD sh)
         if (std.mem.eql(u8, arg, "-")) {
-            sh.locals.ensureUnusedCapacity(sh.gpa, 1) catch return 2;
-            sh.locals.appendAssumeCapacity(.{ .name = sh.gpa.dupe(u8, "-") catch return 2, .old = null, .flags = sh.flags });
+            sh.locals.ensureUnusedCapacity(sh.gpa, 1) catch |oe| return sh.oom(oe);
+            sh.locals.appendAssumeCapacity(.{ .name = sh.gpa.dupe(u8, "-") catch |oe| return sh.oom(oe), .old = null, .flags = sh.flags });
             continue;
         }
         const eq = std.mem.indexOfScalar(u8, arg, '=');
@@ -428,14 +428,14 @@ fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             again = true;
         };
         if (again) {
-            if (eq) |e| sh.setVar(name, arg[e + 1 ..]) catch return 2;
+            if (eq) |e| sh.setVar(name, arg[e + 1 ..]) catch |oe| return sh.setFailed(oe);
             continue;
         }
-        sh.locals.ensureUnusedCapacity(sh.gpa, 1) catch return 2;
-        sh.locals.appendAssumeCapacity(exec.saveVar(sh, name) catch return 2);
+        sh.locals.ensureUnusedCapacity(sh.gpa, 1) catch |oe| return sh.oom(oe);
+        sh.locals.appendAssumeCapacity(exec.saveVar(sh, name) catch |oe| return sh.oom(oe));
         // `local x` without a value keeps the current value, as in dash and
         // FreeBSD sh (the variable is local from now on)
-        if (eq) |e| sh.setVar(name, arg[e + 1 ..]) catch return 2;
+        if (eq) |e| sh.setVar(name, arg[e + 1 ..]) catch |oe| return sh.setFailed(oe);
     }
     return 0;
 }
@@ -471,7 +471,7 @@ fn unsetCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
                 sh.diagCmdK(.readonly_assignment, name, "unset", "{s}: is read only", .{name});
                 return die(sh, 2);
             },
-            error.OutOfMemory => return 2,
+            error.OutOfMemory => return sh.oom(error.OutOfMemory),
         };
     }
     return 0;
@@ -626,9 +626,9 @@ fn setCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         i += 1;
     }
     if (i <= args.len and (i < args.len or (i > 1 and std.mem.eql(u8, args[i - 1], "--")))) {
-        sh.setParams(args[i..]) catch return 2;
+        sh.setParams(args[i..]) catch |oe| return sh.oom(oe);
         // new positional parameters restart option parsing (dash, bash)
-        sh.setVarRaw("OPTIND", "1") catch {};
+        sh.setVarRaw("OPTIND", "1") catch |oe| return sh.oom(oe);
         sh.getopts_sub = 0;
     }
     return 0;
@@ -642,7 +642,7 @@ fn timesCmd(sh: *Shell, a: Allocator, _: []const []const u8) u8 {
             return std.fmt.allocPrint(al, "{d}m{d}.{d:0>6}s", .{ secs / 60, secs % 60, us % 1_000_000 }) catch "";
         }
     }.fmt;
-    const text = std.fmt.allocPrint(a, "{s} {s}\n{s} {s}\n", .{ f(a, t.user), f(a, t.system), f(a, t.child_user), f(a, t.child_system) }) catch return 2;
+    const text = std.fmt.allocPrint(a, "{s} {s}\n{s} {s}\n", .{ f(a, t.user), f(a, t.system), f(a, t.child_user), f(a, t.child_system) }) catch |oe| return sh.oom(oe);
     _ = sh.out(text);
     return 0;
 }
@@ -675,15 +675,15 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             // a subshell reports the parent's traps until it sets its own
             const t = if (sh.in_subshell and !sh.trap_set[n]) (sh.parent_traps[n] orelse own) else own;
             const cmd = t orelse continue;
-            const q = quoteSingle(a, cmd) catch return 2;
-            out.print(a, "trap -- {s} {s}\n", .{ q, sys.signal_names[n] }) catch return 2;
+            const q = quoteSingle(a, cmd) catch |oe| return sh.oom(oe);
+            out.print(a, "trap -- {s} {s}\n", .{ q, sys.signal_names[n] }) catch |oe| return sh.oom(oe);
         }
         _ = sh.out(out.items);
         return 0;
     }
     if (!had_dd and std.mem.eql(u8, args[i], "-l")) {
         var out: std.ArrayList(u8) = .empty;
-        for (sys.signal_names[1..]) |nm| out.print(a, "{s}\n", .{nm}) catch return 2;
+        for (sys.signal_names[1..]) |nm| out.print(a, "{s}\n", .{nm}) catch |oe| return sh.oom(oe);
         _ = sh.out(out.items);
         return 0;
     }
@@ -726,7 +726,7 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         sh.traps[n] = null;
         sh.trap_set[n] = true;
         if (action) |cmd| {
-            sh.traps[n] = sh.gpa.dupe(u8, cmd) catch return 2;
+            sh.traps[n] = sh.gpa.dupe(u8, cmd) catch |oe| return sh.oom(oe);
             // `trap '' CHLD` is recorded for the programs run, not applied here
             const ignored: sys.SignalAction = if (n == sys.SIGCHLD) .default else .ignore;
             if (n > 0 and !sh.inherited_ignore[n]) _ = sys.setSignal(n, if (cmd.len == 0) ignored else .catch_flag);
@@ -834,7 +834,7 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         if (sh.getVar("CDPATH")) |cp| {
             var it = std.mem.splitScalar(u8, cp, ':');
             while (it.next()) |d| {
-                const cand = std.fmt.allocPrint(a, "{s}/{s}", .{ if (d.len == 0) "." else d, dir }) catch return 2;
+                const cand = std.fmt.allocPrint(a, "{s}/{s}", .{ if (d.len == 0) "." else d, dir }) catch |oe| return sh.oom(oe);
                 if (sys.stat(cand, true)) |info| {
                     if (info.kind == .dir) {
                         target = cand;
@@ -848,12 +848,12 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     const old_pwd = sh.getVar("PWD") orelse (physicalCwd(a) orelse "");
     var curpath = target;
     if (!physical) {
-        const abs = if (target.len > 0 and target[0] == '/') target else std.fmt.allocPrint(a, "{s}/{s}", .{ old_pwd, target }) catch return 2;
+        const abs = if (target.len > 0 and target[0] == '/') target else std.fmt.allocPrint(a, "{s}/{s}", .{ old_pwd, target }) catch |oe| return sh.oom(oe);
         if (!dotdotOk(a, abs)) {
             sh.diagCmdK(.cannot_cd, dir, "cd", "can't cd to {s}", .{dir});
             return 2;
         }
-        curpath = canonical(a, abs) catch return 2;
+        curpath = canonical(a, abs) catch |oe| return sh.oom(oe);
     }
     sys.chdir(if (physical) target else curpath) catch {
         const e = sys.errno();
@@ -863,10 +863,10 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     };
     sh.clearRelativeHash();
     const new_pwd: []const u8 = if (physical) (physicalCwd(a) orelse target) else curpath;
-    sh.setVarRaw("OLDPWD", old_pwd) catch {};
+    sh.setVarRaw("OLDPWD", old_pwd) catch |oe| return sh.oom(oe);
     if (sh.vars.getPtr("OLDPWD")) |v| v.exported = true; // dash, bash and FreeBSD sh export it
-    sh.setVarRaw("PWD", new_pwd) catch {};
-    if (print) _ = sh.out(std.fmt.allocPrint(a, "{s}\n", .{new_pwd}) catch return 2);
+    sh.setVarRaw("PWD", new_pwd) catch |oe| return sh.oom(oe);
+    if (print) _ = sh.out(std.fmt.allocPrint(a, "{s}\n", .{new_pwd}) catch |oe| return sh.oom(oe));
     return 0;
 }
 
@@ -891,7 +891,7 @@ fn pwdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         sh.diagCmdK(.other, null, "pwd", "getcwd() failed: {s}", .{sys.strerror(sys.errno())});
         return 1;
     };
-    _ = sh.out(std.fmt.allocPrint(a, "{s}\n", .{path}) catch return 2);
+    _ = sh.out(std.fmt.allocPrint(a, "{s}\n", .{path}) catch |oe| return sh.oom(oe));
     return 0;
 }
 
@@ -957,11 +957,11 @@ fn echoCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var first = true;
     var go = true;
     while (i < args.len and go) : (i += 1) {
-        if (!first) out.append(a, ' ') catch return 2;
+        if (!first) out.append(a, ' ') catch |oe| return sh.oom(oe);
         first = false;
-        go = escapes(a, &out, args[i], false) catch return 2;
+        go = escapes(a, &out, args[i], false) catch |oe| return sh.oom(oe);
     }
-    if (go and newline) out.append(a, '\n') catch return 2;
+    if (go and newline) out.append(a, '\n') catch |oe| return sh.oom(oe);
     if (!sh.out(out.items)) {
         sh.diagCmdK(.io_error, "I/O error", "echo", "I/O error", .{});
         return 1;
@@ -1093,7 +1093,7 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 // format-string escapes
                 var j = k + 1;
                 if (j >= fmt.len) {
-                    out.append(a, '\\') catch return 2;
+                    out.append(a, '\\') catch |oe| return sh.oom(oe);
                     break;
                 }
                 var tmp: std.ArrayList(u8) = .empty;
@@ -1105,22 +1105,22 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                         v = v * 8 + (fmt[j] - '0');
                         j += 1;
                     }
-                    out.append(a, @truncate(v)) catch return 2;
+                    out.append(a, @truncate(v)) catch |oe| return sh.oom(oe);
                     k = j - 1;
                     continue;
                 }
                 const seg = fmt[k .. k + 2];
                 if (fmt[j] == '"' or fmt[j] == '\'') {
-                    out.append(a, fmt[j]) catch return 2;
+                    out.append(a, fmt[j]) catch |oe| return sh.oom(oe);
                 } else {
-                    _ = escapes(a, &tmp, seg, true) catch return 2;
-                    out.appendSlice(a, tmp.items) catch return 2;
+                    _ = escapes(a, &tmp, seg, true) catch |oe| return sh.oom(oe);
+                    out.appendSlice(a, tmp.items) catch |oe| return sh.oom(oe);
                 }
                 k += 1;
                 continue;
             }
             if (c != '%') {
-                out.append(a, c) catch return 2;
+                out.append(a, c) catch |oe| return sh.oom(oe);
                 continue;
             }
             k += 1;
@@ -1130,7 +1130,7 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 return 1;
             }
             if (fmt[k] == '%') {
-                out.append(a, '%') catch return 2;
+                out.append(a, '%') catch |oe| return sh.oom(oe);
                 continue;
             }
             // flags, width, precision
@@ -1183,30 +1183,30 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     ai += 1;
                     var s = arg orelse "";
                     if (prec) |p| s = s[0..@min(p, s.len)];
-                    body.appendSlice(a, s) catch return 2;
+                    body.appendSlice(a, s) catch |oe| return sh.oom(oe);
                 },
                 'b' => {
                     ai += 1;
                     var tmp: std.ArrayList(u8) = .empty;
-                    const cont_ = escapes(a, &tmp, arg orelse "", true) catch return 2;
+                    const cont_ = escapes(a, &tmp, arg orelse "", true) catch |oe| return sh.oom(oe);
                     var s: []const u8 = tmp.items;
                     if (prec) |p| s = s[0..@min(p, s.len)];
-                    body.appendSlice(a, s) catch return 2;
+                    body.appendSlice(a, s) catch |oe| return sh.oom(oe);
                     if (!cont_) stop = true;
                 },
                 'c' => {
                     ai += 1;
-                    if (arg) |s| if (s.len > 0) body.append(a, s[0]) catch return 2;
+                    if (arg) |s| if (s.len > 0) body.append(a, s[0]) catch |oe| return sh.oom(oe);
                 },
                 'd', 'i' => {
                     ai += 1;
                     const v = if (arg) |s| printfNumber(sh, s, &st) else 0;
                     var digits: std.ArrayList(u8) = .empty;
                     const mag: u64 = if (v < 0) @as(u64, @bitCast(-%v)) else @intCast(v);
-                    digits.print(a, "{d}", .{mag}) catch return 2;
-                    if (prec) |p| while (digits.items.len < p) digits.insert(a, 0, '0') catch return 2;
+                    digits.print(a, "{d}", .{mag}) catch |oe| return sh.oom(oe);
+                    if (prec) |p| while (digits.items.len < p) digits.insert(a, 0, '0') catch |oe| return sh.oom(oe);
                     const sign: []const u8 = if (v < 0) "-" else if (plus) "+" else if (space) " " else "";
-                    padNum(a, &body, sign, digits.items, width, left, zero and prec == null) catch return 2;
+                    padNum(a, &body, sign, digits.items, width, left, zero and prec == null) catch |oe| return sh.oom(oe);
                     width = 0;
                 },
                 'u', 'o', 'x', 'X' => {
@@ -1214,31 +1214,31 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     const v: u64 = @bitCast(if (arg) |s| printfNumberK(sh, s, &st, true) else 0);
                     var digits: std.ArrayList(u8) = .empty;
                     switch (conv) {
-                        'u' => digits.print(a, "{d}", .{v}) catch return 2,
-                        'o' => digits.print(a, "{o}", .{v}) catch return 2,
-                        'x' => digits.print(a, "{x}", .{v}) catch return 2,
-                        else => digits.print(a, "{X}", .{v}) catch return 2,
+                        'u' => digits.print(a, "{d}", .{v}) catch |oe| return sh.oom(oe),
+                        'o' => digits.print(a, "{o}", .{v}) catch |oe| return sh.oom(oe),
+                        'x' => digits.print(a, "{x}", .{v}) catch |oe| return sh.oom(oe),
+                        else => digits.print(a, "{X}", .{v}) catch |oe| return sh.oom(oe),
                     }
-                    if (prec) |p| while (digits.items.len < p) digits.insert(a, 0, '0') catch return 2;
+                    if (prec) |p| while (digits.items.len < p) digits.insert(a, 0, '0') catch |oe| return sh.oom(oe);
                     const pre: []const u8 = if (alt and v != 0) (if (conv == 'x') "0x" else if (conv == 'X') "0X" else if (conv == 'o') "0" else "") else "";
-                    padNum(a, &body, pre, digits.items, width, left, zero and prec == null) catch return 2;
+                    padNum(a, &body, pre, digits.items, width, left, zero and prec == null) catch |oe| return sh.oom(oe);
                     width = 0;
                 },
                 'e', 'E', 'f', 'F', 'g', 'G', 'a', 'A' => {
                     ai += 1;
                     const x = if (arg) |s| printfFloat(sh, s, &st) else 0.0;
-                    const r = fmtfloat.format(a, x, .{ .conv = conv, .prec = prec, .alt = alt }) catch return 2;
+                    const r = fmtfloat.format(a, x, .{ .conv = conv, .prec = prec, .alt = alt }) catch |oe| return sh.oom(oe);
                     const sign: []const u8 = if (r.neg) "-" else if (plus) "+" else if (space) " " else "";
                     const hex_prefix: usize = if (std.ascii.toLower(conv) == 'a' and r.finite) 2 else 0;
                     if (zero and !left and r.finite and width > sign.len + r.body.len) {
                         // zeros go after the sign (and the 0x of %a)
-                        body.appendSlice(a, sign) catch return 2;
-                        body.appendSlice(a, r.body[0..hex_prefix]) catch return 2;
-                        body.appendNTimes(a, '0', width - sign.len - r.body.len) catch return 2;
-                        body.appendSlice(a, r.body[hex_prefix..]) catch return 2;
+                        body.appendSlice(a, sign) catch |oe| return sh.oom(oe);
+                        body.appendSlice(a, r.body[0..hex_prefix]) catch |oe| return sh.oom(oe);
+                        body.appendNTimes(a, '0', width - sign.len - r.body.len) catch |oe| return sh.oom(oe);
+                        body.appendSlice(a, r.body[hex_prefix..]) catch |oe| return sh.oom(oe);
                     } else {
-                        body.appendSlice(a, sign) catch return 2;
-                        body.appendSlice(a, r.body) catch return 2;
+                        body.appendSlice(a, sign) catch |oe| return sh.oom(oe);
+                        body.appendSlice(a, r.body) catch |oe| return sh.oom(oe);
                     }
                 },
                 else => {
@@ -1251,13 +1251,13 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             if (body.items.len < width) {
                 const pad = width - body.items.len;
                 if (left) {
-                    out.appendSlice(a, body.items) catch return 2;
-                    out.appendNTimes(a, ' ', pad) catch return 2;
+                    out.appendSlice(a, body.items) catch |oe| return sh.oom(oe);
+                    out.appendNTimes(a, ' ', pad) catch |oe| return sh.oom(oe);
                 } else {
-                    out.appendNTimes(a, ' ', pad) catch return 2;
-                    out.appendSlice(a, body.items) catch return 2;
+                    out.appendNTimes(a, ' ', pad) catch |oe| return sh.oom(oe);
+                    out.appendSlice(a, body.items) catch |oe| return sh.oom(oe);
                 }
-            } else out.appendSlice(a, body.items) catch return 2;
+            } else out.appendSlice(a, body.items) catch |oe| return sh.oom(oe);
         }
         if (stop) break;
         if (ai >= rest.len or ai == start_ai or !consumed_any) break;
@@ -1338,8 +1338,8 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         if (escaped) {
             escaped = false;
             if (c == '\n') continue;
-            bytes.append(a, c) catch return 2;
-            esc.append(a, true) catch return 2;
+            bytes.append(a, c) catch |oe| return sh.oom(oe);
+            esc.append(a, true) catch |oe| return sh.oom(oe);
             continue;
         }
         if (c == '\\' and !raw) {
@@ -1347,8 +1347,8 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             continue;
         }
         if (c == '\n') break;
-        bytes.append(a, c) catch return 2;
-        esc.append(a, false) catch return 2;
+        bytes.append(a, c) catch |oe| return sh.oom(oe);
+        esc.append(a, false) catch |oe| return sh.oom(oe);
     }
     const ifs: []const u8 = sh.getVar("IFS") orelse " \t\n";
     const isIfs = struct {
@@ -1371,7 +1371,7 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         while (pos < b.len and !esc.items[pos] and isWs(ifs, b[pos])) pos += 1;
         var val: std.ArrayList(u8) = .empty;
         if (idx + 1 == names.len) {
-            val.appendSlice(a, b[pos..]) catch return 2;
+            val.appendSlice(a, b[pos..]) catch |oe| return sh.oom(oe);
             // trim trailing IFS whitespace
             while (val.items.len > 0) {
                 const li = pos + val.items.len - 1;
@@ -1398,7 +1398,7 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             }
             pos = b.len;
         } else {
-            while (pos < b.len and (esc.items[pos] or !isIfs(ifs, b[pos]))) : (pos += 1) val.append(a, b[pos]) catch return 2;
+            while (pos < b.len and (esc.items[pos] or !isIfs(ifs, b[pos]))) : (pos += 1) val.append(a, b[pos]) catch |oe| return sh.oom(oe);
             // consume the delimiter
             while (pos < b.len and !esc.items[pos] and isWs(ifs, b[pos])) pos += 1;
             if (pos < b.len and !esc.items[pos] and isIfs(ifs, b[pos]) and !isWs(ifs, b[pos])) {
@@ -1728,9 +1728,9 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     if (i >= args.len) return 0;
     var saved_path: ?shell.Saved = null;
     if (use_default_path) {
-        const saved = exec.saveVar(sh, "PATH") catch return 2;
+        const saved = exec.saveVar(sh, "PATH") catch |oe| return sh.oom(oe);
         saved_path = saved;
-        sh.setVarRaw("PATH", "/usr/bin:/bin") catch {};
+        sh.setVarRaw("PATH", "/usr/bin:/bin") catch |oe| return sh.oom(oe);
     }
     defer if (saved_path) |saved| exec.restoreVar(sh, saved);
     if (mode != 0) {
@@ -1754,9 +1754,9 @@ fn hashCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         i += 1;
     }
     if (i >= args.len and args.len == 1) {
-        const keys = sortedKeys(a, sh.hash) catch return 2;
+        const keys = sortedKeys(a, sh.hash) catch |oe| return sh.oom(oe);
         var out: std.ArrayList(u8) = .empty;
-        for (keys) |k| out.print(a, "{s}\n", .{sh.hash.get(k).?}) catch return 2;
+        for (keys) |k| out.print(a, "{s}\n", .{sh.hash.get(k).?}) catch |oe| return sh.oom(oe);
         _ = sh.out(out.items);
         return 0;
     }
@@ -1767,7 +1767,7 @@ fn hashCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             st = 1;
             continue;
         };
-        putString(sh.gpa, &sh.hash, n, p) catch return 2;
+        putString(sh.gpa, &sh.hash, n, p) catch |oe| return sh.oom(oe);
     }
     return st;
 }
@@ -1781,9 +1781,9 @@ fn putString(gpa: Allocator, map: *std.StringHashMapUnmanaged([]u8), key: []cons
 
 fn aliasCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     if (args.len == 1) {
-        const keys = sortedKeys(a, sh.aliases) catch return 2;
+        const keys = sortedKeys(a, sh.aliases) catch |oe| return sh.oom(oe);
         var out: std.ArrayList(u8) = .empty;
-        for (keys) |k| out.print(a, "{s}={s}\n", .{ k, quoteSingle(a, sh.aliases.get(k).?) catch "" }) catch return 2;
+        for (keys) |k| out.print(a, "{s}={s}\n", .{ k, quoteSingle(a, sh.aliases.get(k).?) catch |oe| return sh.oom(oe) }) catch |oe| return sh.oom(oe);
         _ = sh.out(out.items);
         return 0;
     }
@@ -1791,9 +1791,9 @@ fn aliasCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     for (args[1..]) |arg| {
         if (std.mem.indexOfScalar(u8, arg, '=')) |e| {
             const name = arg[0..e];
-            putString(sh.gpa, &sh.aliases, name, arg[e + 1 ..]) catch return 2;
+            putString(sh.gpa, &sh.aliases, name, arg[e + 1 ..]) catch |oe| return sh.oom(oe);
         } else if (sh.aliases.get(arg)) |v| {
-            _ = sh.out(std.fmt.allocPrint(a, "{s}={s}\n", .{ arg, quoteSingle(a, v) catch "" }) catch return 2);
+            _ = sh.out(std.fmt.allocPrint(a, "{s}={s}\n", .{ arg, quoteSingle(a, v) catch |oe| return sh.oom(oe) }) catch |oe| return sh.oom(oe));
         } else {
             sh.diagCmdK(.alias_not_found, arg, "alias", "{s} not found", .{arg});
             st = 1;
@@ -1861,10 +1861,10 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     const finish = struct {
         fn f(s: *Shell, n: []const u8, val: []const u8, oi: usize, sub_: usize, st: u8) u8 {
             const ok = lexer.isName(n);
-            if (ok) s.setVar(n, val) catch {};
+            if (ok) s.setVar(n, val) catch |se| return s.setFailed(se);
             var buf: [24]u8 = undefined;
             const t = std.fmt.bufPrint(&buf, "{d}", .{oi}) catch "1";
-            s.setVarRaw("OPTIND", t) catch {};
+            s.setVarRaw("OPTIND", t) catch |oe| return s.oom(oe);
             s.getopts_last_optind = oi;
             s.getopts_sub = sub_;
             return if (ok) st else 2;
@@ -1884,7 +1884,7 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     const more = sub < arg.len;
     if (pos == null) {
         if (silent) {
-            sh.setVar("OPTARG", &cbuf) catch {};
+            sh.setVar("OPTARG", &cbuf) catch |se| return sh.setFailed(se);
         } else {
             sh.unsetVar("OPTARG") catch {};
             sh.diagBareK(.illegal_option, optText(a, "-{c}", .{c}), std.fmt.allocPrint(a, "Illegal option -{c}", .{c}) catch "");
@@ -1894,19 +1894,19 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     const takes = pos.? + 1 < os.len and os[pos.? + 1] == ':';
     if (takes) {
         if (more) {
-            sh.setVar("OPTARG", arg[sub..]) catch {};
+            sh.setVar("OPTARG", arg[sub..]) catch |se| return sh.setFailed(se);
             return finish(sh, name, &cbuf, idx + 1, 0, 0);
         }
         if (idx + 1 > list.len) {
             if (silent) {
-                sh.setVar("OPTARG", &cbuf) catch {};
+                sh.setVar("OPTARG", &cbuf) catch |se| return sh.setFailed(se);
                 return finish(sh, name, ":", idx + 1, 0, 0);
             }
             sh.unsetVar("OPTARG") catch {};
             sh.diagBareK(.usage, null, std.fmt.allocPrint(a, "No arg for -{c} option", .{c}) catch "");
             return finish(sh, name, "?", idx + 1, 0, 0);
         }
-        sh.setVar("OPTARG", list[idx]) catch {};
+        sh.setVar("OPTARG", list[idx]) catch |se| return sh.setFailed(se);
         return finish(sh, name, &cbuf, idx + 2, 0, 0);
     }
     sh.unsetVar("OPTARG") catch {};
@@ -1934,8 +1934,8 @@ fn killCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 sh.diagCmdK(.kill_error, null, "kill", "invalid signal number or exit status: {s}", .{args[i + 1]});
                 return 2;
             }
-            out.print(a, "{s}\n", .{sys.signal_names[@intCast(s)]}) catch return 2;
-        } else for (sys.signal_names[1..]) |nm| out.print(a, "{s}\n", .{nm}) catch return 2;
+            out.print(a, "{s}\n", .{sys.signal_names[@intCast(s)]}) catch |oe| return sh.oom(oe);
+        } else for (sys.signal_names[1..]) |nm| out.print(a, "{s}\n", .{nm}) catch |oe| return sh.oom(oe);
         _ = sh.out(out.items);
         return 0;
     }
@@ -1995,8 +1995,8 @@ fn umaskCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     return std.fmt.allocPrint(al, "{c}={s}{s}{s}", .{ who, if (bits & 4 == 0) "r" else "", if (bits & 2 == 0) "w" else "", if (bits & 1 == 0) "x" else "" }) catch "";
                 }
             }.p;
-            _ = sh.out(std.fmt.allocPrint(a, "{s},{s},{s}\n", .{ f(a, 'u', (m >> 6) & 7), f(a, 'g', (m >> 3) & 7), f(a, 'o', m & 7) }) catch return 2);
-        } else _ = sh.out(std.fmt.allocPrint(a, "{o:0>4}\n", .{m}) catch return 2);
+            _ = sh.out(std.fmt.allocPrint(a, "{s},{s},{s}\n", .{ f(a, 'u', (m >> 6) & 7), f(a, 'g', (m >> 3) & 7), f(a, 'o', m & 7) }) catch |oe| return sh.oom(oe));
+        } else _ = sh.out(std.fmt.allocPrint(a, "{o:0>4}\n", .{m}) catch |oe| return sh.oom(oe));
         return 0;
     }
     if (args[i].len > 1 and args[i][0] == '-' and !std.mem.eql(u8, args[i], "--")) {
@@ -2101,8 +2101,8 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         for (rows) |row| {
             const lim = sys.getrlimit(row.res) catch continue;
             const v = if (hard) lim.hard else lim.soft;
-            out.print(a, "-{c}: {s:<22}", .{ row.opt, row.label }) catch return 2;
-            if (v == sys.infinity) out.appendSlice(a, "unlimited\n") catch return 2 else out.print(a, "{d}\n", .{v / row.scale}) catch return 2;
+            out.print(a, "-{c}: {s:<22}", .{ row.opt, row.label }) catch |oe| return sh.oom(oe);
+            if (v == sys.infinity) out.appendSlice(a, "unlimited\n") catch |oe| return sh.oom(oe) else out.print(a, "{d}\n", .{v / row.scale}) catch |oe| return sh.oom(oe);
         }
         _ = sh.out(out.items);
         return 0;
@@ -2113,7 +2113,7 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     };
     if (i >= args.len) {
         const v = if (hard) cur.hard else cur.soft;
-        if (v == sys.infinity) _ = sh.out("unlimited\n") else _ = sh.out(std.fmt.allocPrint(a, "{d}\n", .{v / scale}) catch return 2);
+        if (v == sys.infinity) _ = sh.out("unlimited\n") else _ = sh.out(std.fmt.allocPrint(a, "{d}\n", .{v / scale}) catch |oe| return sh.oom(oe));
         return 0;
     }
     const v: u64 = if (std.mem.eql(u8, args[i], "unlimited")) sys.infinity else blk: {

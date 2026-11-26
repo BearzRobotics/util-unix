@@ -242,7 +242,7 @@ pub fn runEnvFile(sh: *Shell) void {
     if (path.len == 0 or path[0] != '/') return;
     const text = exec.readFile(a, path) orelse return;
     const saved = sh.label;
-    _ = exec.runSource(sh, text, .{}) catch {};
+    _ = exec.runSource(sh, text, .{}) catch |oe| sh.oom(oe);
     sh.label = saved;
     if (sh.flow == .exit_shell and !sh.explicit_exit) sh.flow = .none;
 }
@@ -338,7 +338,7 @@ pub fn loop(s: *Session) u8 {
             const prompt = expandPrompt(sh, a, ps) catch ps;
             switch (readOne(s, a, prompt)) {
                 .text => |l| {
-                    text.appendSlice(a, l) catch return 2;
+                    text.appendSlice(a, l) catch |oe| return sh.oom(oe);
                 },
                 .interrupted => {
                     text.clearRetainingCapacity();
@@ -348,7 +348,7 @@ pub fn loop(s: *Session) u8 {
                 .edit => |t| {
                     if (externalEdit(sh, a, t)) |e| {
                         text.clearRetainingCapacity();
-                        text.appendSlice(a, e) catch return 2;
+                        text.appendSlice(a, e) catch |oe| return sh.oom(oe);
                         sh.errRaw(e);
                     } else {
                         // nothing runs, not even earlier lines of the command
@@ -386,7 +386,7 @@ pub fn loop(s: *Session) u8 {
         sh.line = 0;
         s.hist.add(src) catch {};
         sh.hist_pending = true;
-        _ = exec.runSource(sh, src, .{}) catch return 2;
+        _ = exec.runSource(sh, src, .{}) catch |oe| return sh.oom(oe);
         sh.hist_pending = false;
         if (sh.flow == .exit_shell and sh.explicit_exit) return finish(s);
         sh.flow = .none;

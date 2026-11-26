@@ -51,10 +51,10 @@ pub fn jobsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 st = 1;
                 continue;
             };
-            picked.append(a, j) catch return 2;
+            picked.append(a, j) catch |oe| return sh.oom(oe);
         }
     } else {
-        for (sh.jobs.items) |j| picked.append(a, j) catch return 2;
+        for (sh.jobs.items) |j| picked.append(a, j) catch |oe| return sh.oom(oe);
         // current job first, then the previous one, then the rest newest first
         std.mem.sort(*jobs.Job, picked.items, {}, struct {
             fn lt(_: void, l: *jobs.Job, r: *jobs.Job) bool {
@@ -66,7 +66,7 @@ pub fn jobsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         }.lt);
     }
     for (picked.items) |j| {
-        jobs.format(sh, a, &out, j, mode) catch return 2;
+        jobs.format(sh, a, &out, j, mode) catch |oe| return sh.oom(oe);
         j.notified = true;
     }
     _ = sh.out(out.items);
@@ -92,9 +92,9 @@ fn resumeJob(sh: *Shell, cmd: []const u8, args: []const []const u8, fg: bool) u8
     }
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     defer arena.deinit();
-    const text = jobs.commandText(arena.allocator(), j) catch return 2;
+    const text = jobs.commandText(arena.allocator(), j) catch |oe| return sh.oom(oe);
     if (fg) {
-        _ = sh.out(std.fmt.allocPrint(arena.allocator(), "{s}\n", .{text}) catch return 2);
+        _ = sh.out(std.fmt.allocPrint(arena.allocator(), "{s}\n", .{text}) catch |oe| return sh.oom(oe));
         j.foreground = true;
         jobs.continueJob(sh, j);
         j.stamp = blk: {
@@ -103,7 +103,7 @@ fn resumeJob(sh: *Shell, cmd: []const u8, args: []const []const u8, fg: bool) u8
         };
         return jobs.waitFg(sh, j);
     }
-    _ = sh.out(std.fmt.allocPrint(arena.allocator(), "[{d}] {s}\n", .{ j.id, text }) catch return 2);
+    _ = sh.out(std.fmt.allocPrint(arena.allocator(), "[{d}] {s}\n", .{ j.id, text }) catch |oe| return sh.oom(oe));
     jobs.continueJob(sh, j);
     sh.bg_pid = j.lastPid();
     return 0;
