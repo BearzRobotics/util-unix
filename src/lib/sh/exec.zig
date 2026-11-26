@@ -368,7 +368,12 @@ fn childInit(sh: *Shell, bg: bool) void {
     if (sh.flags.interactive and !was_subshell) {
         // The interactive shell's own dispositions must not leak into
         // commands (POSIX XCU sh "Signals").
+        // A child without a process group of its own shares the shell's: were
+        // it stopped by ^Z, the shell, which ignores that signal, would wait
+        // for it for ever. It keeps the job-control signals ignored.
+        const own_group = sh.jc and sys.getpgrp() != sh.shell_pgid;
         for ([_]u8{ 2, 3, 15, 20, 21, 22 }) |sg| {
+            if (sg >= 20 and !own_group) continue;
             // a `trap '' SIG` the user set stays in force for the child and what it runs
             const user_ignored = if (sh.traps[sg]) |t| t.len == 0 else false;
             if (!sh.inherited_ignore[sg] and !user_ignored) _ = sys.setSignal(sg, .default);

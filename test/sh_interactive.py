@@ -464,6 +464,15 @@ def input_and_history_cases():
     # JOB-05: an interactive shell started in the background waits its turn
     has("sh -i in the background does not take the terminal", ["%s -i &" % SH, ("sleep", 1), ALIVE, "jobs", "kill -KILL %1", ALIVE], ["al1ve", "Stopped"])
 
+    # JOB-04: ^Z cannot stop what the shell could never continue. The shell
+    # under test runs under another one: the system discards ^Z for the group of
+    # a session leader, which has nobody outside it to continue it.
+    for name, steps, want in (
+        ("a command substitution", ["x=$(sleep 2; echo hi); echo got-$x-$((1+1))"], "got-hi-2"),
+        ("a pipeline in a substitution", ["echo got-$(sleep 2 | cat)end-$((1+1))"], "got-end-2"),
+        ("a command after set +m", ["set +m", "sleep 2; echo done-$((1+1))"], "done-2")):
+        has("^Z during " + name + " does not hang the shell", ["%s -i" % SH] + steps + [("sleep", .7), "^Z", ("sleep", 2.5), ALIVE], [want, "al1ve"])
+
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
         d = tempfile.mkdtemp(dir=TMP)
