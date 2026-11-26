@@ -27,6 +27,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const pattern = @import("pattern.zig");
 
+/// How far `.` and `@` may nest.
+const max_vi_depth = 16;
+
 // --- terminal abstraction ---------------------------------------------------------
 
 pub const ReadResult = union(enum) {
@@ -340,6 +343,8 @@ pub const Editor = struct {
     vi_last_count: ?usize = null,
     vi_changed: bool = false,
     vi_replaying: bool = false,
+    /// How deep `.` and `@` are inside one another.
+    vi_depth: u8 = 0,
     vi_undo_text: std.ArrayList(u8) = .empty,
     vi_undo_cur: usize = 0,
     result_line: std.ArrayList(u8) = .empty,
@@ -1800,11 +1805,14 @@ pub const Editor = struct {
             .@"@" => {
                 self.vi_pend = .none;
                 self.vi_count = null;
-                if (self.alias_fn) |af| if (c < 128) if (af(self.cb_ctx, @intCast(c))) |txt| {
+                // an alias that runs itself must not recurse without end
+                if (self.vi_depth < max_vi_depth) if (self.alias_fn) |af| if (c < 128) if (af(self.cb_ctx, @intCast(c))) |txt| {
                     const copy = self.gpa.dupe(u8, txt) catch return;
                     defer self.gpa.free(copy);
                     const saved = self.vi_replaying;
                     self.vi_replaying = true;
+                    self.vi_depth += 1;
+                    defer self.vi_depth -= 1;
                     for (copy) |b| {
                         if (self.parser.push(b)) |kk| self.viKey(kk);
                     }
@@ -2113,7 +2121,7 @@ pub const Editor = struct {
                 }
             },
             '.' => {
-                if (self.vi_last.items.len == 0) {
+                if (self.vi_last.items.len == 0 or self.vi_depth >= max_vi_depth) {
                     self.alert();
                     return;
                 }
@@ -2121,8 +2129,17 @@ pub const Editor = struct {
                 defer self.gpa.free(keys);
                 const cnt = if (have_count) count else (self.vi_last_count orelse 1);
                 if (have_count) self.vi_last_count = count;
+                const saved = self.vi_replaying;
                 self.vi_replaying = true;
-                defer self.vi_replaying = false;
+                self.vi_depth += 1;
+                defer {
+                    self.vi_depth -= 1;
+                    self.vi_replaying = saved;
+                    // what was replayed is not a new change: `.` must never
+                    // become the command that `.` repeats
+                    self.vi_changed = false;
+                    self.vi_rec.clearRetainingCapacity();
+                }
                 if (cnt > 1 or have_count) {
                     // the recorded count digits were kept out; apply as prefix
                     var tmp: [24]u8 = undefined;
@@ -2340,6 +2357,30 @@ fn expectBuf(mode: Mode, keys: []const u8, hist: []const []u8, want: []const u8,
     _ = try drive(mode, keys, hist, &t, &n, &c);
     try std.testing.expectEqualStrings(want, t[0..n]);
     try std.testing.expectEqual(want_cur, c);
+}
+
+test "vi: '.' can be repeated" {
+    try expectBuf(.vi, "abcdef\x1bx.....", &.{}, "", 0);
+    try expectBuf(.vi, "abcdef\x1b0x..2.", &.{}, "f", 0);
+}
+
+test "vi: an alias macro that runs itself stops" {
+    var mt: MemTerm = .{};
+    defer mt.out.deinit(std.testing.allocator);
+    var ed = Editor.init(std.testing.allocator, mt.term());
+    defer ed.deinit();
+    ed.mode = .vi;
+    ed.alias_fn = struct {
+        fn get(_: ?*anyopaque, letter: u8) ?[]const u8 {
+            return switch (letter) {
+                'a' => "@a",
+                'b' => "x.@b",
+                else => null,
+            };
+        }
+    }.get;
+    ed.begin("$ ", &.{});
+    try std.testing.expectEqual(Status.more, ed.feed("abcdef\x1b@a@b"));
 }
 
 test "emacs: insertion and cursor movement" {
