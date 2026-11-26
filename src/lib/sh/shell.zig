@@ -51,7 +51,9 @@ pub const Flags = struct {
     pipefail: bool = false,
 };
 
-pub const Flow = enum { none, break_loop, continue_loop, return_func, exit_shell };
+/// `interrupt`: ^C in an interactive shell with no INT trap. Everything being
+/// run is abandoned, back to the prompt.
+pub const Flow = enum { none, break_loop, continue_loop, return_func, exit_shell, interrupt };
 
 /// A builtin supplied by the host program (DKDE, tests).
 pub const HostBuiltin = struct {

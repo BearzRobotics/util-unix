@@ -473,6 +473,16 @@ def input_and_history_cases():
         ("a command after set +m", ["set +m", "sleep 2; echo done-$((1+1))"], "done-2")):
         has("^Z during " + name + " does not hang the shell", ["%s -i" % SH] + steps + [("sleep", .7), "^Z", ("sleep", 2.5), ALIVE], [want, "al1ve"])
 
+    # JOB-02: ^C abandons what the shell itself is doing
+    NO = "NOT-CANCELLED-$((1+1))"
+    for name, line in (("a loop of builtins", "while :; do :; done; echo " + NO),
+                       ("read", "read x; echo " + NO),
+                       ("wait", "sleep 7 & wait; echo " + NO),
+                       ("a loop in a function", "f() { while :; do :; done; echo " + NO + "; }; f; echo " + NO),
+                       ("a sourced loop in eval", "eval 'while true; do x=1; done'; echo " + NO)):
+        has("^C abandons " + name, [line, ("sleep", .6), "^C", ("sleep", .4), "echo status=$?", ALIVE], ["status=130", "al1ve"], ["NOT-CANCELLED-2"])
+    has("^C with an INT trap runs the trap and goes on", ["trap 'echo caught-$((1+1))' INT", "read x; echo after-$?-$((2+2))", ("sleep", .6), "^C", "typed", ALIVE], ["caught-2", "al1ve"])
+
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
         d = tempfile.mkdtemp(dir=TMP)

@@ -246,7 +246,7 @@ pub fn runEnvFile(sh: *Shell) void {
     const saved = sh.label;
     _ = exec.runSource(sh, text, .{}) catch |oe| sh.oom(oe);
     sh.label = saved;
-    if (sh.flow == .exit_shell and !sh.explicit_exit) sh.flow = .none;
+    if (sh.flow == .interrupt or (sh.flow == .exit_shell and !sh.explicit_exit)) sh.flow = .none;
 }
 
 fn readPlainLine(sh: *Shell, a: Allocator, prompt: []const u8) ?[]const u8 {
@@ -392,6 +392,8 @@ pub fn loop(s: *Session) u8 {
         _ = exec.runSource(sh, src, .{}) catch |oe| return sh.oom(oe);
         sh.hist_pending = false;
         if (sh.flow == .exit_shell and sh.explicit_exit) return finish(s);
+        // start the prompt on a line of its own, after the terminal's "^C"
+        if (sh.flow == .interrupt) sh.errRaw("\n");
         sh.flow = .none;
         sh.explicit_exit = false;
     }

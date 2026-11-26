@@ -267,6 +267,25 @@ fn reportSyntax(sh: *Shell, d: *const parser.Diag, prefix: []const u8, src: []co
 
 // --- traps ------------------------------------------------------------------
 
+/// Whether SIGINT without a trap abandons the commands being run.
+fn abandons(sh: *const Shell) bool {
+    return sh.flags.interactive and !sh.in_subshell;
+}
+
+fn interrupt(sh: *Shell) void {
+    sh.flow = .interrupt;
+    sh.status = 130;
+}
+
+/// ^C while a command's words were being expanded (a command substitution it
+/// killed): the command must not run with what is left.
+fn interruptedExpanding(sh: *Shell) bool {
+    if (sh.flow == .interrupt) return true;
+    if (!abandons(sh) or sh.traps[2] != null or !sys.takePending(2)) return false;
+    interrupt(sh);
+    return true;
+}
+
 /// Run the trap commands of signals that arrived since the last check.
 pub fn checkTraps(sh: *Shell) void {
     if (!sys.signalsPending()) return;
@@ -274,7 +293,10 @@ pub fn checkTraps(sh: *Shell) void {
     var sig: u8 = 1;
     while (sig < sys.nsig) : (sig += 1) {
         if (!sys.takePending(sig)) continue;
-        const cmd = sh.traps[sig] orelse continue;
+        const cmd = sh.traps[sig] orelse {
+            if (sig == 2 and abandons(sh)) interrupt(sh);
+            continue;
+        };
         if (cmd.len == 0) continue;
         const saved = sh.status;
         const copy = sh.gpa.dupe(u8, cmd) catch |oe| {
@@ -476,7 +498,9 @@ fn execReplace(sh: *Shell, node: *const Node) u8 {
 // --- nodes --------------------------------------------------------------------
 
 pub fn execNode(sh: *Shell, node: *const Node) u8 {
-    const st = execInner(sh, node);
+    var st = execInner(sh, node);
+    // the statuses of the constructs unwound by ^C do not count
+    if (sh.flow == .interrupt) st = 130;
     sh.status = st;
     return st;
 }
@@ -732,6 +756,7 @@ fn execFor(sh: *Shell, name: []const u8, words: ?[]const ast.Word, body: ?*const
     } else {
         for (sh.params.items) |p| list.append(a, a.dupe(u8, p) catch |oe| return sh.oom(oe)) catch |oe| return sh.oom(oe);
     }
+    if (interruptedExpanding(sh)) return 130;
     var st: u8 = 0;
     sh.loop_depth += 1;
     defer sh.loop_depth -= 1;
@@ -1174,6 +1199,8 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
             }
         }
     }
+
+    if (interruptedExpanding(sh)) return 130;
 
     if (sh.flags.xtrace and args.items.len > 0) xtrace(sh, a, s, vals, args.items);
 
