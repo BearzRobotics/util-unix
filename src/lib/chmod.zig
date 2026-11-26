@@ -147,6 +147,7 @@ pub fn isRoot(io: Io, path: []const u8) bool {
 pub fn run(io: Io, gpa: Allocator, path: []const u8, opts: Options) Allocator.Error!bool {
     var e: Engine = .{ .io = io, .gpa = gpa, .opts = opts };
     defer e.path.deinit(gpa);
+    defer e.ancestors.deinit(gpa);
     try e.path.appendSlice(gpa, path);
     return e.visit(opts.base orelse Io.Dir.cwd(), path, true);
 }
@@ -157,6 +158,8 @@ const Engine = struct {
     opts: Options,
     /// Display path of the entry being processed ("dir/sub/file").
     path: std.ArrayList(u8) = .empty,
+    /// The directories the walk is inside, to notice a link back to one (-L).
+    ancestors: std.ArrayList(fsown.Stat) = .empty,
 
     fn emit(e: *Engine, ev: Event) void {
         e.opts.reporter.on_event(e.opts.reporter.context, ev);
@@ -228,6 +231,14 @@ const Engine = struct {
 
         var ok = e.apply(parent, name, st, through_link);
 
+        // A link back to a directory we are inside of: GNU (through fts) does
+        // not descend and does not warn; the entry is changed like a leaf.
+        // Without this, -L recurses until the stack or the descriptors run out,
+        // and with two such links takes practically forever.
+        if (examined) |seen| for (e.ancestors.items) |a| {
+            if (a.sameFile(seen)) return ok;
+        };
+
         if (descend) {
             var dir = parent.openDir(e.io, name, .{ .iterate = true, .follow_symlinks = through_link }) catch |err| {
                 e.problem(.cannot_read_directory, err);
@@ -244,6 +255,10 @@ const Engine = struct {
                     return false;
                 }
             }
+            if (examined) |seen| try e.ancestors.append(e.gpa, seen);
+            defer if (examined != null) {
+                _ = e.ancestors.pop();
+            };
             const base_len = e.path.items.len;
             var it = dir.iterate();
             while (true) {
@@ -532,6 +547,28 @@ test "preserve_root stops the walk at that directory however it is reached" {
     // without recursion the directory itself may be changed
     opts.recurse = false;
     try testing.expect(try run(testing.io, testing.allocator, "other", opts));
+}
+
+test "-L does not descend into a directory it is already inside" {
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "d/sub");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "d/sub/b", .data = "" });
+    try tmp.dir.symLink(testing.io, ".", "d/self", .{});
+    try tmp.dir.symLink(testing.io, "..", "d/sub/up", .{});
+    var log: Log = .{};
+    defer log.deinit();
+    try testing.expect(try run(testing.io, testing.allocator, "d", .{
+        .change = .{ .fixed = 0o755 },
+        .recurse = true,
+        .traversal = .logical,
+        .verbosity = .verbose,
+        .reporter = log.reporter(),
+        .base = tmp.dir,
+    }));
+    // d, self, sub, sub/b, sub/up: each once
+    try testing.expectEqual(@as(usize, 5), log.list.items.len);
 }
 
 test "validMode accepts GNU forms and rejects junk" {

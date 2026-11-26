@@ -84,6 +84,14 @@ run_tree "-R -L tree"              "$R" -RL 700 t
 run_tree "-R -P tree"              "$R" -RP 700 t
 run_tree "-R -h"                   "$R" -Rh 700 t
 run_tree "-R on file"              "$R" -R 700 t/f1
+# links back up the tree: each is changed once and not descended into. The file
+# size limit ends a walk that runs away (-v makes it write for every entry).
+LOOPS="$R; ln -s . t/a/self; ln -s . t/a/self2; ln -s .. t/a/b/up"
+TREE_PRE='ulimit -f 2000; ulimit -n 64'
+run_tree "-R -L with symlink loops"  "$LOOPS" -R -L -v u+rwx t
+# -v is left out here: ours does not yet report the links it skips (PERM-19)
+run_tree "-R -H with symlink loops"  "$LOOPS" -R -H u+rwx t
+TREE_PRE=
 run_tree "-R missing"              "$R" -R 700 nofile
 run_tree "--recursive"             "$R" --recursive 700 t
 run_tree "-R dangling in tree"     'mkdir t; ln -s nowhere t/dang; touch t/f' -R 700 t
