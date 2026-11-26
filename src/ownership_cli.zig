@@ -289,15 +289,16 @@ const Reporter = struct {
 
     /// GNU describe_change(): `user` null means the group-oriented wording.
     fn change(self: *Reporter, c: own.Change) void {
-        var buf: [2048]u8 = undefined;
-        var w: Io.Writer = .fixed(&buf);
+        var buf: [4096]u8 = undefined;
+        var out = Io.File.stdout().writerStreaming(self.ctx.io, &buf);
+        const w = &out.interface;
         const path = cli.quoteaf(c.path);
         const user = c.new_user;
         const group = c.new_group;
 
         if (c.status == .not_applied) {
             w.print("neither symbolic link {f} nor referent has been changed\n", .{path}) catch return;
-            _ = cli.writeStdout(self.ctx.io, w.buffered());
+            w.flush() catch {};
             return;
         }
 
@@ -339,7 +340,7 @@ const Reporter = struct {
                 w.print("ownership of {f} retained\n", .{path}) catch {},
             .not_applied => unreachable,
         }
-        _ = cli.writeStdout(self.ctx.io, w.buffered());
+        w.flush() catch {};
     }
 };
 

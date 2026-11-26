@@ -116,11 +116,20 @@ pub fn printVersion(ctx: Context) bool {
     return writeStdout(ctx.io, text);
 }
 
+/// Format straight to `file`, however long the result is: messages quote file
+/// names, which a fixed buffer would drop or cut. False if it was not written.
+pub fn print(io: Io, file: Io.File, comptime fmt: []const u8, args: anytype) bool {
+    // what fits here is still written in one piece
+    var buf: [4096]u8 = undefined;
+    var w = file.writerStreaming(io, &buf);
+    w.interface.print(fmt, args) catch return false;
+    w.interface.flush() catch return false;
+    return true;
+}
+
 /// Print a diagnostic `<name>: <message>\n` to stderr. Best effort.
 pub fn warn(ctx: Context, comptime fmt: []const u8, args: anytype) void {
-    var buf: [1024]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buf, "{s}: " ++ fmt ++ "\n", .{ctx.name} ++ args) catch return;
-    Io.File.stderr().writeStreamingAll(ctx.io, msg) catch {};
+    _ = print(ctx.io, Io.File.stderr(), "{s}: " ++ fmt ++ "\n", .{ctx.name} ++ args);
 }
 
 /// Human-readable text for common file errors, matching the strerror()

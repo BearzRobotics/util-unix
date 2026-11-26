@@ -179,19 +179,15 @@ const Reporter = struct {
         const ctx = r.ctx;
         switch (ev) {
             .changed => |c| {
-                var buf: [8192]u8 = undefined;
                 var os: [9]u8 = undefined;
                 var ns: [9]u8 = undefined;
-                const line = if (c.old == c.new)
-                    std.fmt.bufPrint(&buf, "mode of {f} retained as {o:0>4} ({s})\n", .{ cli.quoteaf(c.path), c.new, uu.mode.modeString(&ns, c.new) })
+                if (c.old == c.new)
+                    _ = cli.print(ctx.io, .stdout(), "mode of {f} retained as {o:0>4} ({s})\n", .{ cli.quoteaf(c.path), c.new, uu.mode.modeString(&ns, c.new) })
                 else
-                    std.fmt.bufPrint(&buf, "mode of {f} changed from {o:0>4} ({s}) to {o:0>4} ({s})\n", .{ cli.quoteaf(c.path), c.old, uu.mode.modeString(&os, c.old), c.new, uu.mode.modeString(&ns, c.new) });
-                _ = cli.writeStdout(ctx.io, line catch return);
+                    _ = cli.print(ctx.io, .stdout(), "mode of {f} changed from {o:0>4} ({s}) to {o:0>4} ({s})\n", .{ cli.quoteaf(c.path), c.old, uu.mode.modeString(&os, c.old), c.new, uu.mode.modeString(&ns, c.new) });
             },
             .could_not_access => |path| {
-                var buf: [8200]u8 = undefined;
-                const line = std.fmt.bufPrint(&buf, "{f} could not be accessed\n", .{cli.quoteaf(path)}) catch return;
-                _ = cli.writeStdout(ctx.io, line);
+                _ = cli.print(ctx.io, .stdout(), "{f} could not be accessed\n", .{cli.quoteaf(path)});
             },
             .problem => |p| {
                 const cause = if (p.cause) |c| cli.errText(c) else "";

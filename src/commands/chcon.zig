@@ -208,9 +208,7 @@ const Reporter = struct {
         const ctx = r.ctx;
         switch (ev) {
             .changing => |path| {
-                var buf: [Io.Dir.max_path_bytes + 64]u8 = undefined;
-                const line = std.fmt.bufPrint(&buf, "changing security context of {f}\n", .{cli.quoteaf(path)}) catch return;
-                _ = cli.writeStdout(ctx.io, line);
+                _ = cli.print(ctx.io, .stdout(), "changing security context of {f}\n", .{cli.quoteaf(path)});
             },
             .problem => |p| {
                 const cause: []const u8 = if (p.cause) |c| causeText(c) else "";

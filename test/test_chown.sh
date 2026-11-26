@@ -108,5 +108,12 @@ low_fd_tree "-R fast path short of descriptors"    -R ":$DG" w
 very_deep_case "-R 20000 levels (fast path)" "-group $DG" -R ":$DG" deep
 very_deep_case "-R -c 20000 levels" "-group $DG" -R -c ":$DG" deep
 
+# a message about a very long name must come out whole (a fixed buffer dropped it)
+LONG=$(printf '%0200d' 0)
+run_tree "long path: diagnostic is not dropped" ':' "$(id -un)" "$LONG/$LONG/$LONG/$LONG/$LONG/$LONG"
+run_tree "very long path with control characters" ':' -v "$(id -un)" "$(printf '\001%.0s' $(seq 250))/$LONG/$LONG/$LONG/$LONG/$LONG/$LONG/$LONG/$LONG"
+LONG_TREE='L=$(printf "%0200d" 0); mkdir -p $L/$L/$L/$L/$L/$L && touch $L/$L/$L/$L/$L/$L/f'
+run_tree "long paths: every -v line" "$LONG_TREE" -R -v "$(id -un)" "$(printf '%0200d' 0)"
+
 print_summary
 [ "$FAIL" -eq 0 ]

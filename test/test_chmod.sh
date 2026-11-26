@@ -153,4 +153,11 @@ run_tree "--reference missing arg" "$S" 600 f --reference
 run_tree "permission denied dir"   'mkdir d; touch d/f; chmod 000 d' 600 d/f
 run_tree "file owned by root"      "$S" 600 /etc/passwd
 run_tree "name with space"         'echo A > "a b"' 600 "a b"
+# a message about a very long name must come out whole (a fixed buffer dropped it)
+LONG=$(printf '%0200d' 0)
+run_tree "long path: diagnostic is not dropped" ':' 600 "$LONG/$LONG/$LONG/$LONG/$LONG/$LONG"
+run_tree "very long path with control characters" ':' -v 600 "$(printf '\001%.0s' $(seq 250))/$LONG/$LONG/$LONG/$LONG/$LONG/$LONG/$LONG/$LONG"
+LONG_TREE='L=$(printf "%0200d" 0); mkdir -p $L/$L/$L/$L/$L/$L && touch $L/$L/$L/$L/$L/$L/f'
+run_tree "long paths: every -v line" "$LONG_TREE" -R -v 600 "$(printf '%0200d' 0)"
+
 print_summary
