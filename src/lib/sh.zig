@@ -54,3 +54,26 @@ test {
     _ = completion;
     _ = interactive;
 }
+
+test "a shell that runs out of memory keeps its tables sound" {
+    const std = @import("std");
+    const quiet = struct {
+        fn report(_: ?*anyopaque, _: *const shell.Diagnostic) void {}
+        fn builtin(_: ?*anyopaque, _: *shell.Shell, _: []const []const u8) u8 {
+            return 0;
+        }
+    };
+    // fail every allocation in turn; the testing allocator reports what is
+    // leaked or freed twice, and a bad table entry crashes `deinit`
+    var fail_at: usize = 0;
+    while (true) : (fail_at += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_at });
+        run: {
+            const s = shell.Shell.init(.{ .io = std.testing.io, .gpa = failing.allocator() }, .{ .reporter = quiet.report }) catch break :run;
+            defer s.deinit();
+            s.registerBuiltin("hosted", .{ .run = quiet.builtin }) catch {};
+            _ = s.runString("export X1; readonly Y1; alias a1=b; alias a1=c a2=d; hash sh sh; f() { :; }; f() { :; }; X2=1; X2=2 :; PATH=/bin :; hosted") catch {};
+        }
+        if (!failing.has_induced_failure) break;
+    }
+}

@@ -42,6 +42,14 @@ fn aliasGet(ctx: *anyopaque, name: []const u8) ?[]const u8 {
 /// Parse and execute `src` one complete command at a time.
 pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!u8 {
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
+    // the arena is kept when a function now points into it, else freed
+    const defined_before = sh.funcs_defined;
+    sh.arenas_running += 1;
+    defer {
+        sh.arenas_running -= 1;
+        // room was reserved when the function was defined
+        if (sh.funcs_defined != defined_before) sh.pinned.appendAssumeCapacity(arena) else arena.deinit();
+    }
     const a = arena.allocator();
     // NUL bytes in a script are ignored (dash, FreeBSD sh)
     const src = if (std.mem.indexOfScalar(u8, src_in, 0) != null) blk: {
@@ -52,7 +60,6 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
     var d: parser.Diag = .{};
     var p = try parser.Parser.initProgram(a, src, &d);
     p.aliases = .{ .ctx = sh, .get = aliasGet };
-    const defined_before = sh.funcs_defined;
     const saved_src = sh.cur_src;
     sh.cur_src = src;
     defer sh.cur_src = saved_src;
@@ -69,10 +76,7 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
                 last = 2;
                 break;
             },
-            error.OutOfMemory => {
-                arena.deinit();
-                return error.OutOfMemory;
-            },
+            error.OutOfMemory => return error.OutOfMemory,
         };
         if (p.warn_heredoc) |w| {
             p.warn_heredoc = null;
@@ -89,9 +93,6 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
         checkTraps(sh);
         if (sh.flow != .none) break;
     }
-    if (sh.funcs_defined != defined_before) {
-        sh.pinned.append(sh.gpa, arena) catch {};
-    } else arena.deinit();
     return last;
 }
 
@@ -114,6 +115,8 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
     var line: u32 = 1;
     var eof = false;
     var last: u8 = 0;
+    sh.arenas_running += 1;
+    defer sh.arenas_running -= 1;
     const saved_src = sh.cur_src;
     defer sh.cur_src = saved_src;
     var chunk: [8192]u8 = undefined;
@@ -199,7 +202,7 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
             checkTraps(sh);
         }
         if (sh.funcs_defined != defined_before) {
-            sh.pinned.append(gpa, arena) catch {};
+            sh.pinned.appendAssumeCapacity(arena);
         } else arena.deinit();
         if (sh.flow != .none) break;
     }
@@ -528,9 +531,9 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
         .for_clause => |f| return execFor(sh, f.name, f.words, f.body),
         .case_clause => |c| return execCase(sh, c.word, c.items),
         .function => |f| {
-            const gop = sh.funcs.getOrPut(sh.gpa, f.name) catch return 2;
-            if (!gop.found_existing) gop.key_ptr.* = sh.gpa.dupe(u8, f.name) catch return 2;
-            gop.value_ptr.* = f.body;
+            // every running script may have to keep its arena for this
+            sh.pinned.ensureUnusedCapacity(sh.gpa, sh.arenas_running) catch return 2;
+            _ = shell.putOwned(*const Node, sh.gpa, &sh.funcs, f.name, f.body) catch return 2;
             sh.funcs_defined += 1;
             return 0;
         },
@@ -906,8 +909,9 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
 
 fn saveFd(sh: *Shell, n: i32, save: ?*Redirs) bool {
     const s = save orelse return true;
+    s.saved.ensureUnusedCapacity(sh.gpa, 1) catch return false;
     const copy: i32 = sys.dupAbove(n, 10) catch -1;
-    s.saved.append(sh.gpa, .{ .fd = n, .saved = copy }) catch return false;
+    s.saved.appendAssumeCapacity(.{ .fd = n, .saved = copy });
     return true;
 }
 
@@ -1185,8 +1189,11 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
     // A PATH assignment in the command's own prefix applies to its lookup.
     var path_saved: ?shell.Saved = null;
     for (s.assigns, vals) |asg, v| if (std.mem.eql(u8, asg.name, "PATH")) {
-        const old: ?shell.Var = if (sh.vars.get("PATH")) |ov| .{ .value = if (ov.value) |x| sh.gpa.dupe(u8, x) catch null else null, .exported = ov.exported, .readonly = ov.readonly } else null;
-        path_saved = .{ .name = sh.gpa.dupe(u8, "PATH") catch break, .old = old };
+        // saved once: restoring then brings back the value from before the line
+        if (path_saved == null) {
+            const saved = saveVar(sh, "PATH") catch return 2;
+            path_saved = saved;
+        }
         sh.setVarRaw("PATH", v) catch {};
     };
     const r = resolve(sh, a, name);
@@ -1269,7 +1276,7 @@ fn expandPrefix(sh: *Shell, a: Allocator, assigns: []const ast.Assign, vals: [][
 }
 
 /// What `restoreVar` needs to put variable `name` back as it is now.
-fn saveVar(sh: *Shell, name: []const u8) Allocator.Error!shell.Saved {
+pub fn saveVar(sh: *Shell, name: []const u8) Allocator.Error!shell.Saved {
     var old: ?shell.Var = null;
     if (sh.vars.get(name)) |ov| old = .{
         .value = if (ov.value) |x| try sh.gpa.dupe(u8, x) else null,
@@ -1349,12 +1356,9 @@ fn runInShell(sh: *Shell, a: Allocator, r: Resolved, args: []const []const u8, s
     }
     for (s.assigns, vals) |asg, v| {
         if (!is_special) {
-            const old: ?shell.Var = if (sh.vars.get(asg.name)) |ov| .{
-                .value = if (ov.value) |x| sh.gpa.dupe(u8, x) catch null else null,
-                .exported = ov.exported,
-                .readonly = ov.readonly,
-            } else null;
-            temps.append(sh.gpa, .{ .name = sh.gpa.dupe(u8, asg.name) catch return 2, .old = old }) catch return 2;
+            // room first, so that what is saved cannot be dropped
+            temps.ensureUnusedCapacity(sh.gpa, 1) catch return 2;
+            temps.appendAssumeCapacity(saveVar(sh, asg.name) catch return 2);
         }
         sh.setVar(asg.name, v) catch |e| switch (e) {
             error.ReadOnly => {
@@ -1400,7 +1404,7 @@ fn execBehindCommand(args: []const []const u8) bool {
     return i < args.len and std.mem.eql(u8, args[i], "exec");
 }
 
-fn restoreVar(sh: *Shell, sv: shell.Saved) void {
+pub fn restoreVar(sh: *Shell, sv: shell.Saved) void {
     defer sh.gpa.free(sv.name);
     if (sv.flags) |f| {
         sh.flags = f;
@@ -1413,8 +1417,9 @@ fn restoreVar(sh: *Shell, sv: shell.Saved) void {
             if (cur.value) |x| sh.gpa.free(x);
             cur.* = o;
         } else {
-            const key = sh.gpa.dupe(u8, sv.name) catch return;
-            sh.vars.put(sh.gpa, key, o) catch {};
+            _ = shell.putOwned(shell.Var, sh.gpa, &sh.vars, sv.name, o) catch {
+                if (o.value) |x| sh.gpa.free(x);
+            };
         }
     } else {
         if (sh.vars.getPtr(sv.name)) |cur| {

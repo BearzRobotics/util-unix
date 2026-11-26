@@ -90,6 +90,21 @@ pub const Saved = struct {
     flags: ?Flags = null,
 };
 
+/// Store `value` under `key` in a map that owns its keys, returning the value it
+/// replaces (the caller frees what that owns). If this fails the map is as it
+/// was: a new entry never holds the caller's `key` or an unset value.
+pub fn putOwned(comptime V: type, gpa: Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) Allocator.Error!?V {
+    if (map.getPtr(key)) |slot| {
+        const old = slot.*;
+        slot.* = value;
+        return old;
+    }
+    const owned = try gpa.dupe(u8, key);
+    errdefer gpa.free(owned);
+    try map.putNoClobber(gpa, owned, value);
+    return null;
+}
+
 pub const Shell = struct {
     env: Env,
     gpa: Allocator,
@@ -155,6 +170,8 @@ pub const Shell = struct {
     /// Arenas of programs that defined functions; kept for the shell's life.
     pinned: std.ArrayList(std.heap.ArenaAllocator) = .empty,
     funcs_defined: u32 = 0,
+    /// Scripts being run, each holding an arena it may have to keep.
+    arenas_running: u32 = 0,
     reporter: ?*const fn (ctx: ?*anyopaque, d: *const Diagnostic) void = null,
     reporter_ctx: ?*anyopaque = null,
     /// getopts: position inside a grouped option argument.
@@ -188,17 +205,19 @@ pub const Shell = struct {
         self.* = .{
             .env = env,
             .gpa = gpa,
-            .name = try gpa.dupe(u8, options.name),
-            .prog = try gpa.dupe(u8, options.prog),
+            .name = &.{},
+            .prog = &.{},
             .flags = options.flags,
             .pid = sys.getpid(),
             .diag_style = options.diag_style,
             .diag_color = options.diag_color,
-            .label = try gpa.dupe(u8, options.label),
             .reporter = options.reporter,
             .reporter_ctx = options.reporter_ctx,
         };
         errdefer self.deinit();
+        self.name = try gpa.dupe(u8, options.name);
+        self.prog = try gpa.dupe(u8, options.prog);
+        self.label = try gpa.dupe(u8, options.label);
         if (options.environ) |m| {
             var it = m.iterator();
             while (it.next()) |e| {
@@ -368,21 +387,13 @@ pub const Shell = struct {
     }
 
     pub fn setExported(self: *Shell, name: []const u8, on: bool) Allocator.Error!void {
-        const gop = try self.vars.getOrPut(self.gpa, name);
-        if (!gop.found_existing) {
-            gop.key_ptr.* = try self.gpa.dupe(u8, name);
-            gop.value_ptr.* = .{};
-        }
-        gop.value_ptr.exported = on;
+        if (!self.vars.contains(name)) _ = try putOwned(Var, self.gpa, &self.vars, name, .{});
+        self.vars.getPtr(name).?.exported = on;
     }
 
     pub fn setReadonly(self: *Shell, name: []const u8) Allocator.Error!void {
-        const gop = try self.vars.getOrPut(self.gpa, name);
-        if (!gop.found_existing) {
-            gop.key_ptr.* = try self.gpa.dupe(u8, name);
-            gop.value_ptr.* = .{};
-        }
-        gop.value_ptr.readonly = true;
+        if (!self.vars.contains(name)) _ = try putOwned(Var, self.gpa, &self.vars, name, .{});
+        self.vars.getPtr(name).?.readonly = true;
     }
 
     /// "NAME=value" strings of the exported variables, allocated from `a`.
@@ -500,9 +511,7 @@ pub const Shell = struct {
     /// Register a builtin implemented by the host. It is found before
     /// functions? No: after special builtins and functions, before `PATH`.
     pub fn registerBuiltin(self: *Shell, name: []const u8, b: HostBuiltin) Allocator.Error!void {
-        const gop = try self.host_builtins.getOrPut(self.gpa, name);
-        if (!gop.found_existing) gop.key_ptr.* = try self.gpa.dupe(u8, name);
-        gop.value_ptr.* = b;
+        _ = try putOwned(HostBuiltin, self.gpa, &self.host_builtins, name, b);
     }
 
     // --- running -----------------------------------------------------------

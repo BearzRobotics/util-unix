@@ -412,7 +412,8 @@ fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
         // `local -` restores the shell options when the function returns
         // (dash, FreeBSD sh)
         if (std.mem.eql(u8, arg, "-")) {
-            sh.locals.append(sh.gpa, .{ .name = sh.gpa.dupe(u8, "-") catch return 2, .old = null, .flags = sh.flags }) catch return 2;
+            sh.locals.ensureUnusedCapacity(sh.gpa, 1) catch return 2;
+            sh.locals.appendAssumeCapacity(.{ .name = sh.gpa.dupe(u8, "-") catch return 2, .old = null, .flags = sh.flags });
             continue;
         }
         const eq = std.mem.indexOfScalar(u8, arg, '=');
@@ -430,12 +431,8 @@ fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             if (eq) |e| sh.setVar(name, arg[e + 1 ..]) catch return 2;
             continue;
         }
-        const old: ?shell.Var = if (sh.vars.get(name)) |ov| .{
-            .value = if (ov.value) |x| sh.gpa.dupe(u8, x) catch null else null,
-            .exported = ov.exported,
-            .readonly = ov.readonly,
-        } else null;
-        sh.locals.append(sh.gpa, .{ .name = sh.gpa.dupe(u8, name) catch return 2, .old = old }) catch return 2;
+        sh.locals.ensureUnusedCapacity(sh.gpa, 1) catch return 2;
+        sh.locals.appendAssumeCapacity(exec.saveVar(sh, name) catch return 2);
         // `local x` without a value keeps the current value, as in dash and
         // FreeBSD sh (the variable is local from now on)
         if (eq) |e| sh.setVar(name, arg[e + 1 ..]) catch return 2;
@@ -1729,17 +1726,13 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         };
     }
     if (i >= args.len) return 0;
-    var saved_path: ?[]u8 = null;
+    var saved_path: ?shell.Saved = null;
     if (use_default_path) {
-        if (sh.getVar("PATH")) |p| saved_path = sh.gpa.dupe(u8, p) catch null;
+        const saved = exec.saveVar(sh, "PATH") catch return 2;
+        saved_path = saved;
         sh.setVarRaw("PATH", "/usr/bin:/bin") catch {};
     }
-    defer if (use_default_path) {
-        if (saved_path) |p| {
-            sh.setVarRaw("PATH", p) catch {};
-            sh.gpa.free(p);
-        } else sh.unsetVar("PATH") catch {};
-    };
+    defer if (saved_path) |saved| exec.restoreVar(sh, saved);
     if (mode != 0) {
         var out: std.ArrayList(u8) = .empty;
         const ok = describe(sh, a, args[i], mode == 'V', &out);
@@ -1774,11 +1767,16 @@ fn hashCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             st = 1;
             continue;
         };
-        const gop = sh.hash.getOrPut(sh.gpa, n) catch return 2;
-        if (gop.found_existing) sh.gpa.free(gop.value_ptr.*) else gop.key_ptr.* = sh.gpa.dupe(u8, n) catch return 2;
-        gop.value_ptr.* = sh.gpa.dupe(u8, p) catch return 2;
+        putString(sh.gpa, &sh.hash, n, p) catch return 2;
     }
     return st;
+}
+
+/// Set `key` to a copy of `value` in a map that owns both.
+fn putString(gpa: Allocator, map: *std.StringHashMapUnmanaged([]u8), key: []const u8, value: []const u8) Allocator.Error!void {
+    const copy = try gpa.dupe(u8, value);
+    errdefer gpa.free(copy);
+    if (try shell.putOwned([]u8, gpa, map, key, copy)) |old| gpa.free(old);
 }
 
 fn aliasCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
@@ -1793,9 +1791,7 @@ fn aliasCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     for (args[1..]) |arg| {
         if (std.mem.indexOfScalar(u8, arg, '=')) |e| {
             const name = arg[0..e];
-            const gop = sh.aliases.getOrPut(sh.gpa, name) catch return 2;
-            if (gop.found_existing) sh.gpa.free(gop.value_ptr.*) else gop.key_ptr.* = sh.gpa.dupe(u8, name) catch return 2;
-            gop.value_ptr.* = sh.gpa.dupe(u8, arg[e + 1 ..]) catch return 2;
+            putString(sh.gpa, &sh.aliases, name, arg[e + 1 ..]) catch return 2;
         } else if (sh.aliases.get(arg)) |v| {
             _ = sh.out(std.fmt.allocPrint(a, "{s}={s}\n", .{ arg, quoteSingle(a, v) catch "" }) catch return 2);
         } else {
