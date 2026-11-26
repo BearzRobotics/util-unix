@@ -566,6 +566,8 @@ c "alias used hundreds of times" 'echo "alias say=echo" > s; i=0; while [ $i -lt
 c "alias of an alias used hundreds of times" '{ echo "alias say=echo"; echo "alias hi=\"say hi \""; i=0; while [ $i -lt 300 ]; do echo "hi $i"; i=$((i+1)); done; } > s; sh s | tail -3'
 c "long alias values used many times" '{ echo "alias say=\"echo $(printf %09000d 7)\""; i=0; while [ $i -lt 40 ]; do echo "say $i; say $i"; i=$((i+1)); done; } > s; . ./s | cksum'
 
+c "alias use does not disturb an earlier tilde name" 'printf "%s\n" "alias a=:" "alias b=\"echo zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\"" "{ a; echo ~root; b; b; }" > s; sh s'
+
 # ---- eval / dot / exec / command / type ----
 c "eval simple" 'eval echo hi' B
 c "eval concatenates args" 'eval "echo" "a" "b"' B

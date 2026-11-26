@@ -477,7 +477,7 @@ pub const Parser = struct {
                 '`' => try self.scanBackquote(b, in_dq),
                 '~' => {
                     if (!in_dq and ctx != .text and (b.atStart() or b.after_sep)) {
-                        if (self.tryTilde(b, ctx)) |t| {
+                        if (try self.tryTilde(b, ctx)) |t| {
                             try b.push(a, if (b.atStart()) .{ .tilde = t } else .{ .atilde = t });
                             continue;
                         }
@@ -508,7 +508,7 @@ pub const Parser = struct {
     }
 
     /// At a `~`: the user name when it forms a tilde-prefix, advancing past it.
-    fn tryTilde(self: *Parser, b: *const Builder, ctx: ScanCtx) ?[]const u8 {
+    fn tryTilde(self: *Parser, b: *const Builder, ctx: ScanCtx) Allocator.Error!?[]const u8 {
         var i: usize = 1;
         while (self.at(i)) |c| : (i += 1) {
             if (c == '/' or lexer.isMeta(c)) break;
@@ -516,7 +516,7 @@ pub const Parser = struct {
             if (ctx == .brace and c == '}') break;
             if (c == '\\' or c == '\'' or c == '"' or c == '$' or c == '`') return null;
         }
-        const name = self.src[self.pos + 1 .. self.pos + i];
+        const name = try self.a.dupe(u8, self.src[self.pos + 1 .. self.pos + i]);
         self.pos += i;
         return name;
     }
