@@ -73,7 +73,8 @@ while read -r c k; do
     sc=$(grep "^{\"code\":\"$c\"" "$TMP/catalog.json" | sed 's/.*"shellcheck":\([^,]*\),.*/\1/')
     case "$sc" in null) ;; \"SC[0-9]*\") grep -q "^ShellCheck: ${sc#\"}" "$TMP/exp" 2>/dev/null || { "$OURS" --explain "$c" | grep -q "^ShellCheck: " && ok "explain names ShellCheck for $c" || bad "explain lacks the ShellCheck id of $c"; };; *) bad "bad shellcheck field of $c: $sc";; esac
     case "$c" in SH9000|SH4004|SH4006|SH5013|SH5015|SH6001|SH6002) continue;; esac
-    if grep -q "^$c	" "$D/cases.txt"; then ok "test covers $c"; else bad "no test case for $c"; fi
+    # a case alone proves nothing: its frozen output must hold the code
+    if grep -q "^$c	" "$D/cases.txt" && grep -q "\"code\":\"$c\"" "$D/$c.json"; then ok "test covers $c"; else bad "no test case producing $c"; fi
 done < "$TMP/codes"
 # the shellcheck id also appears in the json diagnostic of a case (SH1001 maps to SC1089)
 run_case 'echo )' json

@@ -88,6 +88,40 @@ fn checkSimple(c: *Ctx, n: *const ast.Node, s: ast.Simple) Allocator.Error!void 
     };
 }
 
+/// The first line opening a definition with the `function` keyword and a brace
+/// on the same line. `function f {` is not POSIX syntax: `{` is an argument, so
+/// the closing brace is a syntax error and `check` never sees a tree. `--check`
+/// calls this after a syntax error to name the actual mistake.
+pub fn functionKeywordLine(source: []const u8) ?Finding {
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    var number: u32 = 0;
+    while (lines.next()) |line| {
+        number += 1;
+        const text = std.mem.trimStart(u8, line, " \t");
+        if (!std.mem.startsWith(u8, text, "function ") and !std.mem.startsWith(u8, text, "function\t")) continue;
+        var rest = std.mem.trimStart(u8, text["function".len..], " \t");
+        var n: usize = 0;
+        while (n < rest.len and (std.ascii.isAlphanumeric(rest[n]) or rest[n] == '_' or rest[n] == '-')) n += 1;
+        if (n == 0) continue;
+        rest = std.mem.trimStart(u8, rest[n..], " \t");
+        if (std.mem.startsWith(u8, rest, "()")) rest = std.mem.trimStart(u8, rest[2..], " \t");
+        if (!std.mem.startsWith(u8, rest, "{")) continue;
+        const column: u32 = @intCast(line.len - text.len + 1);
+        return .{ .kind = .lint_function_keyword, .line = number, .column = column, .end_column = column + 8, .subject = "function" };
+    }
+    return null;
+}
+
+test "the function keyword is found where it does not parse" {
+    const hit = functionKeywordLine("echo a\n  function f {\n :\n }\n").?;
+    try std.testing.expectEqual(@as(u32, 2), hit.line);
+    try std.testing.expectEqual(@as(u32, 3), hit.column);
+    try std.testing.expect(functionKeywordLine("function f() { :; }") != null);
+    try std.testing.expect(functionKeywordLine("functional f {") == null);
+    try std.testing.expect(functionKeywordLine("echo function f {") == null);
+    try std.testing.expect(functionKeywordLine("function f") == null);
+}
+
 fn walk(c: *Ctx, node: ?*const ast.Node) Allocator.Error!void {
     const n = node orelse return;
     switch (n.kind) {

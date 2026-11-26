@@ -1,2 +1,3 @@
 s.sh:1:17: error: unexpected '}' [SH1001]
+s.sh:1:1: warning: `function` is a bash/ksh keyword; POSIX defines `name() { ...; }` [SH7005]
 rc=2

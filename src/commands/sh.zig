@@ -386,37 +386,42 @@ fn runProfiles(shell: *sh.Shell) void {
     }
 }
 
+fn reportFinding(ctx: cli.Context, f: sh.lint.Finding, label: []const u8, text: []const u8, style: diag.Style) void {
+    var arena = std.heap.ArenaAllocator.init(ctx.gpa);
+    defer arena.deinit();
+    const e = diag.entryOf(f.kind);
+    const dd: diag.Diagnostic = .{
+        .code = e.code,
+        .kind = f.kind,
+        .severity = .warning,
+        .label = label,
+        .line = f.line,
+        .column = f.column,
+        .end_column = f.end_column,
+        .subject = f.subject,
+        .posix = e.summary,
+        .source = text,
+    };
+    const out = diag.render(arena.allocator(), &dd, ctx.name, style, false, false) catch return;
+    sys.writeAll(2, out) catch {};
+}
+
 /// `sh --check`: parse (reporting syntax errors), then run the lint checks.
 /// Exit 0 when clean, 1 with findings, 2 on a syntax error.
 fn runCheck(ctx: cli.Context, shell: *sh.Shell, text: []const u8, label: []const u8, style: diag.Style) u8 {
     shell.flags.noexec = true;
     const st = shell.runString(text) catch return 2;
-    if (st != 0) return 2;
+    if (st != 0) {
+        if (sh.lint.functionKeywordLine(text)) |f| reportFinding(ctx, f, label, text, style);
+        return 2;
+    }
     var d: sh.parser.Diag = .{};
     var prog = shell.parse(text, &d) catch return 2;
     defer prog.deinit();
     var findings: std.ArrayList(sh.lint.Finding) = .empty;
     defer findings.deinit(ctx.gpa);
     sh.lint.check(ctx.gpa, prog.commands, &findings) catch return 2;
-    var arena = std.heap.ArenaAllocator.init(ctx.gpa);
-    defer arena.deinit();
-    for (findings.items) |f| {
-        const e = diag.entryOf(f.kind);
-        const dd: diag.Diagnostic = .{
-            .code = e.code,
-            .kind = f.kind,
-            .severity = .warning,
-            .label = label,
-            .line = f.line,
-            .column = f.column,
-            .end_column = f.end_column,
-            .subject = f.subject,
-            .posix = e.summary,
-            .source = text,
-        };
-        const out = diag.render(arena.allocator(), &dd, ctx.name, style, false, false) catch return 2;
-        sys.writeAll(2, out) catch {};
-    }
+    for (findings.items) |f| reportFinding(ctx, f, label, text, style);
     return if (findings.items.len > 0) 1 else 0;
 }
 

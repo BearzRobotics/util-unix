@@ -3,4 +3,9 @@ sh: s.sh:1:17: error[SH1001]: unexpected '}'
 1 | function f { :; }
   |                 ^
 help: check for a missing separator (`;` or newline) or a stray operator before it
+sh: s.sh:1:1: warning[SH7005]: `function` is a bash/ksh keyword; POSIX defines `name() { ...; }`
+  |
+1 | function f { :; }
+  | ^^^^^^^^
+help: write `name() { ...; }`
 rc=2
