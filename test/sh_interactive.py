@@ -446,6 +446,14 @@ def input_and_history_cases():
         ["HISTSIZE=3", "echo first$((1+1))-$((2+2))aaaaaaaaaaaaaaaaaaaaaaaa", "echo b", "echo c", "fc -s first", ALIVE],
         ["first2-4aaaaaaaaaaaaaaaaaaaaaaaa\n$", "al1ve"])
 
+    # MEM-02: bytes that are not UTF-8, from the history file or a file name
+    d = tempfile.mkdtemp(dir=TMP)
+    with open(os.path.join(d, "hist"), "wb") as f:
+        f.write(b"echo caf\xe9\n")
+    has("recalling a history line that is not UTF-8", ["raw:\x1b[A", "raw:\x15", ALIVE], ["al1ve"], env={"HISTFILE": os.path.join(d, "hist")})
+    open(os.path.join(os.fsencode(d), b"caf\xe9"), "wb").close()
+    has("completing a file name that is not UTF-8", ["raw:ls caf\t", "raw:\r", ALIVE], ["al1ve"], cwd=d)
+
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
         d = tempfile.mkdtemp(dir=TMP)

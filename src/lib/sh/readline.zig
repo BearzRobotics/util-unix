@@ -30,6 +30,19 @@ const pattern = @import("pattern.zig");
 /// How far `.` and `@` may nest.
 const max_vi_depth = 16;
 
+/// The character at byte `i`. History lines and file names are raw bytes: one
+/// that does not start a whole, valid UTF-8 character counts as a character of
+/// its own, drawn as U+FFFD.
+const Char = struct { len: usize, cp: u21, valid: bool };
+
+fn charAt(s: []const u8, i: usize) Char {
+    const bad: Char = .{ .len = 1, .cp = 0xfffd, .valid = false };
+    const n: usize = std.unicode.utf8ByteSequenceLength(s[i]) catch return bad;
+    if (n > s.len - i) return bad;
+    const cp = std.unicode.utf8Decode(s[i..][0..n]) catch return bad;
+    return .{ .len = n, .cp = cp, .valid = true };
+}
+
 // --- terminal abstraction ---------------------------------------------------------
 
 pub const ReadResult = union(enum) {
@@ -260,10 +273,9 @@ pub fn textWidth(s: []const u8) usize {
             i += 1;
             continue;
         }
-        const n = std.unicode.utf8ByteSequenceLength(c) catch 1;
-        const cp = if (i + n <= s.len) (std.unicode.utf8Decode(s[i .. i + n]) catch 0xfffd) else 0xfffd;
-        w += cpWidth(cp);
-        i += n;
+        const ch = charAt(s, i);
+        w += cpWidth(ch.cp);
+        i += ch.len;
     }
     return w;
 }
@@ -560,10 +572,9 @@ pub const Editor = struct {
                 i += 1;
                 continue;
             }
-            const n = std.unicode.utf8ByteSequenceLength(c) catch 1;
-            const cp = if (i + n <= prompt.len) (std.unicode.utf8Decode(prompt[i .. i + n]) catch 0xfffd) else 0xfffd;
-            self.advance(&p, cp);
-            i += n;
+            const ch = charAt(prompt, i);
+            self.advance(&p, ch.cp);
+            i += ch.len;
         }
         return p;
     }
@@ -574,8 +585,8 @@ pub const Editor = struct {
         const s = self.buf.items;
         var i: usize = 0;
         while (i < upto and i < s.len) {
-            const n = std.unicode.utf8ByteSequenceLength(s[i]) catch 1;
-            const cp = if (i + n <= s.len) (std.unicode.utf8Decode(s[i .. i + n]) catch 0xfffd) else 0xfffd;
+            const ch = charAt(s, i);
+            const cp = ch.cp;
             if (cp < 32 and cp != '\n') {
                 self.advance(&p, 'x');
                 self.advance(&p, 'x');
@@ -583,7 +594,7 @@ pub const Editor = struct {
                 self.advance(&p, 'x');
                 self.advance(&p, 'x');
             } else self.advance(&p, cp);
-            i += n;
+            i += ch.len;
         }
         return p;
     }
@@ -602,8 +613,8 @@ pub const Editor = struct {
         var p = self.layoutPrompt(self.displayPrompt());
         var i: usize = 0;
         while (i < s.len) {
-            const n = std.unicode.utf8ByteSequenceLength(s[i]) catch 1;
-            const cp = if (i + n <= s.len) (std.unicode.utf8Decode(s[i .. i + n]) catch 0xfffd) else 0xfffd;
+            const ch = charAt(s, i);
+            const cp = ch.cp;
             const before = p.row;
             if (cp == '\n') {
                 self.out.appendSlice(self.gpa, "\r\n") catch return;
@@ -616,11 +627,11 @@ pub const Editor = struct {
                 self.advance(&p, 'x');
             } else {
                 // The cell may wrap before it is written (wide character).
-                self.out.appendSlice(self.gpa, s[i .. i + n]) catch return;
+                self.out.appendSlice(self.gpa, if (ch.valid) s[i..][0..ch.len] else "\u{fffd}") catch return;
                 self.advance(&p, cp);
             }
             if (p.row > before and cp != '\n') self.out.appendSlice(self.gpa, "\r\n") catch return;
-            i += n;
+            i += ch.len;
         }
     }
 
@@ -669,14 +680,15 @@ pub const Editor = struct {
     fn prevBoundary(self: *const Editor, pos: usize) usize {
         if (pos == 0) return 0;
         var p = pos - 1;
-        while (p > 0 and (self.buf.items[p] & 0xc0) == 0x80) p -= 1;
-        return p;
+        while (p > 0 and pos - p < 4 and (self.buf.items[p] & 0xc0) == 0x80) p -= 1;
+        // bytes that are not one character are stepped over singly, as
+        // `nextBoundary` does
+        return if (charAt(self.buf.items, p).len == pos - p) p else pos - 1;
     }
 
     fn nextBoundary(self: *const Editor, pos: usize) usize {
         if (pos >= self.buf.items.len) return self.buf.items.len;
-        const n = std.unicode.utf8ByteSequenceLength(self.buf.items[pos]) catch 1;
-        return @min(pos + n, self.buf.items.len);
+        return pos + charAt(self.buf.items, pos).len;
     }
 
     fn pushUndo(self: *Editor) void {
@@ -2393,6 +2405,23 @@ test "emacs: M-t with no word before the first one does nothing" {
         var c: usize = 0;
         _ = try drive(.emacs, keys, &.{}, &t, &n, &c);
         try std.testing.expectEqualStrings(keys[0 .. keys.len - 2], t[0..n]);
+    }
+}
+
+test "a line with bytes that are not UTF-8 can be shown and edited" {
+    // Latin-1, a lone continuation byte, truncated and overlong sequences
+    for ([_][]const u8{ "caf\xe9", "\xe9x", "a\x80\x80\x80\x80\x80b", "\xf0\x9f", "\xc0\xafz", "ok\xff" }) |line| {
+        var history = [_][]u8{@constCast(line)};
+        // recall it, walk to the start and back over it, then delete all of it
+        var keys: std.ArrayList(u8) = .empty;
+        defer keys.deinit(std.testing.allocator);
+        try keys.appendSlice(std.testing.allocator, "\x10\x01");
+        for (0..line.len) |_| try keys.appendSlice(std.testing.allocator, "\x06");
+        for (0..line.len) |_| try keys.appendSlice(std.testing.allocator, "\x02");
+        try keys.appendSlice(std.testing.allocator, "\x05");
+        for (0..line.len) |_| try keys.appendSlice(std.testing.allocator, "\x7f");
+        try expectBuf(.emacs, keys.items, &history, "", 0);
+        try expectBuf(.emacs, "\x10", &history, line, line.len);
     }
 }
 
