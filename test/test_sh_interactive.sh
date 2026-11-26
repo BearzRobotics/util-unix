@@ -21,13 +21,20 @@ OUT="$(mktemp)"
 trap 'rm -f "$OUT"' EXIT
 # a new session of its own: a stray signal in a test cannot reach the caller
 if command -v setsid > /dev/null 2>&1; then
-    setsid python3 -u "$HERE/sh_interactive.py" "$OURS" "$@" > "$OUT" 2>&1 < /dev/null
+    setsid -w python3 -u "$HERE/sh_interactive.py" "$OURS" "$@" > "$OUT" 2>&1 < /dev/null
 else
     python3 -u "$HERE/sh_interactive.py" "$OURS" "$@" > "$OUT" 2>&1 < /dev/null
 fi
+py_rc=$?
 cat "$OUT"
 PASS=$(grep -c '^PASS' "$OUT")
 FAIL=$(grep -c '^FAIL' "$OUT")
+# A harness that crashed stops printing cases, which must not read as success:
+# its last line is the summary, and it exits 1 only to report failed cases.
+if ! grep -q '^[0-9][0-9]* passed, [0-9][0-9]* failed$' "$OUT" || { [ "$py_rc" -ne 0 ] && [ "$FAIL" -eq 0 ]; }; then
+    echo "FAIL the python harness did not finish (exit status $py_rc)"
+    FAIL=$((FAIL + 1))
+fi
 printf '\n======================================\n'
 printf ' sh interactive: %d/%d passed\n' "$PASS" "$((PASS + FAIL))"
 [ "$FAIL" -eq 0 ] && echo " All tests passed!" || printf ' %d test(s) failed\n' "$FAIL"

@@ -12,6 +12,10 @@ if command -v python3 >/dev/null 2>&1; then
     printf '%s\n' "$py_out" | grep -E '^(PASS|FAIL|     )'
     p=$(printf '%s\n' "$py_out" | grep -c '^PASS'); f=$(printf '%s\n' "$py_out" | grep -c '^FAIL')
     PASS=$((PASS + p)); FAIL=$((FAIL + f))
+    # see test_sh_interactive.sh: a crashed harness must not read as success
+    if ! printf '%s\n' "$py_out" | grep -q '^ stty: [0-9][0-9]*/[0-9][0-9]* passed$' || { [ "$py_rc" -ne 0 ] && [ "$f" -eq 0 ]; }; then
+        FAIL=$((FAIL + 1)); echo "FAIL the python harness did not finish (exit status $py_rc)"
+    fi
 else
     skip_test "pseudo-terminal tests (python3 needed)"
 fi
