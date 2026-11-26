@@ -561,6 +561,11 @@ c "prefix assignment colon-default sees earlier" 'a=; a=1 b=${a:-empty} env | gr
 c "prefix assignment changed by a later expansion" 'unset a; a=1 b=$((a=5)) c=$a env | grep "^[abc]=" | sort; echo "${a-unset}"'
 c "prefix assignment sees earlier under set -u" 'set -u; unset d; d=/new f=$d/file env | grep "^f="'
 
+# ---- aliases keep expanding however many have been used (SHL-02) ----
+c "alias used hundreds of times" 'echo "alias say=echo" > s; i=0; while [ $i -lt 300 ]; do echo "say $i"; i=$((i+1)); done >> s; . ./s | tail -3'
+c "alias of an alias used hundreds of times" '{ echo "alias say=echo"; echo "alias hi=\"say hi \""; i=0; while [ $i -lt 300 ]; do echo "hi $i"; i=$((i+1)); done; } > s; sh s | tail -3'
+c "long alias values used many times" '{ echo "alias say=\"echo $(printf %09000d 7)\""; i=0; while [ $i -lt 40 ]; do echo "say $i; say $i"; i=$((i+1)); done; } > s; . ./s | cksum'
+
 # ---- eval / dot / exec / command / type ----
 c "eval simple" 'eval echo hi' B
 c "eval concatenates args" 'eval "echo" "a" "b"' B

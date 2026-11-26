@@ -113,6 +113,11 @@ pub const Carry = struct {
     blank_marks: []const usize = &.{},
 };
 
+/// The most substitutions one word of the input may lead to. `active` already
+/// stops an alias from expanding itself; this bounds sets of aliases whose
+/// expansion grows without a practical end.
+const max_alias_steps = 10_000;
+
 pub const Parser = struct {
     a: Allocator,
     src: []const u8,
@@ -132,9 +137,15 @@ pub const Parser = struct {
     /// Aliases being read: (name, end offset of its text in `src`); an alias
     /// is not expanded again inside its own text (POSIX 2.3.1).
     active: std.ArrayList(ActiveAlias) = .empty,
+    /// Where `src` lives once an alias has been substituted: it ends where the
+    /// buffer ends, with room in front. Later substitutions are written over
+    /// text already read, so memory does not grow with each one. (Nothing the
+    /// parser returns points into `src`.)
+    splice_buf: []u8 = &.{},
     /// `src[0..splice_end]` is alias text, not part of the original input.
     splice_end: usize = 0,
-    alias_budget: u32 = 200,
+    /// Substitutions made since a word of the original input was last replaced.
+    alias_steps: u32 = 0,
     blank_marks: std.ArrayList(usize) = .empty,
     /// Offsets (in `src`) where a backslash-newline was removed by `joinLines`,
     /// so line numbers stay those of the original text.
@@ -1104,7 +1115,6 @@ pub const Parser = struct {
     /// `blank_marks` holds the offsets where such values end.
     fn aliasStep(self: *Parser, allow_reserved: bool) Error!bool {
         const al = self.aliases orelse return false;
-        if (self.alias_budget == 0) return false;
         const t = try self.peek();
         const w = switch (t.tag) {
             .word => |w| w,
@@ -1116,14 +1126,21 @@ pub const Parser = struct {
             else => return false,
         };
         if (!allow_reserved and lexer.reservedOf(w) != null) return false;
-        for (self.active.items) |ac| if (ac.end > t.start and std.mem.eql(u8, ac.name, name)) return false;
+        // forget the aliases whose text has been passed
+        var i: usize = 0;
+        while (i < self.active.items.len) {
+            if (self.active.items[i].end <= t.start) {
+                _ = self.active.swapRemove(i);
+            } else i += 1;
+        }
+        for (self.active.items) |ac| if (std.mem.eql(u8, ac.name, name)) return false;
         const val = al.get(al.ctx, name) orelse return false;
-        self.alias_budget -= 1;
+        if (t.start >= self.splice_end) self.alias_steps = 0;
+        if (self.alias_steps == max_alias_steps) return self.fail("Syntax error: alias \"{s}\" expands without a practical end", .{name});
+        self.alias_steps += 1;
         for (self.active.items) |*ac| ac.end = (ac.end + val.len) -| self.pos;
         try self.active.append(self.a, .{ .name = name, .end = val.len });
-        const ns = try self.a.alloc(u8, val.len + self.src.len - self.pos);
-        @memcpy(ns[0..val.len], val);
-        @memcpy(ns[val.len..], self.src[self.pos..]);
+        const ns = try self.splice(val);
         for (self.blank_marks.items) |*m| m.* = (m.* + val.len) -| self.pos;
         if (self.conts.len > 0) {
             var keep: std.ArrayList(usize) = .empty;
@@ -1137,6 +1154,24 @@ pub const Parser = struct {
         self.pos = 0;
         self.peeked = null;
         return true;
+    }
+
+    /// `val` followed by the unread source.
+    fn splice(self: *Parser, val: []const u8) Allocator.Error![]const u8 {
+        const rest = self.src[self.pos..];
+        if (self.splice_buf.len > 0) {
+            const read_to = self.splice_buf.len - rest.len;
+            if (read_to >= val.len) {
+                @memcpy(self.splice_buf[read_to - val.len .. read_to], val);
+                return self.splice_buf[read_to - val.len ..];
+            }
+        }
+        const room = @max(4096, 4 * val.len);
+        const buf = try self.a.alloc(u8, room + val.len + rest.len);
+        @memcpy(buf[room..][0..val.len], val);
+        @memcpy(buf[room + val.len ..], rest);
+        self.splice_buf = buf;
+        return buf[room..];
     }
 
     fn maybeAlias(self: *Parser) Error!void {
