@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # chcon: differential tests against GNU chcon 9.7. The host kernel has no SELinux,
 # where `security.selinux` is an ordinary extended attribute that an unprivileged
-# user may set on tmpfs and ext4; so contexts are plain strings and the result is
-# compared by reading the attribute of every file afterwards. Skipped when the
-# scratch file system refuses security.* attributes.
+# user may set on tmpfs in a user namespace of their own; so contexts are plain
+# strings and the result is compared by reading the attribute of every file
+# afterwards. When the scratch directory refuses security.* attributes, the suite
+# runs itself again on a tmpfs in a user and mount namespace; it is skipped only
+# where that is not possible either.
 UTIL="chcon"
 export LC_ALL=C
 . "$(dirname "$0")/testlib.sh"
@@ -13,7 +15,15 @@ if ! command -v python3 >/dev/null 2>&1; then echo "SKIP chcon (python3 needed)"
 BASE="$(mktemp -d)"; trap 'rm -rf "$BASE"' EXIT
 touch "$BASE/probe"
 if ! /usr/bin/chcon a:b:c:d "$BASE/probe" 2>/dev/null; then
-    echo "SKIP chcon (this file system does not accept security.* attributes)"; exit 0
+    if [ -z "${UU_CHCON_NAMESPACE:-}" ]; then
+        mnt="$BASE/tmpfs"; mkdir "$mnt"
+        if unshare -rm sh -c 'mount -t tmpfs tmpfs "$1"' sh "$mnt" 2>/dev/null; then
+            # not exec: this shell's EXIT trap still has $BASE to remove
+            UU_CHCON_NAMESPACE=1 unshare -rm sh -c 'mount -t tmpfs tmpfs "$1" && TMPDIR="$1" exec sh "$2"' sh "$mnt" "$0"
+            status=$?; rm -rf "$BASE" "$(dirname "$TMPDIR_CMP")"; exit "$status"
+        fi
+    fi
+    echo "SKIP chcon (cannot set security.* attributes here, even on a tmpfs in a user namespace)"; exit 0
 fi
 
 # Attribute dump: path, kind, context (NUL shown as <NUL>), for the whole tree.
