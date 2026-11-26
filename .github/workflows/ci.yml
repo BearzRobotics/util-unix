@@ -2,7 +2,9 @@ name: ci
 
 on:
   push:
+    branches: ['**']   # tags run this through release.yml
   pull_request:
+  workflow_call:       # release.yml runs every job before it builds
 
 permissions:
   contents: read

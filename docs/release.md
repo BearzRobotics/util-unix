@@ -1,7 +1,9 @@
 # Cutting a release
 
-Releases are built by `.github/workflows/release.yml` when a tag `v*` is pushed. The
-workflow installs Zig 0.17.1 (pinned), calls `scripts/package.sh` for each target, writes
+Releases are built by `.github/workflows/release.yml` when a tag `v*` is pushed. It first
+runs every `ci.yml` job (unit tests, behavioural suites, build modes, cross builds) on the
+tagged commit and builds nothing unless all pass; the aarch64 binaries are also run under
+qemu-user. The workflow then installs Zig 0.17.1 (pinned), calls `scripts/package.sh` for each target, writes
 `SHA256SUMS`, takes the release notes from the `CHANGELOG.md` section of the version and
 creates the GitHub release. Running the workflow by hand (workflow_dispatch) is a dry run:
 it builds the archives as workflow artifacts and publishes nothing.
@@ -24,7 +26,8 @@ test and maintain that platform. `ci.yml` cross-compiles Linux and macOS (compil
 
 ## Checklist
 
-1. `main` is green in CI (`zig build`, `zig build test`, all three modes, all cross targets).
+1. `main` is green in CI (`zig build`, `zig build test`, the behavioural suites, all three
+   modes, all cross targets).
 2. Run the full differential suites locally (`sh test/run_all_tests.sh` after
    `zig build -Doptimize=ReleaseSafe`). Do not run the `sync` global-flush cases.
 3. Run the QEMU guest tests (`sh test/vm/run.sh`) and the `sh` corpora (`test/test_sh_corpora.sh`).
