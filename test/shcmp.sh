@@ -58,8 +58,24 @@ shcmp_norm() {
 shcmp_exec() {
     prefix="$1"; snippet="$2"; w="$3"
     rm -rf "$w"; mkdir -p "$w"
-    (cd "$w" && SH_DIAGNOSTICS=posix timeout 20 $prefix -c "$snippet" < /dev/null > "$w.out" 2> "$w.err"; echo $? > "$w.rc")
+    shcmp_inner_sh $prefix
+    (cd "$w" && PATH="$TEST_TMP/inner:$PATH" SH_DIAGNOSTICS=posix timeout 20 $prefix -c "$snippet" < /dev/null > "$w.out" 2> "$w.err"; echo $? > "$w.rc")
 }
+
+# A snippet that runs `sh` must get the shell being compared, not the system's:
+# a directory holding `sh -> that shell` goes first on PATH. It is the same
+# directory for every shell, so a snippet that prints the path prints the same.
+shcmp_inner_sh() {
+    case $1 in /*) inner=$1 ;; *) inner=$PWD/$1 ;; esac
+    mkdir -p "$TEST_TMP/inner" && rm -f "$TEST_TMP/inner/sh" && ln -s "$inner" "$TEST_TMP/inner/sh"
+}
+
+# Self-check: inside a case, `sh` must be our shell when our shell runs the case.
+shcmp_exec "$OURS" 'command -v sh' "$TEST_TMP/selfcheck"
+if [ "$(cat "$TEST_TMP/selfcheck.out")" != "$TEST_TMP/inner/sh" ] || ! [ "$TEST_TMP/inner/sh" -ef "$OURS" ]; then
+    echo "FATAL: inside a case, 'sh' is not the shell under test ($OURS)" >&2
+    exit 2
+fi
 
 shcmp_bsd() {
     snippet="$1"; w="$2"

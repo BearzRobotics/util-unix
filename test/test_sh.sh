@@ -1037,7 +1037,7 @@ c "sh -f" 'touch a; sh -f -c "echo *"' B
 c "sh -o noglob" 'touch a; sh -o noglob -c "echo *"' B
 c "sh +e" 'sh +e -c "false; echo yes"' B
 c "sh -c no args" 'sh -c' e
-c "sh script missing" 'sh nosuchscript; echo $?' e
+c "sh script missing" 'sh nosuchscript; echo $?' eP "XCU sh, EXIT STATUS: 127 when the command_file cannot be found; dash exits 2."
 c "sh -- operand" 'echo "echo ok" > s; sh -- s' B
 c "sh -c with dollar zero" 'sh -c "echo \$0" myname' B
 
@@ -1087,8 +1087,10 @@ c "scripts: NUL bytes are ignored" 'printf "echo a\0b\n" > s; . ./s' B "POSIX le
 # ---- script on standard input is run incrementally (compared with dash only) ----
 stdin_case() {
     desc="$1"; input="$2"; shift 2
-    printf '%s' "$input" | (cd "$TEST_TMP" && "$OURS" "$@") > "$TEST_TMP/si.ours" 2>&1; ro=$?
-    printf '%s' "$input" | (cd "$TEST_TMP" && /usr/bin/dash "$@") > "$TEST_TMP/si.dash" 2>&1; rd=$?
+    shcmp_inner_sh "$OURS"
+    printf '%s' "$input" | (cd "$TEST_TMP" && PATH="$TEST_TMP/inner:$PATH" "$OURS" "$@") > "$TEST_TMP/si.ours" 2>&1; ro=$?
+    shcmp_inner_sh /usr/bin/dash
+    printf '%s' "$input" | (cd "$TEST_TMP" && PATH="$TEST_TMP/inner:$PATH" /usr/bin/dash "$@") > "$TEST_TMP/si.dash" 2>&1; rd=$?
     sed -e 's#^[^: ]*: [0-9]*: #sh: #' "$TEST_TMP/si.ours" > "$TEST_TMP/si.o2"
     sed -e 's#^[^: ]*: [0-9]*: #sh: #' "$TEST_TMP/si.dash" > "$TEST_TMP/si.d2"
     if [ "$ro" = "$rd" ] && cmp -s "$TEST_TMP/si.o2" "$TEST_TMP/si.d2"; then

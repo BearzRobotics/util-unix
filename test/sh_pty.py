@@ -6,7 +6,7 @@ Every session runs in its own session (pty.fork), is capped by a deadline and is
 cleaned up by killing exactly the processes of that session (never a group or
 pid this module did not create).
 """
-import os, pty, re, select, signal, struct, fcntl, termios, time
+import os, pty, re, select, shutil, signal, struct, fcntl, tempfile, termios, time
 
 CSI = re.compile(r"\x1b\[([0-9;?]*)([A-Za-z])")
 
@@ -83,6 +83,14 @@ class Session:
         e = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "TERM": "xterm", "HOME": "/nonexistent",
              "PS1": "$ ", "ENV": "/dev/null", "LC_ALL": "C"}
         e.update(env or {})
+        # a command that runs `sh` must get the shell under test, not the system's
+        # (bsdrun.sh runs inside the FreeBSD sysroot, where `sh` already is)
+        self.inner = None
+        target = shutil.which(argv[0])
+        if target and os.path.basename(target) != "bsdrun.sh":
+            self.inner = tempfile.mkdtemp(prefix="shpty-inner.")
+            os.symlink(os.path.abspath(target), os.path.join(self.inner, "sh"))
+            e["PATH"] = self.inner + ":" + e.get("PATH", "/usr/bin:/bin")
         pid, fd = pty.fork()
         if pid == 0:
             if cwd:
@@ -147,6 +155,8 @@ class Session:
         if self.closed:
             return
         self.closed = True
+        if self.inner:
+            shutil.rmtree(self.inner, ignore_errors=True)
         try:
             members = session_members(self.pid)
         except Exception:
