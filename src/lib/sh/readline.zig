@@ -1310,6 +1310,18 @@ pub const Editor = struct {
             }
             return;
         }
+        if (k.kind == .char and !k.alt) {
+            // The interrupt character abandons the line whatever the editor is
+            // in the middle of (raw mode: no signal comes from the terminal).
+            if (k.cp == 3) {
+                self.status = .interrupted;
+                return;
+            }
+            if (self.mode == .vi and !self.vi_insert and k.cp == self.eof_char and self.buf.items.len == 0) {
+                self.status = .eof;
+                return;
+            }
+        }
         if (self.searching) {
             self.searchKey(k);
             return;

@@ -408,6 +408,14 @@ def input_and_history_cases():
     has("typing ahead while a command runs", ["raw:sleep 1\r", "raw:echo A$((1))\recho B$((2))\recho C$((3))\r", ("sleep", 1.5)], ["A1", "B2", "C3"])
     has("typed ahead lines reach a command that reads", ["raw:read v; echo got-$v-$((1+1))\rtyped\n"], ["got-typed-2"])
 
+    # SHI-06: ^C abandons the line in every vi state
+    vi = [SH, "-i", "-o", "vi"]
+    for name, keys in (("command mode", ["raw:echo no$((1))run", "raw:\x1b", "^C"]),
+                       ("search mode", ["raw:echo no$((1))run", "raw:\x1b", "raw:/ab", "^C"]),
+                       ("a pending operator", ["raw:echo no$((1))run", "raw:\x1bd", "^C"])):
+        has("vi ^C cancels the line from " + name, keys + ["raw:\r", ALIVE], ["al1ve"], ["no1run"], argv=vi)
+    leaves("vi ^D on an empty line in command mode leaves", ["set -o vi\r", "\x1b", "\x04"], 0)
+
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
         d = tempfile.mkdtemp(dir=TMP)
