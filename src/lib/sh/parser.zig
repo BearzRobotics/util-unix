@@ -147,10 +147,6 @@ pub const Parser = struct {
     /// Substitutions made since a word of the original input was last replaced.
     alias_steps: u32 = 0,
     blank_marks: std.ArrayList(usize) = .empty,
-    /// Offsets (in `src`) where a backslash-newline was removed by `joinLines`,
-    /// so line numbers stay those of the original text.
-    conts: []const usize = &.{},
-    cont_idx: usize = 0,
     /// A line number offset for sub-parsers.
     depth: u32 = 0,
 
@@ -158,23 +154,15 @@ pub const Parser = struct {
         return .{ .a = a, .src = src, .diag = diag };
     }
 
-    /// Parser for a whole program: line continuations (backslash-newline,
-    /// POSIX 2.2.1) are removed everywhere but in single quotes and comments.
+    /// Parser for a whole program.
     pub fn initProgram(a: Allocator, src: []const u8, diag: *Diag) Allocator.Error!Parser {
-        var p = init(a, src, diag);
-        const j = try joinLines(a, src);
-        p.src = j.text;
-        p.conts = j.conts;
-        return p;
+        return init(a, src, diag);
     }
 
     /// Read `c` before the rest of the source. Call it before parsing.
     pub fn resumeAlias(self: *Parser, c: Carry) Allocator.Error!void {
         if (c.text.len == 0) return;
         self.src = try std.mem.concat(self.a, u8, &.{ c.text, self.src });
-        const moved = try self.a.alloc(usize, self.conts.len);
-        for (moved, self.conts) |*m, old| m.* = old + c.text.len;
-        self.conts = moved;
         for (c.active) |ac| try self.active.append(self.a, .{ .name = try self.a.dupe(u8, ac.name), .end = ac.end });
         try self.blank_marks.appendSlice(self.a, c.blank_marks);
         self.splice_end = c.text.len;
@@ -192,22 +180,9 @@ pub const Parser = struct {
         return .{ .text = try a.dupe(u8, self.src[from..self.splice_end]), .active = active.items, .blank_marks = marks.items };
     }
 
-    /// Length of the unread original text (undoing `joinLines`). Unread alias
-    /// text is not part of it.
+    /// Length of the unread original text. Unread alias text is not part of it.
     pub fn origTailLen(self: *const Parser) usize {
-        const from = @max(@min(self.pos, self.src.len), self.splice_end);
-        var n = self.src.len - from;
-        for (self.conts) |c| if (c >= from) {
-            n += 2;
-        };
-        return n;
-    }
-
-    fn fixLine(self: *Parser) void {
-        while (self.cont_idx < self.conts.len and self.conts[self.cont_idx] <= self.pos) {
-            self.line += 1;
-            self.cont_idx += 1;
-        }
+        return self.src.len - @max(@min(self.pos, self.src.len), self.splice_end);
     }
 
     // --- diagnostics -------------------------------------------------------
@@ -228,7 +203,6 @@ pub const Parser = struct {
     }
 
     fn failK(self: *Parser, kind: diagmod.Kind, comptime fmt: []const u8, args: anytype) Error {
-        self.fixLine();
         const msg = std.fmt.bufPrint(&self.diag.buf, fmt, args) catch self.diag.buf[0..0];
         self.diag.len = msg.len;
         self.diag.line = self.line;
@@ -305,6 +279,52 @@ pub const Parser = struct {
         self.pos += 1;
     }
 
+    // A backslash-newline is removed before the input is split into tokens
+    // (POSIX 2.2.1), but not in single quotes, `$'...'`, comments or a
+    // here-document with a quoted delimiter. Only the scanner knows which of
+    // those it is in, so it passes over the pairs itself: these functions are
+    // for the places where one means nothing.
+
+    /// The index of the next character at or after `i`.
+    fn joined(self: *const Parser, i: usize) usize {
+        var j = i;
+        while (j + 1 < self.src.len and self.src[j] == '\\' and self.src[j + 1] == '\n') j += 2;
+        return j;
+    }
+
+    /// The character `k` places ahead, continuations not counted.
+    fn look(self: *const Parser, k: usize) ?u8 {
+        var i = self.joined(self.pos);
+        for (0..k) |_| i = self.joined(i + 1);
+        return if (i < self.src.len) self.src[i] else null;
+    }
+
+    fn skipConts(self: *Parser) void {
+        while (self.cur() == '\\' and self.at(1) == '\n') {
+            self.adv();
+            self.adv();
+        }
+    }
+
+    /// Pass `n` characters.
+    fn take(self: *Parser, n: usize) void {
+        for (0..n) |_| {
+            self.skipConts();
+            self.adv();
+        }
+    }
+
+    /// Read the characters that satisfy `pred`.
+    fn takeWhile(self: *Parser, pred: *const fn (u8) bool) Allocator.Error![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        while (self.look(0)) |c| {
+            if (!pred(c)) break;
+            self.take(1);
+            try out.append(self.a, c);
+        }
+        return out.items;
+    }
+
     // --- tokens ------------------------------------------------------------
 
     pub fn peek(self: *Parser) Error!Token {
@@ -329,7 +349,6 @@ pub const Parser = struct {
 
     fn lexRaw(self: *Parser) Error!Token {
         while (true) {
-            self.fixLine();
             self.tok_start = self.pos;
             const c = self.cur() orelse return .{ .tag = .eof, .line = self.line };
             if (lexer.isBlank(c)) {
@@ -355,17 +374,12 @@ pub const Parser = struct {
                 return .{ .tag = .newline, .line = line };
             }
             if (try self.lexOperator()) |op| return .{ .tag = .{ .op = op }, .line = line };
-            if (std.ascii.isDigit(c)) {
-                var i: usize = 0;
-                while (self.at(i)) |d| : (i += 1) if (!std.ascii.isDigit(d)) break;
-                // only a single digit names a descriptor: dash and FreeBSD sh read `99>f` as the
-                // word 99 and a redirection (POSIX leaves numbers above 9 unspecified)
-                if (i == 1) if (self.at(i)) |d| if (d == '<' or d == '>') {
-                    const n = std.fmt.parseInt(i32, self.src[self.pos .. self.pos + i], 10) catch return self.failK(.bad_fd_number, "Syntax error: Bad file descriptor number", .{});
-                    self.pos += i;
-                    return .{ .tag = .{ .io_number = n }, .line = line };
-                };
-            }
+            // only a single digit names a descriptor: dash and FreeBSD sh read `99>f` as the
+            // word 99 and a redirection (POSIX leaves numbers above 9 unspecified)
+            if (std.ascii.isDigit(c)) if (self.look(1)) |d| if (d == '<' or d == '>') {
+                self.take(1);
+                return .{ .tag = .{ .io_number = c - '0' }, .line = line };
+            };
             var b: Builder = .{};
             try self.scanParts(&b, .normal, false);
             return .{ .tag = .{ .word = try b.finish(self.a) }, .line = line };
@@ -374,8 +388,8 @@ pub const Parser = struct {
 
     fn lexOperator(self: *Parser) Error!?Op {
         const c = self.cur().?;
-        const n = self.at(1);
-        const n2 = self.at(2);
+        const n = self.look(1);
+        const n2 = self.look(2);
         const r: struct { Op, usize } = switch (c) {
             ';' => if (n == ';') .{ .dsemi, 2 } else .{ .semi, 1 },
             '&' => if (n == '&') .{ .and_if, 2 } else .{ .amp, 1 },
@@ -386,7 +400,7 @@ pub const Parser = struct {
             '>' => if (n == '>') .{ .dgreat, 2 } else if (n == '&') .{ .greatand, 2 } else if (n == '|') .{ .clobber, 2 } else .{ .great, 1 },
             else => return null,
         };
-        self.pos += r[1];
+        self.take(r[1]);
         return r[0];
     }
 
@@ -523,38 +537,38 @@ pub const Parser = struct {
 
     fn scanDollar(self: *Parser, b: *Builder, ctx: ScanCtx, in_dq: bool) Error!void {
         const a = self.a;
-        const n = self.at(1) orelse {
+        const n = self.look(1) orelse {
             try b.lit(a, '$', in_dq);
             self.pos += 1;
             return;
         };
         if (n == '\'' and !in_dq and ctx != .text) return self.scanDollarQuote(b);
         if (n == '{') {
-            self.pos += 2;
+            self.take(2);
             return self.scanBraced(b, in_dq);
         }
         if (n == '(') {
-            if (self.at(2) == '(') {
+            if (self.look(2) == '(') {
                 if (try self.tryArith(b, in_dq)) return;
             }
-            self.pos += 2;
+            self.take(2);
             const body = try self.parseSubstBody();
             try b.push(a, .{ .cmdsub = .{ .body = body, .quoted = in_dq } });
             return;
         }
         if (lexer.isNameStart(n)) {
-            var i: usize = 1;
-            while (self.at(i)) |c| : (i += 1) if (!lexer.isNameChar(c)) break;
+            self.take(1);
             const p = try a.create(ast.Param);
-            p.* = .{ .name = try a.dupe(u8, self.src[self.pos + 1 .. self.pos + i]), .quoted = in_dq };
-            self.pos += i;
+            p.* = .{ .name = try self.takeWhile(lexer.isNameChar), .quoted = in_dq };
             try b.push(a, .{ .param = p });
             return;
         }
         if (std.ascii.isDigit(n) or lexer.isSpecialParam(n)) {
+            self.take(1);
+            self.skipConts();
             const p = try a.create(ast.Param);
-            p.* = .{ .name = try a.dupe(u8, self.src[self.pos + 1 .. self.pos + 2]), .quoted = in_dq };
-            self.pos += 2;
+            p.* = .{ .name = try a.dupe(u8, self.src[self.pos .. self.pos + 1]), .quoted = in_dq };
+            self.pos += 1;
             try b.push(a, .{ .param = p });
             return;
         }
@@ -568,7 +582,7 @@ pub const Parser = struct {
         const a = self.a;
         const qoff = self.pos;
         const qline = self.line;
-        self.pos += 2;
+        self.take(2);
         var out: std.ArrayList(u8) = .empty;
         while (true) {
             const c = self.cur() orelse return self.failOpen(.unterminated_quote, "$'", qoff, qline, "Syntax error: Unterminated quoted string", .{});
@@ -672,38 +686,35 @@ pub const Parser = struct {
         const bstart = self.pos;
         const p = try a.create(ast.Param);
         p.* = .{ .name = "", .quoted = in_dq };
+        self.skipConts();
         var c = self.cur() orelse return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
         var length = false;
         if (c == '#') {
-            const n = self.at(1);
+            const n = self.look(1);
             if (n != null and n.? != '}' and (lexer.isNameStart(n.?) or std.ascii.isDigit(n.?) or n.? == '@' or n.? == '*' or n.? == '$' or n.? == '!' or n.? == '?' or n.? == '-' or n.? == '#')) {
                 // `${#name}` is the length; `${#}` and `${#-...}` use `#` itself.
                 // `${##}`, `${#-}`, `${#?}`, `${#$}`, `${#!}` are the length of
                 // that special parameter (dash, FreeBSD sh); `${#-x}` stays
                 // the default value of `#`.
-                if (!(n.? == '?' or n.? == '$' or n.? == '!' or n.? == '-' or n.? == '#') or self.at(2) == '}') {
+                if (!(n.? == '?' or n.? == '$' or n.? == '!' or n.? == '-' or n.? == '#') or self.look(2) == '}') {
                     length = true;
-                    self.pos += 1;
+                    self.take(1);
+                    self.skipConts();
                     c = self.cur().?;
                 }
             }
         }
         // parameter name
         if (lexer.isNameStart(c)) {
-            var i: usize = 0;
-            while (self.at(i)) |d| : (i += 1) if (!lexer.isNameChar(d)) break;
-            p.name = try a.dupe(u8, self.src[self.pos .. self.pos + i]);
-            self.pos += i;
+            p.name = try self.takeWhile(lexer.isNameChar);
         } else if (std.ascii.isDigit(c)) {
-            var i: usize = 0;
-            while (self.at(i)) |d| : (i += 1) if (!std.ascii.isDigit(d)) break;
-            p.name = try a.dupe(u8, self.src[self.pos .. self.pos + i]);
-            self.pos += i;
+            p.name = try self.takeWhile(std.ascii.isDigit);
         } else if (lexer.isSpecialParam(c)) {
             p.name = try a.dupe(u8, self.src[self.pos .. self.pos + 1]);
             self.pos += 1;
         } else return self.badSubst(b, in_dq, bstart);
 
+        self.skipConts();
         const d = self.cur() orelse return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
         if (length) {
             if (d != '}') return self.badSubst(b, in_dq, bstart);
@@ -720,7 +731,7 @@ pub const Parser = struct {
         var op: ast.ParamOp = undefined;
         switch (d) {
             ':' => {
-                const e = self.at(1) orelse return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
+                const e = self.look(1) orelse return self.failK(.bad_substitution, "Syntax error: Missing '}}'", .{});
                 op = switch (e) {
                     '-' => .use_default,
                     '=' => .assign_default,
@@ -729,7 +740,7 @@ pub const Parser = struct {
                     else => return self.badSubst(b, in_dq, bstart),
                 };
                 p.colon = true;
-                self.pos += 2;
+                self.take(2);
             },
             '-' => {
                 op = .use_default;
@@ -748,18 +759,18 @@ pub const Parser = struct {
                 self.pos += 1;
             },
             '#' => {
-                if (self.at(1) == '#') {
+                if (self.look(1) == '#') {
                     op = .trim_prefix_large;
-                    self.pos += 2;
+                    self.take(2);
                 } else {
                     op = .trim_prefix_small;
                     self.pos += 1;
                 }
             },
             '%' => {
-                if (self.at(1) == '%') {
+                if (self.look(1) == '%') {
                     op = .trim_suffix_large;
-                    self.pos += 2;
+                    self.take(2);
                 } else {
                     op = .trim_suffix_small;
                     self.pos += 1;
@@ -782,7 +793,10 @@ pub const Parser = struct {
 
     /// At `$((`: parse an arithmetic expansion if the text closes with `))`.
     fn tryArith(self: *Parser, b: *Builder, in_dq: bool) Error!bool {
-        const start = self.pos + 3;
+        const opener = self.pos;
+        const opener_line = self.line;
+        self.take(3);
+        const start = self.pos;
         var i = start;
         var depth: usize = 0;
         while (i < self.src.len) : (i += 1) {
@@ -791,12 +805,13 @@ pub const Parser = struct {
                 depth += 1;
             } else if (c == ')') {
                 if (depth == 0) {
-                    if (i + 1 < self.src.len and self.src[i + 1] == ')') break;
-                    return self.failOpen(.unterminated_arithmetic, "$((", self.pos, self.line, "Syntax error: Missing '))'", .{});
+                    const second = self.joined(i + 1);
+                    if (second < self.src.len and self.src[second] == ')') break;
+                    return self.failOpen(.unterminated_arithmetic, "$((", opener, opener_line, "Syntax error: Missing '))'", .{});
                 }
                 depth -= 1;
             }
-        } else return self.failOpen(.unterminated_arithmetic, "$((", self.pos, self.line, "Syntax error: Missing '))'", .{});
+        } else return self.failOpen(.unterminated_arithmetic, "$((", opener, opener_line, "Syntax error: Missing '))'", .{});
         const text = self.src[start..i];
         var sub = Parser.init(self.a, text, self.diag);
         sub.aliases = self.aliases;
@@ -808,7 +823,8 @@ pub const Parser = struct {
         for (text) |c| if (c == '\n') {
             self.line += 1;
         };
-        self.pos = i + 2;
+        self.pos = i + 1;
+        self.take(1); // the second ")"
         try b.push(self.a, .{ .arith = .{ .expr = expr, .quoted = in_dq } });
         return true;
     }
@@ -1142,12 +1158,6 @@ pub const Parser = struct {
         try self.active.append(self.a, .{ .name = name, .end = val.len });
         const ns = try self.splice(val);
         for (self.blank_marks.items) |*m| m.* = (m.* + val.len) -| self.pos;
-        if (self.conts.len > 0) {
-            var keep: std.ArrayList(usize) = .empty;
-            for (self.conts) |c| if (c >= self.pos) try keep.append(self.a, c - self.pos + val.len);
-            self.conts = keep.items;
-            self.cont_idx = 0;
-        }
         if (val.len > 0 and (val[val.len - 1] == ' ' or val[val.len - 1] == '\t')) try self.blank_marks.append(self.a, val.len);
         self.splice_end = val.len + (self.splice_end -| self.pos);
         self.src = ns;
@@ -1588,103 +1598,6 @@ pub const Parser = struct {
 
 };
 
-const HereDelim = struct { text: []const u8, strip: bool };
-
-/// Remove backslash-newline pairs (POSIX 2.2.1) outside single quotes, comments
-/// and here-document bodies. Returns the new text and the offsets in it where
-/// a pair was removed.
-fn joinLines(a: Allocator, src: []const u8) Allocator.Error!struct { text: []const u8, conts: []const usize } {
-    if (std.mem.indexOf(u8, src, "\\\n") == null) return .{ .text = src, .conts = &.{} };
-    var out: std.ArrayList(u8) = .empty;
-    var conts: std.ArrayList(usize) = .empty;
-    var pending: std.ArrayList(HereDelim) = .empty;
-    var i: usize = 0;
-    var dq = false;
-    var word_start = true;
-    while (i < src.len) {
-        const c = src[i];
-        if (c == '\n' and pending.items.len > 0) {
-            try out.append(a, '\n');
-            i += 1;
-            for (pending.items) |h| {
-                while (i < src.len) {
-                    const e = std.mem.indexOfScalarPos(u8, src, i, '\n') orelse src.len;
-                    var ln = src[i..e];
-                    const full = if (e < src.len) src[i .. e + 1] else src[i..e];
-                    try out.appendSlice(a, full);
-                    i = @min(e + 1, src.len);
-                    if (h.strip) ln = std.mem.trimStart(u8, ln, "\t");
-                    if (std.mem.eql(u8, ln, h.text)) break;
-                }
-            }
-            pending.clearRetainingCapacity();
-            word_start = true;
-            continue;
-        }
-        switch (c) {
-            '\\' => {
-                if (i + 1 < src.len and src[i + 1] == '\n') {
-                    try conts.append(a, out.items.len);
-                    i += 2;
-                    continue;
-                }
-                try out.append(a, c);
-                if (i + 1 < src.len) try out.append(a, src[i + 1]);
-                i += 2;
-                word_start = false;
-                continue;
-            },
-            '\'' => if (!dq) {
-                const e = std.mem.indexOfScalarPos(u8, src, i + 1, '\'') orelse src.len - 1;
-                try out.appendSlice(a, src[i .. e + 1]);
-                i = e + 1;
-                word_start = false;
-                continue;
-            },
-            '"' => dq = !dq,
-            '#' => if (!dq and word_start) {
-                const e = std.mem.indexOfScalarPos(u8, src, i, '\n') orelse src.len;
-                try out.appendSlice(a, src[i..e]);
-                i = e;
-                continue;
-            },
-            '<' => if (!dq and i + 2 < src.len and src[i + 1] == '<' and src[i + 2] != '<') {
-                var j = i + 2;
-                var strip = false;
-                if (src[j] == '-') {
-                    strip = true;
-                    j += 1;
-                }
-                try out.appendSlice(a, src[i..j]);
-                while (j < src.len and (src[j] == ' ' or src[j] == '\t')) : (j += 1) try out.append(a, src[j]);
-                var dl: std.ArrayList(u8) = .empty;
-                while (j < src.len) {
-                    const d = src[j];
-                    if (d == ' ' or d == '\t' or d == '\n' or d == ';' or d == '&' or d == '|' or d == '<' or d == '>' or d == '(' or d == ')') break;
-                    try out.append(a, d);
-                    j += 1;
-                    if (d == '\'' or d == '"') continue;
-                    if (d == '\\' and j < src.len) {
-                        try out.append(a, src[j]);
-                        try dl.append(a, src[j]);
-                        j += 1;
-                        continue;
-                    }
-                    try dl.append(a, d);
-                }
-                try pending.append(a, .{ .text = dl.items, .strip = strip });
-                i = j;
-                word_start = false;
-                continue;
-            },
-            else => {},
-        }
-        try out.append(a, c);
-        word_start = c == ' ' or c == '\t' or c == '\n' or c == ';' or c == '&' or c == '|' or c == '(' or c == ')';
-        i += 1;
-    }
-    return .{ .text = out.items, .conts = conts.items };
-}
 
 /// Parse text as the body of an unquoted here-document: only `$` and backquote
 /// expansions (used for PS4, which is expanded when it is printed).

@@ -99,6 +99,13 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
 /// command is parsed and executed as soon as it is complete, so a command
 /// that reads standard input (`cat`, `read`) sees whatever the shell has not
 /// yet buffered. The shell reads 8192 bytes at a time, like dash.
+/// True when `text` ends in a backslash-newline: the line goes on.
+fn endsInContinuation(text: []const u8) bool {
+    if (!std.mem.endsWith(u8, text, "\n")) return false;
+    const body = text[0 .. text.len - 1];
+    return (body.len - std.mem.trimEnd(u8, body, "\\").len) % 2 == 1;
+}
+
 pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
     const gpa = sh.gpa;
     var buf: std.ArrayList(u8) = .empty;
@@ -154,7 +161,7 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
             },
         };
         const tail = p.origTailLen();
-        const complete = eof or (p.pos < p.src.len) or (p.src.len > 0 and p.src[p.src.len - 1] == '\n');
+        const complete = eof or (p.pos < p.src.len) or (std.mem.endsWith(u8, p.src, "\n") and !endsInContinuation(p.src));
         if (!eof and (maybe == null or !complete or p.warn_heredoc != null)) {
             arena.deinit();
             eof = readMore(gpa, &buf, fd, &chunk);

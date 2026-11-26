@@ -568,6 +568,123 @@ c "long alias values used many times" '{ echo "alias say=\"echo $(printf %09000d
 
 c "alias use does not disturb an earlier tilde name" 'printf "%s\n" "alias a=:" "alias b=\"echo zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\"" "{ a; echo ~root; b; b; }" > s; sh s'
 
+# ---- backslash-newline is removed by the scanner (SHL-03) ----
+c "continuation: quote in a backquoted comment" 'cat > s <<'\''END_OF_SCRIPT'\''
+x=`# it'\''s a comment`
+printf '\''%s\n'\'' '\''keep\
+this'\''
+END_OF_SCRIPT
+sh s; echo "= $?"; sh < s; echo "= $?"'
+c "continuation: shift in arithmetic" 'cat > s <<'\''END_OF_SCRIPT'\''
+echo $((1<<2))
+FOO=bar
+echo $FO\
+O
+true &\
+& echo and
+END_OF_SCRIPT
+sh s; echo "= $?"; sh < s; echo "= $?"'
+c "continuation: inside operators" 'cat > s <<'\''END_OF_SCRIPT'\''
+true &\
+& echo a |\
+| echo no
+echo b >\
+> f; cat f
+case x in x) echo c ;\
+; esac
+cat <\
+<E
+body
+E
+cat <\
+<\
+-E
+	body2
+	E
+echo d 2\
+>\
+&1
+END_OF_SCRIPT
+sh s; echo "= $?"; sh < s; echo "= $?"'
+c "continuation: inside parameter expansions" 'cat > s <<'\''END_OF_SCRIPT'\''
+ab=VAL; set -- one two three four five six seven eight nine ten
+echo $\
+ab $a\
+b ${\
+ab} ${a\
+b} ${ab\
+} $\
+1 $\
+{10} ${1\
+0} ${#\
+ab} ${#a\
+b}
+echo ${u:\
+-d} ${ab#\
+#V} ${ab#\
+} ${ab%\
+%L} ${u\
+-e} $\
+# $\
+?
+END_OF_SCRIPT
+sh s; echo "= $?"; sh < s; echo "= $?"'
+c "continuation: inside command and arithmetic substitution" 'cat > s <<'\''END_OF_SCRIPT'\''
+echo $\
+(echo sub) $\
+((1+2)) $(\
+(2+3)) $((4+4)\
+) $((1\
+<\
+<4))
+END_OF_SCRIPT
+sh s; echo "= $?"; sh < s; echo "= $?"'
+c "continuation: line numbers" 'cat > s <<'\''END_OF_SCRIPT'\''
+echo \
+  $LINENO
+echo a\
+b $LINENO
+echo $\
+LINENO
+echo $LINENO
+END_OF_SCRIPT
+sh s; echo "= $?"; sh < s; echo "= $?"' P "dash has no LINENO."
+c "continuation: kept in quoted text" 'cat > s <<'\''END_OF_SCRIPT'\''
+printf '\''%s\n'\'' '\''a\
+b'\'' "c\
+d" e\\
+echo f # comment \
+echo g
+cat <<'\''E'\''
+h\
+i
+E
+cat <<E
+j\
+k
+E
+END_OF_SCRIPT
+sh s; echo "= $?"; sh < s; echo "= $?"'
+c "continuation: quoted here-document delimiter with a blank" 'cat > s <<'\''END_OF_SCRIPT'\''
+cat <<'\''a b'\''
+$x \
+in
+a b
+cat <<\
+  EOF2
+z
+EOF2
+echo after $((1<<2)) ok\
+ay
+END_OF_SCRIPT
+sh s; echo "= $?"; sh < s; echo "= $?"'
+c "continuation: at the very end" 'cat > s <<'\''END_OF_SCRIPT'\''
+echo end \
+
+END_OF_SCRIPT
+sh s; echo "= $?"; sh < s; echo "= $?"' e
+c "continuation: dollar-single-quotes keep it" 'printf "%s\\n" "x=\$'\''a\\'\''b'\''" "y='\''keep\\" "this'\''" "printf \"%s\\\\n\" \"\$x\" \"\$y\"" > s; sh s' Pe "dash has no dollar-single-quotes (POSIX.1-2024)."
+
 # ---- eval / dot / exec / command / type ----
 c "eval simple" 'eval echo hi' B
 c "eval concatenates args" 'eval "echo" "a" "b"' B
