@@ -130,7 +130,7 @@ fn resolveOperand(h: *const History, op: []const u8) Resolve {
     const last = h.nextNumber() -| 1;
     if (std.fmt.parseInt(i64, op, 10)) |n| {
         if (n > 0) return .{ .num = @intCast(n) };
-        const back: u64 = @intCast(-n);
+        const back: u64 = @abs(n);
         if (back == 0) return .{ .num = last };
         if (back > h.entries.items.len) return .{ .num = h.first };
         return .{ .num = last + 1 - back };

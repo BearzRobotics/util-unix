@@ -495,6 +495,16 @@ def input_and_history_cases():
         s.settle(.8); s.send("\x03")
         ok("^C on a job ends a script with set -m", exit_status(s) in (-2, 130) and "CANCELLED-2" not in s.take())
 
+    # SHI-14, SHI-29: numbers too large to repeat or to negate
+    for name, keys in (("emacs motion", "\x1b9" * 21 + "\x02"),
+                       ("emacs insert", "\x1b9" * 9 + "x\x15"),
+                       ("emacs meta command", "\x1b9" * 21 + "\x1bf")):
+        has("huge %s count" % name, ["raw:" + keys, "raw:\x15", ALIVE], ["al1ve"], ["panic"])
+    for name, keys in (("motion", "9" * 21 + "l"), ("operator and motion", "9" * 9 + "d" + "9" * 12 + "l"), ("replace", "9" * 21 + "~")):
+        has("huge vi %s count" % name, ["set -o vi", "raw:echo\x1b" + keys + "dd", "", ALIVE], ["\nal1ve\n"], ["panic", "not found"])
+    has("huge vi put count", ["set -o vi", "raw:x\x1byy" + "9" * 9 + "pdd", "", ALIVE], ["\nal1ve\n"], ["panic", "not found"])
+    has("fc -l with the smallest integer", ["fc -l -9223372036854775808", ALIVE], ["al1ve"], ["panic"])
+
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
         d = tempfile.mkdtemp(dir=TMP)

@@ -286,6 +286,20 @@ const Snapshot = struct { text: []u8, cursor: usize };
 
 const ViPending = enum { none, d, c, y, f, F, t, T, r, @"@" };
 
+/// The largest repeat count a key can be given. Repeating a command that many
+/// times is already more than any line needs; without a limit a few more
+/// digits overflow or hang the editor.
+const max_count = 99_999;
+
+/// The lower limit where each repeat makes the line longer: drawing the line
+/// costs more the longer it is.
+const max_copies = 4096;
+
+/// The repeat count `cur` with another digit typed after it.
+fn addDigit(cur: ?usize, digit: usize) usize {
+    return @min((cur orelse 0) * 10 + digit, max_count);
+}
+
 pub const Editor = struct {
     gpa: Allocator,
     term: Terminal,
@@ -814,7 +828,7 @@ pub const Editor = struct {
             .char => {
                 if (k.alt) {
                     if (k.cp >= '0' and k.cp <= '9') {
-                        self.arg = (self.arg orelse 0) * 10 + (k.cp - '0');
+                        self.arg = addDigit(self.arg, k.cp - '0');
                         return;
                     }
                     self.emacsMeta(k.cp, &keep_kill);
@@ -917,7 +931,7 @@ pub const Editor = struct {
                     27 => dirty = false,
                     else => if (k.cp >= 32) {
                         if (self.arg != null) {
-                            for (0..n) |_| self.insertCp(k.cp);
+                            for (0..@min(n, max_copies)) |_| self.insertCp(k.cp);
                         } else self.insertCp(k.cp);
                         keep_insert = true;
                         self.arg = null;
@@ -942,7 +956,7 @@ pub const Editor = struct {
     fn emacsMeta(self: *Editor, c: u21, keep_kill: *bool) void {
         const n = self.arg orelse 1;
         if (c >= '0' and c <= '9') {
-            self.arg = (self.arg orelse 0) * 10 + (c - '0');
+            self.arg = addDigit(self.arg, c - '0');
             return;
         }
         switch (c) {
@@ -1841,7 +1855,7 @@ pub const Editor = struct {
         }
         // counts
         if (c >= '1' and c <= '9' or (c == '0' and self.vi_count != null)) {
-            self.vi_count = (self.vi_count orelse 0) * 10 + (c - '0');
+            self.vi_count = addDigit(self.vi_count, c - '0');
             return;
         }
         const have_count = self.vi_count != null;
@@ -1893,7 +1907,7 @@ pub const Editor = struct {
             if (self.vi_op_count) |oc| if (!have_count) {
                 mcount = oc;
             } else {
-                mcount = oc * count;
+                mcount = @min(oc * count, max_count);
             };
             self.vi_pend = .none;
             self.vi_count = null;
@@ -2072,7 +2086,7 @@ pub const Editor = struct {
                     self.viSaveUndo();
                     const at = if (c == 'p' and self.buf.items.len > 0) self.nextBoundary(self.cur) else self.cur;
                     var last = at;
-                    for (0..count) |_| {
+                    for (0..@min(count, max_copies)) |_| {
                         self.buf.insertSlice(self.gpa, last, self.vi_reg.items) catch return;
                         last += self.vi_reg.items.len;
                     }
