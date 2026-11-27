@@ -516,7 +516,13 @@ pub fn waitFg(sh: *Shell, j: *Job) u8 {
     // runs, a script ends, an interactive shell goes back to its prompt.
     const interrupted = sig == 2 and j.grouped;
     remove(sh, j);
-    if (interrupted) sys.kill(sys.getpid(), 2) catch {};
+    if (interrupted) {
+        // With nothing here to catch it, the signal would be the host's.
+        if (sh.keep_process and !sh.in_subshell and !sh.flags.interactive and sh.traps[2] == null) {
+            sh.status = code;
+            sh.flow = .exit_shell;
+        } else sys.kill(sys.getpid(), 2) catch {};
+    }
     return code;
 }
 

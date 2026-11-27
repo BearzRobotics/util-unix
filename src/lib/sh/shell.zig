@@ -80,6 +80,12 @@ pub const Options = struct {
     diag_color: bool = false,
     /// Label for script name in diagnostics (`-c`, a path, `stdin`).
     label: []const u8 = "",
+    /// For a host that embeds the shell and must outlive its scripts: `exec`
+    /// runs its command in a child, and then ends the script with that
+    /// command's status instead of replacing the process; an interrupt of a
+    /// foreground job ends the script instead of signalling the process. A
+    /// script can still change the process in other ways (decision 0009).
+    keep_process: bool = false,
     /// Called instead of writing diagnostics to descriptor 2.
     reporter: ?*const fn (ctx: ?*anyopaque, d: *const Diagnostic) void = null,
     reporter_ctx: ?*anyopaque = null,
@@ -173,6 +179,8 @@ pub const Shell = struct {
     hist_pending: bool = false,
     /// Commands run by `fc` that are inside one another.
     fc_depth: u8 = 0,
+    /// `Options.keep_process`.
+    keep_process: bool = false,
     /// Variables saved by `local`, restored when the function returns.
     locals: std.ArrayList(Saved) = .empty,
     /// Arenas of programs that defined functions; kept for the shell's life.
@@ -219,6 +227,7 @@ pub const Shell = struct {
             .pid = sys.getpid(),
             .diag_style = options.diag_style,
             .diag_color = options.diag_color,
+            .keep_process = options.keep_process,
             .reporter = options.reporter,
             .reporter_ctx = options.reporter_ctx,
         };

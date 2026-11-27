@@ -11,7 +11,8 @@
 //! end it (`exec` of a script without `#!`), changes its working directory,
 //! umask, limits, signals and descriptors, and the shell reaps any child. Use
 //! one `Shell` in a single-threaded process, or run the `sh` program as a
-//! child instead. Decision 0009 has the full list.
+//! child instead. `Options.keep_process` stops `exec` from replacing the
+//! process. Decision 0009 has the full list.
 
 pub const ast = @import("sh/ast.zig");
 pub const lexer = @import("sh/lexer.zig");
@@ -238,5 +239,28 @@ test "input nested too deeply is an error, not a crash" {
         var d: parser.Diag = .{};
         try t.expectError(error.Syntax, parser.parseProgram(gpa, src.items, &d));
         try t.expectEqualStrings("Syntax error: nesting too deep", d.message());
+    }
+}
+
+test "keep_process: a script cannot replace its host" {
+    const std = @import("std");
+    const t = std.testing;
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
+    // the commands write nothing: the test runner owns standard output
+    const cases = [_]struct { []const u8, u8 }{
+        .{ "trap 'exit 9' EXIT; exec /bin/sh -c 'exit 7'; exit 3", 7 },
+        .{ "exec /bin/sh -c 'exit 0' >/dev/null; exit 3", 0 },
+        .{ "command exec /bin/sh -c 'exit 5'", 5 },
+        .{ "exec /no/such/program 2>/dev/null", 127 },
+        .{ "(exec /bin/sh -c 'exit 4'); exit $(($? + 1))", 5 },
+        // with job control an interrupted job would have the shell signal itself
+        .{ "set -m 2>/dev/null; /bin/sh -c 'kill -INT $$'; exit 3", 130 },
+    };
+    for (cases) |case| {
+        var st_io = std.Io.Threaded.init_single_threaded;
+        const sh = try Shell.init(.{ .io = st_io.io(), .gpa = t.allocator }, .{ .keep_process = true });
+        defer sh.deinit();
+        _ = try sh.runString(case[0]);
+        try t.expectEqual(case[1], sh.finish());
     }
 }

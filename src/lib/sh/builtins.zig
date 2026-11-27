@@ -308,6 +308,26 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         return die(sh, 127);
     };
     const env = sh.environ(a) catch |oe| return sh.oom(oe);
+    // For a host that is to live on, the program runs in a child. A subshell
+    // is a child already.
+    var forked = false;
+    if (sh.keep_process and !sh.in_subshell) {
+        const pid = jobs.forkInto(sh, null, "", true) catch {
+            sh.diagK(.cannot_fork, null, "Cannot fork", .{});
+            return die(sh, 2);
+        };
+        if (pid != 0) {
+            const st = exec.waitFor(sh, pid, true);
+            // a shell that had been replaced would run no EXIT trap
+            if (sh.traps[0]) |t| {
+                sh.gpa.free(t);
+                sh.traps[0] = null;
+            }
+            return leave(sh, st);
+        }
+        sh.in_subshell = true;
+        forked = true;
+    }
     var i: u8 = 1;
     while (i < sys.nsig) : (i += 1) {
         if (sh.traps[i]) |t| if (t.len > 0) {
@@ -330,12 +350,14 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             if (t.len > 0) _ = sys.setSignal(sg, .catch_flag);
         } else if (!sh.inherited_ignore[sg]) _ = sys.setSignal(sg, shellDefault(sh, sg));
     };
+    var status: u8 = 126;
     if (e == sys.E_NOENT or e == sys.E_NOTDIR) {
         sh.diagCmdK(.not_found, name, "exec", "{s}: not found", .{name});
-        return die(sh, 127);
-    }
-    sh.diagCmdK(if (e == sys.E_ACCES) .not_executable else .other, name, "exec", "{s}: {s}", .{ name, sys.strerror(e) });
-    return die(sh, 126);
+        status = 127;
+    } else sh.diagCmdK(if (e == sys.E_ACCES) .not_executable else .other, name, "exec", "{s}: {s}", .{ name, sys.strerror(e) });
+    // the child made for the program must not go on with the script
+    if (forked) sys.exit(status);
+    return die(sh, status);
 }
 
 // --- variables ---------------------------------------------------------------------------
