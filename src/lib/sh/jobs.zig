@@ -88,8 +88,7 @@ pub const Job = struct {
 
 pub fn create(sh: *Shell) ?*Job {
     const gpa = sh.gpa;
-    var id: u32 = 1;
-    while (find(sh, id) != null) id += 1;
+    const id = freeId(sh);
     const j = gpa.create(Job) catch |oe| {
         _ = sh.oom(oe);
         return null;
@@ -102,6 +101,74 @@ pub fn create(sh: *Shell) ?*Job {
         return null;
     };
     return j;
+}
+
+/// The smallest job number not in use.
+fn freeId(sh: *const Shell) u32 {
+    // one pass over the table, marking the low numbers that are taken
+    var used: [max_finished * 2]bool = @splat(false);
+    for (sh.jobs.items) |j| if (j.id <= used.len) {
+        used[j.id - 1] = true;
+    };
+    var id: u32 = 1;
+    while (id <= used.len and used[id - 1]) id += 1;
+    while (id > used.len and find(sh, id) != null) id += 1;
+    return id;
+}
+
+/// How many finished background jobs a script's shell remembers for a later
+/// `wait`. POSIX asks for at least CHILD_MAX, which is 25 or more.
+const max_finished = 1024;
+
+/// Collect the background processes that have ended, without waiting, so that
+/// they do not stay behind as zombies in a script that never asks about them.
+/// Only processes in the job table are collected: any other child belongs to
+/// whoever is about to wait for it.
+pub fn reap(sh: *Shell) void {
+    if (sh.jobs.items.len == 0) return;
+    var flags: u32 = sys.WNOHANG;
+    if (sh.jc) flags |= sys.WUNTRACED | sys.WCONTINUED;
+    // one look and one wait for each that has ended
+    while (true) {
+        const pid = sys.peekChild(sh.jc) catch break;
+        if (pid == 0) break;
+        const found = findProc(sh, pid);
+        if (found == null or found.?.j.foreground) {
+            // not ours to take, and it hides the ones behind it
+            reapEach(sh, flags);
+            break;
+        }
+        const r = sys.waitpidFlags(pid, flags) catch break;
+        if (r.pid != pid) break;
+        apply(sh, r);
+    }
+    if (!sh.flags.interactive) forgetOld(sh); // it reports each job first
+}
+
+fn reapEach(sh: *Shell, flags: u32) void {
+    for (sh.jobs.items) |j| if (!j.foreground) for (j.procs.items) |*p| {
+        if (p.state == .done) continue;
+        const r = sys.waitpidFlags(p.pid, flags) catch continue;
+        if (r.pid == p.pid) apply(sh, r);
+    };
+}
+
+/// Forget the oldest finished jobs beyond `max_finished`, but never the one
+/// "$!" names.
+fn forgetOld(sh: *Shell) void {
+    if (sh.jobs.items.len <= max_finished) return;
+    var finished: usize = 0;
+    for (sh.jobs.items) |j| if (!j.foreground and j.state() == .done) {
+        finished += 1;
+    };
+    var k: usize = 0;
+    while (finished > max_finished and k < sh.jobs.items.len) {
+        const j = sh.jobs.items[k];
+        if (!j.foreground and j.state() == .done and j.lastPid() != sh.bg_pid) {
+            remove(sh, j);
+            finished -= 1;
+        } else k += 1;
+    }
 }
 
 pub fn find(sh: *const Shell, id: u32) ?*Job {
@@ -288,7 +355,14 @@ pub fn addPlain(sh: *Shell, j: *Job, pid: i32, text: []const u8) void {
 // --- reaping and waiting ---------------------------------------------------------
 
 fn findProc(sh: *Shell, pid: i32) ?struct { j: *Job, p: *Proc } {
-    for (sh.jobs.items) |j| for (j.procs.items) |*p| if (p.pid == pid) return .{ .j = j, .p = p };
+    // Newest first, and not one already collected: the system gives a pid out
+    // again once its process is gone.
+    var k = sh.jobs.items.len;
+    while (k > 0) {
+        k -= 1;
+        const j = sh.jobs.items[k];
+        for (j.procs.items) |*p| if (p.pid == pid and p.state != .done) return .{ .j = j, .p = p };
+    }
     return null;
 }
 

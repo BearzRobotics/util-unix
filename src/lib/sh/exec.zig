@@ -91,6 +91,7 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
         echoed = @max(echoed, end);
         if (sh.flags.noexec) continue;
         last = execNode(sh, node);
+        jobs.reap(sh);
         checkTraps(sh);
         if (sh.flow != .none) break;
     }
@@ -532,6 +533,7 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
                     st = spawnBackground(sh, it.node);
                 } else {
                     st = execNode(sh, it.node);
+                    jobs.reap(sh);
                 }
                 checkTraps(sh);
                 if (sh.flow != .none) return st;
@@ -574,6 +576,7 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
 }
 
 fn spawnBackground(sh: *Shell, node: *const Node) u8 {
+    jobs.reap(sh);
     if (node.kind == .pipeline and node.kind.pipeline.commands.len > 1 and !node.kind.pipeline.negate) {
         return runStagesBg(sh, node.kind.pipeline.commands);
     }

@@ -532,6 +532,9 @@ c "a braced parameter as here-document delimiter" 'cat <<${x}
 a
 ${x}
 echo after'
+c "a finished background job keeps its status until waited for" '(exit 3) & p=$!; sleep .2; /bin/true; true & /bin/true; wait $p; echo $?'
+c "finished background jobs do not pile up as zombies" 'i=0; while [ $i -lt 40 ]; do true & i=$((i+1)); done; sleep .3; /bin/true; z=0; for f in /proc/[0-9]*/stat; do { read -r line < $f; } 2>/dev/null || continue; case $line in *") Z $$ "*) z=$((z+1)) ;; esac; done; echo $((z <= 1))'
+c "a pipeline keeps its statuses while background jobs end" 'i=0; while [ $i -lt 20 ]; do true & (exit 5) | (sleep .01; exit 7); echo $?; i=$((i+1)); done | sort | uniq -c | tr -s " "'
 c "cd is not led astray by an assignment to PWD" 'mkdir -p cdt/sub other/sub; cd cdt; PWD=$PWD/../other; cd sub; case $(pwd -P) in */cdt/sub) echo right ;; *) echo astray ;; esac'
 c "cd with an empty PWD stays relative to the current directory" 'mkdir -p t/tmp; cd t; PWD=; cd tmp; case $(pwd -P) in */t/tmp) echo right ;; *) echo astray ;; esac'
 c "set -v echoes the input, not what an alias made of it" 'printf "set -v\nalias e=echo\ne a\necho b\necho c\n" > v.sh; . ./v.sh'

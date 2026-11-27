@@ -780,6 +780,18 @@ pub fn waitpidFlags(pid: i32, flags: u32) Error!WaitResult {
     return .{ .pid = @intCast(r), .status = @bitCast(st) };
 }
 
+/// The pid of a child that has something to report, without collecting it, so
+/// that it can still be waited for; 0 when there is none. With `stops`,
+/// stopping and continuing count too.
+pub fn peekChild(stops: bool) Error!i32 {
+    if (comptime !is_linux) return nosys();
+    var info: linux.siginfo_t = std.mem.zeroes(linux.siginfo_t);
+    var flags: u32 = linux.W.NOHANG | linux.W.EXITED | linux.W.NOWAIT;
+    if (stops) flags |= linux.W.STOPPED | linux.W.CONTINUED;
+    _ = try check(linux.waitid(.ALL, 0, &info, flags, null));
+    return info.fields.common.first.piduid.pid;
+}
+
 /// Stop signal of a wait status, or 0 when the child did not stop.
 pub fn statusStopSignal(status: u32) u8 {
     if (comptime !is_linux) return 0;
