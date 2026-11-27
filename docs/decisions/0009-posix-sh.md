@@ -77,6 +77,35 @@ mode and forks with the raw syscall in `sys.zig`; external commands use `exec`
 after the fork so redirections can be applied with `dup2` in the child.
 Builtins run in the shell process except in pipelines and subshells.
 
+## An embedded shell owns its process (recorded 2026-11-26)
+
+This is an exception to decision 0002 for `util_unix.sh`. A POSIX shell cannot
+run a script without acting on the process it is in, so a program that runs one
+through the library hands its process to the shell. A host must expect:
+
+- **It can be replaced or ended.** `exec command` replaces the host with that
+  program. If the file has no `#!` line, the shell interprets it in this process
+  and then exits the process. `exit` and `set -e` are different: they end the
+  script, and `runString` returns.
+- **Process state changes and stays changed:** the working directory (`cd`),
+  file mode creation mask (`umask`), resource limits (`ulimit`), and signal
+  dispositions (`trap`, interactive mode, job control, and SIGCHLD, which an
+  ignoring host gets back at `deinit`). With job control the shell also moves
+  between process groups and gives away the controlling terminal.
+- **Descriptors are the host's.** The shell reads and writes 0, 1 and 2 and
+  redirections remap descriptors 0 to 9. `Options.reporter` takes over
+  diagnostics only, not what scripts and builtins print.
+- **It reaps children.** Waiting uses `waitpid(-1)`, so the status of a child
+  the host started can be consumed by the shell.
+- **One thread, one shell.** Subshells `fork` and go on interpreting in the
+  child, allocating with `env.gpa`: in a process with other threads the child
+  can deadlock on a lock one of them held. Pending signals and `errno` are
+  global, so two `Shell`s in one process take each other's.
+
+A host that cannot accept this should run the `sh` program as a child process.
+Options that keep `exec` and the final exit inside a child, or wait only for the
+shell's own children, would be new features and are not planned here.
+
 ## Diagnostics
 
 Decision 0008 applies: dash's terse messages ("Syntax error: ...", "not found")

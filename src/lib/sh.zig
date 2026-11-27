@@ -4,9 +4,14 @@
 //! `Shell.init(env, options)` builds an interpreter; `runString` parses and
 //! runs text; `parse` gives the syntax tree without running; hosts register
 //! extra builtins with `registerBuiltin` and read or write variables with
-//! `getVar`/`setVar`. The library never exits the process and reports
-//! diagnostics through `Options.reporter` (default: standard error in dash's
-//! format).
+//! `getVar`/`setVar`. Diagnostics go to `Options.reporter` (default: standard
+//! error in dash's format).
+//!
+//! A shell owns the process it runs in. A script can replace it (`exec`) or
+//! end it (`exec` of a script without `#!`), changes its working directory,
+//! umask, limits, signals and descriptors, and the shell reaps any child. Use
+//! one `Shell` in a single-threaded process, or run the `sh` program as a
+//! child instead. Decision 0009 has the full list.
 
 pub const ast = @import("sh/ast.zig");
 pub const lexer = @import("sh/lexer.zig");

@@ -32,6 +32,9 @@ using the `std.Io` interface. Core Utils, by contrast, keeps its logic inside
   alone (no wrapper code), wrapper tests via `src/test_all.zig`, behaviour
   tests via `test/test_<cmd>.sh` against GNU.
 
+`util_unix.sh` is an exception to the rules above about output and process-wide
+state: see "An embedded shell owns its process" in decision 0009.
+
 ## Alternatives considered
 
 - Library per command as separate packages: more build files, no benefit yet.

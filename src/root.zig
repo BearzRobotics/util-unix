@@ -7,6 +7,9 @@
 //! caller-supplied `Diagnostic` or an event callback, and leaves signal
 //! dispositions and exit codes to the caller. The command-line executables in
 //! `src/commands/` are thin wrappers over it.
+//!
+//! The exception is `sh`: a POSIX shell owns the process it runs in (see
+//! `lib/sh.zig` and decision 0009).
 
 pub const fsown = @import("lib/fsown.zig");
 const treewalk = @import("lib/treewalk.zig");

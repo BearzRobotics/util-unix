@@ -5,9 +5,11 @@
 //!
 //! The shell writes to file descriptors 0, 1 and 2 as the programs it
 //! interprets do (redirections remap them, so the shell cannot hold a fixed
-//! `Io.Writer`); it never prints anything on its own initiative, never calls
-//! `exit`, and reports diagnostics through `reporter` when the host installs
-//! one (otherwise to descriptor 2 in dash's `name: line: message` format).
+//! `Io.Writer`); it never prints anything on its own initiative, and reports
+//! diagnostics through `reporter` when the host installs one (otherwise to
+//! descriptor 2 in dash's `name: line: message` format). What it runs can end
+//! the process and change process-wide state: see "An embedded shell owns its
+//! process" in decision 0009.
 
 const std = @import("std");
 const sys = @import("../../sys.zig");
