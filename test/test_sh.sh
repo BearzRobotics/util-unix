@@ -551,7 +551,9 @@ c "pwd takes grouped options and refuses others" 'pwd -LP >/dev/null; echo $?; p
 c "printf precision zero of zero has no digits" 'printf "[%.0d][%.0u][%.0x][%#.0o][%.0d][%5.3d]\n" 0 0 0 0 7 -7'
 c "command -p does not change the PATH of the command" 'PATH=$PWD:$PATH; export PATH; want=$PATH; [ "$(command -p sh -c "echo \$PATH")" = "$want" ] && echo same' e
 c "command says when a file may not be run" 'mkdir -p ne; : > ne/zzcmd; PATH=./ne; command zzcmd 2>/dev/null; echo $?' P
-c "a signal sent to a child just forked reaches it" 'trap "got=1" TERM; i=0; n=0; while [ $i -lt 20 ]; do sleep 1 & p=$!; kill -TERM $p; wait $p; [ $? = 143 ] && n=$((n+1)); i=$((i+1)); done; echo "$n of 20"' P
+# stderr is not compared: dash has the race, and says "Terminated" as often as
+# a signal happens to reach its child
+c "a signal sent to a child just forked reaches it" 'trap "got=1" TERM; i=0; n=0; while [ $i -lt 20 ]; do sleep 1 & p=$!; kill -TERM $p; wait $p; [ $? = 143 ] && n=$((n+1)); i=$((i+1)); done; echo "$n of 20"' Pe
 c "no command starts with signals held back" 'trap "" USR2; trap "echo no" USR1; s="grep SigBlk /proc/self/status"; $s; ($s); echo | $s; echo "$($s)"; $s & wait; (exec $s); command $s'
 c "a long here-document in a script on stdin ends at any read boundary" 'for pad in 8150 8170 8179 8180 8181 8182 8183 8184 8185 8190 16370; do { printf "cat <<DELIM | wc -c\n"; printf "%0${pad}d\n" 0; printf "DELIM\necho after\n"; } > s; sh < s; done | tr -d " " | tr "\n" " "'
 c "a long here-document delimiter joined by a backslash is found" '{ printf "cat <<DELIM | wc -c\n"; printf "%020000d\n" 0; printf "DEL\\\nIM\necho after\n"; } > s; sh < s | tr -d " "'
