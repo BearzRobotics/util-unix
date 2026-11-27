@@ -403,6 +403,9 @@ fn childInit(sh: *Shell, bg: bool) void {
             if (!sh.inherited_ignore[sg] and !user_ignored) _ = sys.setSignal(sg, .default);
         }
     }
+    // a script with `set -m`: what runs in a group of its own can be stopped
+    // and continued, so it gets the signals back (see above for the others)
+    if (!sh.flags.interactive and sh.jc and sys.getpgrp() != sh.shell_pgid) sh.restoreJobSignals();
     var i: u8 = 0;
     while (i < sys.nsig) : (i += 1) {
         if (sh.traps[i]) |t| {

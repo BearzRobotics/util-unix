@@ -154,6 +154,8 @@ pub const Shell = struct {
     job_stamp: u64 = 0,
     /// Job control is on (`set -m`): jobs get process groups.
     jc: bool = false,
+    /// Which of `job_signals` the shell itself set to be ignored.
+    job_ignored: [3]bool = @splat(false),
     /// Controlling terminal descriptor (>= 10, close-on-exec) or -1.
     tty_fd: i32 = -1,
     shell_pgid: i32 = 0,
@@ -264,10 +266,24 @@ pub const Shell = struct {
 
     /// Signals an interactive shell with job control ignores (POSIX: SIGTSTP,
     /// SIGTTIN, SIGTTOU; SIGINT/SIGQUIT/SIGTERM are handled by the loop).
+    /// A trap the user set stays as it is. What the shell does change it
+    /// remembers, for `restoreJobSignals`.
     pub fn ignoreJobSignals(self: *Shell) void {
-        _ = self;
-        for ([_]u8{ 20, 21, 22 }) |s| _ = sys.setSignal(s, .ignore);
+        for (job_signals, &self.job_ignored) |s, *mine| {
+            if (self.traps[s] != null or sys.getSignal(s) == .ignore) continue;
+            mine.* = sys.setSignal(s, .ignore);
+        }
     }
+
+    /// Undo `ignoreJobSignals`, except where a trap has been set since.
+    pub fn restoreJobSignals(self: *Shell) void {
+        for (job_signals, &self.job_ignored) |s, *mine| {
+            if (mine.* and self.traps[s] == null) _ = sys.setSignal(s, .default);
+            mine.* = false;
+        }
+    }
+
+    const job_signals = [_]u8{ 20, 21, 22 }; // TSTP, TTIN, TTOU
 
     fn initPwd(self: *Shell) Allocator.Error!void {
         var buf: [4096]u8 = undefined;

@@ -341,8 +341,12 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         const user_ignored = if (sh.traps[sg]) |t| t.len == 0 else false;
         if (!sh.inherited_ignore[sg] and !user_ignored) _ = sys.setSignal(sg, .default);
     };
+    // the program does not inherit what the shell ignores for job control
+    const had_ignored = !interactive_main and sh.jc;
+    if (had_ignored) sh.restoreJobSignals();
     exec.execProgram(sh, a, path, rest, env);
     const e = sys.errno();
+    if (had_ignored and !forked) sh.ignoreJobSignals();
     if (e == sys.E_NOEXEC) exec.execScript(sh, a, path, rest, &.{}, &.{});
     if (interactive_main) for (own) |sg| {
         // exec failed: the shell goes on as before

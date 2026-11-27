@@ -396,6 +396,33 @@ pub fn update(sh: *Shell) void {
     }
 }
 
+/// `waitOne` for the `wait` builtin, which ^C and trapped signals end. One that
+/// is already pending counts, and one cannot arrive unnoticed between looking
+/// and sleeping: signals are held back until the sleep lets them in.
+fn waitUnlessSignalled(sh: *Shell, interrupted: *bool) bool {
+    var flags: u32 = sys.WNOHANG;
+    if (sh.jc) flags |= sys.WUNTRACED | sys.WCONTINUED;
+    const before = sys.blockSignals();
+    defer sys.restoreMask(before);
+    const added = sys.wakeOnChild();
+    defer if (added) sys.restoreChild();
+    while (true) {
+        if (interrupting(sh) != null) {
+            interrupted.* = true;
+            return false;
+        }
+        const r = sys.waitpidFlags(-1, flags) catch {
+            if (sys.errno() == sys.E_INTR) continue;
+            return false;
+        };
+        if (r.pid > 0) {
+            apply(sh, r);
+            return true;
+        }
+        sys.suspendUntilSignal(&before);
+    }
+}
+
 /// The pending signal that is to interrupt a `wait`: SIGINT, or one the user
 /// has a trap for.
 pub fn interrupting(sh: *const Shell) ?u8 {
@@ -411,20 +438,13 @@ pub fn interrupting(sh: *const Shell) ?u8 {
 /// Block until some child changes state and record it; false when there is
 /// no child left or the wait was interrupted by a signal (reported through
 /// `interrupted`).
-fn waitOne(sh: *Shell, interrupted: *bool) bool {
+fn waitOne(sh: *Shell, interrupted: *bool, interruptible: bool) bool {
+    if (interruptible) return waitUnlessSignalled(sh, interrupted);
     var flags: u32 = 0;
     if (sh.jc) flags |= sys.WUNTRACED | sys.WCONTINUED;
     while (true) {
         const r = sys.waitpidFlags(-1, flags) catch {
-            if (sys.errno() == sys.E_INTR) {
-                // only ^C and a trapped signal end a wait: not, say, the
-                // line editor's own SIGWINCH
-                if (interrupting(sh) != null) {
-                    interrupted.* = true;
-                    return false;
-                }
-                continue;
-            }
+            if (sys.errno() == sys.E_INTR) continue;
             return false;
         };
         if (r.pid <= 0) return false;
@@ -569,7 +589,7 @@ pub fn waitFg(sh: *Shell, j: *Job) u8 {
     if (sh.tty_fd >= 0 and j.pgid != 0) sys.tcsetpgrp(sh.tty_fd, j.pgid) catch {};
     var intr = false;
     while (j.state() == .running) {
-        if (!waitOne(sh, &intr)) {
+        if (!waitOne(sh, &intr, false)) {
             if (intr) {
                 intr = false;
                 continue;
@@ -619,7 +639,7 @@ pub fn waitFg(sh: *Shell, j: *Job) u8 {
 pub fn waitJob(sh: *Shell, j: *Job) bool {
     var intr = false;
     while (j.state() == .running) {
-        if (!waitOne(sh, &intr)) {
+        if (!waitOne(sh, &intr, true)) {
             if (intr) return false;
             lostChildren(j);
         }
@@ -715,10 +735,9 @@ pub fn disable(sh: *Shell) void {
                 sh.shell_pgid = sh.orig_pgrp;
             } else |_| {}
         }
-        if (!sh.flags.interactive) for ([_]u8{ 20, 21, 22 }) |sig| {
-            const user_ignored = if (sh.traps[sig]) |t| t.len == 0 else false;
-            if (!sh.inherited_ignore[sig] and !user_ignored) _ = sys.setSignal(sig, .default);
-        };
+        // an interactive shell goes on ignoring them after `set +m`: what it
+        // then runs shares its group, and ^Z must not stop that for good
+        if (!sh.flags.interactive) sh.restoreJobSignals();
     }
     sys.close(sh.tty_fd);
     sh.tty_fd = -1;

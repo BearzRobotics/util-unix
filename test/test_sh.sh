@@ -532,6 +532,8 @@ c "a braced parameter as here-document delimiter" 'cat <<${x}
 a
 ${x}
 echo after'
+c "a signal already pending ends wait at once" 'trap "echo trapped" USR1; sleep 3 & p=$!; start=$(date +%s); wait $(kill -USR1 $$; echo $p); echo "wait=$? quick=$(($(date +%s) - start < 2))"; kill $p'
+c "wait still waits for the job when nothing is trapped" '(sleep .3; exit 6) & wait $!; echo $?'
 c "a finished background job keeps its status until waited for" '(exit 3) & p=$!; sleep .2; /bin/true; true & /bin/true; wait $p; echo $?'
 c "finished background jobs do not pile up as zombies" 'i=0; while [ $i -lt 40 ]; do true & i=$((i+1)); done; sleep .3; /bin/true; z=0; for f in /proc/[0-9]*/stat; do { read -r line < $f; } 2>/dev/null || continue; case $line in *") Z $$ "*) z=$((z+1)) ;; esac; done; echo $((z <= 1))'
 c "a pipeline keeps its statuses while background jobs end" 'i=0; while [ $i -lt 20 ]; do true & (exit 5) | (sleep .01; exit 7); echo $?; i=$((i+1)); done | sort | uniq -c | tr -s " "'

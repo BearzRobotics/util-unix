@@ -242,12 +242,29 @@ def vi_cases():
 # ---------------------------------------------------------------------------
 # transcripts compared with dash and FreeBSD sh
 
+def wait_for_prompt(s, before, timeout=6.0):
+    """Wait until the shell has answered a line with its next prompt. A line
+    sent sooner is echoed by the terminal ahead of that prompt, and on a busy
+    machine a fixed pause is not enough. Gives up after `timeout`: a line such
+    as `fg` brings no prompt back."""
+    end = time.time() + timeout
+    while time.time() < end:
+        lines = strip(s.buf).split("\n")
+        # a further line that holds nothing but a prompt (its blank is stripped)
+        if len(lines) > before and lines[-1] in ("$", ">"):
+            return
+        s.settle(0.05)
+
 def transcript(argv, steps, cwd=None, env=None, settle=0.35):
     out = ""
     with Session(argv, env=env, cwd=cwd) as s:
-        s.expect(r"\$ ?$")
+        # a shell inside the FreeBSD sandbox can take seconds to start
+        s.expect(r"\$ ?$", 20)
         s.take()
-        for st in steps:
+        for n, st in enumerate(steps):
+            before = len(strip(s.buf).split("\n"))
+            # a key such as ^Z is meant for the command still running
+            interrupts = n + 1 < len(steps) and steps[n + 1] in ("^Z", "^C")
             if st == "^Z":
                 s.send("\x1a")
             elif st == "^C":
@@ -258,6 +275,8 @@ def transcript(argv, steps, cwd=None, env=None, settle=0.35):
             else:
                 s.send(st + "\n")
             s.settle(settle)
+            if not interrupts:
+                wait_for_prompt(s, before)
         s.settle(0.2)
         out = s.take()
     if out.startswith("$ "):
@@ -556,6 +575,16 @@ def input_and_history_cases():
     # SHX-10: a failed exec leaves the traps in place
     for how in ("exec", "command exec"):
         has("a failed '%s' keeps traps" % how, ["trap 'echo got-$((1+1))' USR1", how + " /no/such/program", "kill -USR1 $$", ("sleep", .5), ALIVE], ["got-2", "al1ve"])
+
+    # SHX-06: set -m in a script leaves its signals, and its children's, alone
+    mask = "grep SigIgn /proc/self/status"
+    with Session([SH, "-c", "%s; set -m; %s; /bin/sh -c '%s'; set +m; %s; echo DONE" % (mask, mask, mask, mask)]) as s:
+        s.settle(1.0); seen = re.findall(r"SigIgn:\s*([0-9a-f]+)", s.take())
+        # in order: before, a program run under set -m (twice), after set +m
+        ok("set -m leaves a script's programs able to be stopped", len(seen) == 4 and len(set(seen)) == 1, repr(seen))
+    with Session([SH, "-c", "trap 'echo got-$((1+1))' TSTP; set -m; kill -TSTP $$; echo after-$((2+2))"]) as s:
+        s.settle(1.0); screen = s.take()
+        ok("set -m keeps a trap on TSTP", "got-2" in screen and "after-4" in screen, repr(screen))
 
     # SHI-18: saving the history
     d = tempfile.mkdtemp(dir=TMP)

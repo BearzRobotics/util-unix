@@ -646,6 +646,44 @@ pub fn getSignal(sig: u8) SignalAction {
     return .catch_flag;
 }
 
+pub const SignalMask = if (is_linux) linux.sigset_t else void;
+
+/// Hold every signal back, returning what was held back before.
+pub fn blockSignals() SignalMask {
+    if (comptime !is_linux) return {};
+    var all = linux.sigfillset();
+    var before: linux.sigset_t = undefined;
+    _ = linux.sigprocmask(linux.SIG.BLOCK, &all, &before);
+    return before;
+}
+
+pub fn restoreMask(mask: SignalMask) void {
+    if (comptime !is_linux) return;
+    _ = linux.sigprocmask(linux.SIG.SETMASK, &mask, null);
+}
+
+/// sigsuspend(2): let the signals through that `mask` lets through and sleep,
+/// in one step, until one has been handled.
+pub fn suspendUntilSignal(mask: *const SignalMask) void {
+    if (comptime !is_linux) return;
+    _ = linux.syscall2(.rt_sigsuspend, @intFromPtr(mask), linux.NSIG / 8);
+}
+
+fn wake(_: if (is_linux) linux.SIG else u32) callconv(.c) void {}
+
+/// While SIGCHLD is at its default it ends no sleep. Give it a handler that
+/// does nothing; true when there is one to take away with `restoreChild`.
+pub fn wakeOnChild() bool {
+    if (comptime !is_linux) return false;
+    if (getSignal(SIGCHLD) != .default) return false;
+    const act: linux.Sigaction = .{ .handler = .{ .handler = &wake }, .mask = linux.sigemptyset(), .flags = 0 };
+    return linux.errno(linux.sigaction(@fromBackingInt(@intCast(SIGCHLD)), &act, null)) == .SUCCESS;
+}
+
+pub fn restoreChild() void {
+    _ = setSignal(SIGCHLD, .default);
+}
+
 /// True when some caught signal arrived since the flags were last cleared.
 pub fn signalsPending() bool {
     return any_pending;
