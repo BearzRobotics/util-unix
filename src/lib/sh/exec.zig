@@ -1096,7 +1096,7 @@ const Resolved = union(enum) {
 };
 
 fn pathFind(sh: *Shell, a: Allocator, name: []const u8, want_exec: bool) ?[]const u8 {
-    const path = sh.getVar("PATH") orelse "";
+    const path = sh.lookup_path orelse sh.getVar("PATH") orelse "";
     var it = std.mem.splitScalar(u8, path, ':');
     while (it.next()) |dir| {
         const full = (if (dir.len == 0)
@@ -1124,14 +1124,14 @@ pub fn resolve(sh: *Shell, a: Allocator, name: []const u8) Resolved {
     // a remembered location is used as it is, even if the file went away
     // (dash, FreeBSD sh: the command is then not found until `hash -r`)
     // a copy: a redirection's expansion may assign PATH, which empties the table
-    if (sh.hash.get(name)) |p| return .{ .external = a.dupe(u8, p) catch |oe| {
+    if (sh.lookup_path == null) if (sh.hash.get(name)) |p| return .{ .external = a.dupe(u8, p) catch |oe| {
         _ = sh.oom(oe);
         return .not_found;
     } };
     if (pathFind(sh, a, name, true)) |p| {
         // remember the location, as dash and FreeBSD sh do (POSIX `hash`);
         // entries from a relative PATH entry are dropped again by `cd`
-        {
+        if (sh.lookup_path == null) {
             const key = sh.gpa.dupe(u8, name) catch return .{ .external = p };
             const val = sh.gpa.dupe(u8, p) catch {
                 sh.gpa.free(key);
@@ -1662,17 +1662,19 @@ fn newShell(sh: *Shell, name: []const u8, assigns: []const ast.Assign, vals: []c
 
 /// Run an already-expanded command (used by `command`); with `no_func` shell
 /// functions are skipped.
-pub fn runArgs(sh: *Shell, a: Allocator, args: []const []const u8, no_func: bool) u8 {
+/// Run `args` as a command, for `command`. `lookup` replaces PATH for finding it
+/// only: the command itself, and what it runs, see PATH as it is.
+pub fn runArgs(sh: *Shell, a: Allocator, args: []const []const u8, no_func: bool, lookup: ?[]const u8) u8 {
+    sh.lookup_path = lookup;
     var r = resolve(sh, a, args[0]);
     if (no_func and r == .function) {
         r = if (builtins.find(args[0])) |b| .{ .builtin = b } else if (sh.host_builtins.get(args[0])) |h| .{ .host = h } else if (pathFind(sh, a, args[0], true)) |p| .{ .external = p } else .not_found;
     }
+    const denied = r == .not_found and foundButNotExecutable(sh, a, args[0]);
+    sh.lookup_path = null;
     const empty: ast.Simple = .{ .assigns = &.{}, .words = &.{}, .redirs = &.{} };
     switch (r) {
-        .not_found => {
-            sh.diagK(.not_found, args[0], "{s}: not found", .{args[0]});
-            return 127;
-        },
+        .not_found => return reportMissing(sh, args[0], denied),
         .external => |p| return runExternal(sh, a, p, args, empty, &.{}, false),
         .special, .builtin => |b| return b.run(sh, a, args),
         .host => |h| return h.run(h.ctx, sh, args),

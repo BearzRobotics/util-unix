@@ -544,6 +544,13 @@ c "errexit in a login startup file ends the shell" 'echo "set -e; false" > .prof
 c "return in a login startup file ends only that file" 'printf "return 0\necho not\n" > .profile; HOME=$PWD sh -l -c "echo one
 echo two"; echo $?' e
 c "the EXIT trap of a startup file that exits runs" 'echo "trap \"echo bye\" EXIT; exit 4" > .profile; HOME=$PWD sh -l -c "echo ran"; echo $?' e
+c "read takes grouped options and an attached prompt" 'echo hi | { read -rp x v; echo "$?:$v"; }'
+c "export, readonly and unset take grouped options" 'x=1; unset -vv x; echo "${x-gone}"; export -pp >/dev/null && echo ok' P
+cx "cd refuses an unknown option" 'mkdir -p ./-x; cd -x 2>/dev/null; echo $?; basename "$PWD" | grep -c -- -x' P
+c "pwd takes grouped options and refuses others" 'pwd -LP >/dev/null; echo $?; pwd -x 2>/dev/null; echo $?' P
+c "printf precision zero of zero has no digits" 'printf "[%.0d][%.0u][%.0x][%#.0o][%.0d][%5.3d]\n" 0 0 0 0 7 -7'
+c "command -p does not change the PATH of the command" 'PATH=$PWD:$PATH; export PATH; want=$PATH; [ "$(command -p sh -c "echo \$PATH")" = "$want" ] && echo same' e
+c "command says when a file may not be run" 'mkdir -p ne; : > ne/zzcmd; PATH=./ne; command zzcmd 2>/dev/null; echo $?' P
 c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
 c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
 c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'

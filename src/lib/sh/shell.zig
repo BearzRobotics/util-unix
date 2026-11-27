@@ -194,6 +194,8 @@ pub const Shell = struct {
     reporter_ctx: ?*anyopaque = null,
     /// getopts: position inside a grouped option argument.
     getopts_sub: usize = 0,
+    /// `command -p`: searched instead of PATH while the one command is looked up
+    lookup_path: ?[]const u8 = null,
     getopts_last_optind: usize = 1,
     exit_status_override: ?u8 = null,
     in_exit_trap: bool = false,

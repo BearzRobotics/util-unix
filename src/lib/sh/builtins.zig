@@ -405,12 +405,10 @@ fn declare(sh: *Shell, a: Allocator, args: []const []const u8, comptime cmd: []c
             i += 1;
             break;
         }
-        if (std.mem.eql(u8, args[i], "-p")) {
-            _ = 0;
-        } else {
-            sh.diagCmdK(.illegal_option, args[i], cmd, "Illegal option {s}", .{args[i]});
+        for (args[i][1..]) |c| if (c != 'p') {
+            sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), cmd, "Illegal option -{c}", .{c});
             return die(sh, 2);
-        }
+        };
     }
     if (i >= args.len) return printVars(sh, a, cmd ++ " ", !ro, ro);
     var st: u8 = 0;
@@ -486,7 +484,7 @@ fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
     return 0;
 }
 
-fn unsetCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
+fn unsetCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
     var funcs = false;
     while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
@@ -494,14 +492,14 @@ fn unsetCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             i += 1;
             break;
         }
-        if (std.mem.eql(u8, args[i], "-f")) {
-            funcs = true;
-        } else if (std.mem.eql(u8, args[i], "-v")) {
-            funcs = false;
-        } else {
-            sh.diagCmdK(.illegal_option, args[i], "unset", "Illegal option {s}", .{args[i]});
-            return die(sh, 2);
-        }
+        for (args[i][1..]) |c| switch (c) {
+            'f' => funcs = true,
+            'v' => funcs = false,
+            else => {
+                sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), "unset", "Illegal option -{c}", .{c});
+                return die(sh, 2);
+            },
+        };
     }
     for (args[i..]) |name| {
         if (funcs) {
@@ -851,7 +849,7 @@ fn dotdotOk(a: Allocator, abs: []const u8) bool {
 fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
     var physical = false;
-    opts: while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
+    while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
         if (std.mem.eql(u8, args[i], "--")) {
             i += 1;
             break;
@@ -859,7 +857,10 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         for (args[i][1..]) |c| switch (c) {
             'P' => physical = true,
             'L' => physical = false,
-            else => break :opts,
+            else => {
+                sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), "cd", "Illegal option -{c}", .{c});
+                return 2;
+            },
         };
     }
     var dir: []const u8 = undefined;
@@ -933,7 +934,15 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 fn pwdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var physical = false;
     for (args[1..]) |arg| {
-        if (std.mem.eql(u8, arg, "-P")) physical = true else if (std.mem.eql(u8, arg, "-L")) physical = false;
+        if (arg.len < 2 or arg[0] != '-' or std.mem.eql(u8, arg, "--")) break;
+        for (arg[1..]) |c| switch (c) {
+            'P' => physical = true,
+            'L' => physical = false,
+            else => {
+                sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), "pwd", "Illegal option -{c}", .{c});
+                return 2;
+            },
+        };
     }
     var path: []const u8 = if (physical) "" else truePwd(sh) orelse "";
     if (path.len == 0) path = physicalCwd(a) orelse blk: {
@@ -1262,7 +1271,7 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     var digits: std.ArrayList(u8) = .empty;
                     const mag: u64 = if (v < 0) @as(u64, @bitCast(-%v)) else @intCast(v);
                     digits.print(a, "{d}", .{mag}) catch |oe| return sh.oom(oe);
-                    if (prec) |p| while (digits.items.len < p) digits.insert(a, 0, '0') catch |oe| return sh.oom(oe);
+                    if (prec) |p| padDigits(a, &digits, p, mag == 0) catch |oe| return sh.oom(oe);
                     const sign: []const u8 = if (v < 0) "-" else if (plus) "+" else if (space) " " else "";
                     padNum(a, &body, sign, digits.items, width, left, zero and prec == null) catch |oe| return sh.oom(oe);
                     width = 0;
@@ -1277,7 +1286,8 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                         'x' => digits.print(a, "{x}", .{v}) catch |oe| return sh.oom(oe),
                         else => digits.print(a, "{X}", .{v}) catch |oe| return sh.oom(oe),
                     }
-                    if (prec) |p| while (digits.items.len < p) digits.insert(a, 0, '0') catch |oe| return sh.oom(oe);
+                    // `%#.0o` of zero is still "0"
+                    if (prec) |p| padDigits(a, &digits, p, v == 0 and !(alt and conv == 'o')) catch |oe| return sh.oom(oe);
                     const pre: []const u8 = if (alt and v != 0) (if (conv == 'x') "0x" else if (conv == 'X') "0X" else if (conv == 'o') "0" else "") else "";
                     padNum(a, &body, pre, digits.items, width, left, zero and prec == null) catch |oe| return sh.oom(oe);
                     width = 0;
@@ -1327,6 +1337,17 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     return st;
 }
 
+/// An integer's precision: at least `prec` digits. Zero with precision zero has none.
+fn padDigits(a: Allocator, digits: *std.ArrayList(u8), prec: usize, is_zero: bool) Allocator.Error!void {
+    if (prec == 0 and is_zero) digits.clearRetainingCapacity();
+    const len = digits.items.len;
+    if (prec <= len) return;
+    // in one step: inserting a zero at a time is quadratic
+    try digits.resize(a, prec);
+    @memmove(digits.items[prec - len ..], digits.items[0..len]);
+    @memset(digits.items[0 .. prec - len], '0');
+}
+
 fn padNum(a: Allocator, body: *std.ArrayList(u8), sign: []const u8, digits: []const u8, width: usize, left: bool, zero: bool) Allocator.Error!void {
     const len = sign.len + digits.len;
     const pad = if (width > len) width - len else 0;
@@ -1355,17 +1376,30 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             i += 1;
             break;
         }
-        if (std.mem.eql(u8, args[i], "-r")) {
-            raw = true;
-        } else if (std.mem.eql(u8, args[i], "-p") and i + 1 < args.len) {
-            // `read -p prompt` is not POSIX; dash and FreeBSD sh accept it and
-            // write the prompt to standard error when reading a terminal
-            i += 1;
-            if (sys.isatty(0)) sh.errRaw(args[i]);
-        } else {
-            sh.diagCmdK(.illegal_option, args[i], "read", "Illegal option {s}", .{args[i]});
-            return 2;
-        }
+        var j: usize = 1;
+        while (j < args[i].len) : (j += 1) switch (args[i][j]) {
+            'r' => raw = true,
+            'p' => {
+                // `read -p prompt` is not POSIX; dash and FreeBSD sh accept it and
+                // write the prompt to standard error when reading a terminal.
+                // It is the rest of this word, or the next one.
+                var prompt = args[i][j + 1 ..];
+                if (prompt.len == 0) {
+                    if (i + 1 >= args.len) {
+                        sh.diagCmdK(.usage, null, "read", "No arg for -p option", .{});
+                        return 2;
+                    }
+                    i += 1;
+                    prompt = args[i];
+                }
+                if (sys.isatty(0)) sh.errRaw(prompt);
+                break;
+            },
+            else => |c| {
+                sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), "read", "Illegal option -{c}", .{c});
+                return 2;
+            },
+        };
     }
     const names = args[i..];
     if (names.len == 0) {
@@ -1787,15 +1821,11 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         };
     }
     if (i >= args.len) return 0;
-    var saved_path: ?shell.Saved = null;
-    if (use_default_path) {
-        const saved = exec.saveVar(sh, "PATH") catch |oe| return sh.oom(oe);
-        saved_path = saved;
-        sh.setVarRaw("PATH", "/usr/bin:/bin") catch |oe| return sh.oom(oe);
-    }
-    defer if (saved_path) |saved| exec.restoreVar(sh, saved);
+    const lookup: ?[]const u8 = if (use_default_path) "/usr/bin:/bin" else null;
     if (mode != 0) {
         var out: std.ArrayList(u8) = .empty;
+        sh.lookup_path = lookup;
+        defer sh.lookup_path = null;
         const ok = describe(sh, a, args[i], mode == 'V', &out);
         if (!ok and mode == 'V') {
             out.print(a, "{s}: not found\n", .{args[i]}) catch {};
@@ -1805,7 +1835,7 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     sh.no_die += 1;
     defer sh.no_die -= 1;
-    return exec.runArgs(sh, a, args[i..], true);
+    return exec.runArgs(sh, a, args[i..], true, lookup);
 }
 
 fn hashCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
