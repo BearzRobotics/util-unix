@@ -532,6 +532,9 @@ c "a braced parameter as here-document delimiter" 'cat <<${x}
 a
 ${x}
 echo after'
+c "a quoted ) does not end arithmetic" 'x=")"; echo $((1+${x#")"}2)); echo $(( $(echo ")" | wc -c) + 1 )); echo $(( (1+2) * $(echo "((" | wc -c) ))'
+c "a case inside a substitution inside arithmetic" 'echo $(( $(case a in a) echo 1;; esac) + 1 ))'
+c "backquotes inside arithmetic" 'echo $(( `echo ")" | wc -c` + 1 ))'
 c "a quoted delimiter keeps its dollar and stops expansion" 'cat <<"$x y"
 $HOME
 $x y

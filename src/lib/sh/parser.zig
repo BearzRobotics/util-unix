@@ -820,27 +820,70 @@ pub const Parser = struct {
         try b.push(a, .{ .param = p });
     }
 
+    /// Where the "))" that ends the arithmetic expression starting at `start`
+    /// begins. What is quoted does not count. With `commands`, a "$(" is
+    /// skipped by parsing it.
+    fn arithEnd(self: *Parser, start: usize, commands: bool) Error!?usize {
+        var depth: usize = 0;
+        var i = start;
+        while (i < self.src.len) : (i += 1) {
+            switch (self.src[i]) {
+                '\\' => i += 1,
+                '\'', '"', '`' => |quote| i = closingQuote(self.src, i + 1, quote) orelse return null,
+                '$' => if (commands and i + 2 < self.src.len and self.src[i + 1] == '(' and self.src[i + 2] != '(') {
+                    if (try self.substEnd(i)) |end| i = end - 1;
+                },
+                '(' => depth += 1,
+                ')' => {
+                    if (depth == 0) {
+                        const second = self.joined(i + 1);
+                        return if (second < self.src.len and self.src[second] == ')') i else null;
+                    }
+                    depth -= 1;
+                },
+                else => {},
+            }
+        }
+        return null;
+    }
+
+    /// Just past the ")" of the command substitution at `at_dollar`, or null
+    /// when it does not parse.
+    fn substEnd(self: *Parser, at_dollar: usize) Allocator.Error!?usize {
+        var scratch: Diag = .{};
+        var probe = Parser.init(self.a, self.src[at_dollar..], &scratch);
+        probe.aliases = self.aliases;
+        probe.depth = self.depth + 1;
+        probe.nest = self.nest;
+        probe.pos = 2;
+        _ = probe.parseSubstBody() catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return null,
+        };
+        return at_dollar + probe.pos;
+    }
+
+    fn closingQuote(text: []const u8, start: usize, quote: u8) ?usize {
+        var i = start;
+        while (i < text.len) : (i += 1) {
+            if (text[i] == quote) return i;
+            // a backslash quotes inside "..." and `...`, not inside '...'
+            if (text[i] == '\\' and quote != '\'') i += 1;
+        }
+        return null;
+    }
+
     /// At `$((`: parse an arithmetic expansion if the text closes with `))`.
     fn tryArith(self: *Parser, b: *Builder, in_dq: bool) Error!bool {
         const opener = self.pos;
         const opener_line = self.line;
         self.take(3);
         const start = self.pos;
-        var i = start;
-        var depth: usize = 0;
-        while (i < self.src.len) : (i += 1) {
-            const c = self.src[i];
-            if (c == '(') {
-                depth += 1;
-            } else if (c == ')') {
-                if (depth == 0) {
-                    const second = self.joined(i + 1);
-                    if (second < self.src.len and self.src[second] == ')') break;
-                    return self.failOpen(.unterminated_arithmetic, "$((", opener, opener_line, "Syntax error: Missing '))'", .{});
-                }
-                depth -= 1;
-            }
-        } else return self.failOpen(.unterminated_arithmetic, "$((", opener, opener_line, "Syntax error: Missing '))'", .{});
+        // Counting parentheses is nearly always enough. Where it fails, read
+        // each "$(...)" as the commands it is: "case a in a)" has a ")" that
+        // closes nothing. (Not at once: nested, that would parse twice a level.)
+        const i = self.arithEnd(start, false) catch null orelse (try self.arithEnd(start, true)) orelse
+            return self.failOpen(.unterminated_arithmetic, "$((", opener, opener_line, "Syntax error: Missing '))'", .{});
         const text = self.src[start..i];
         var sub = Parser.init(self.a, text, self.diag);
         sub.aliases = self.aliases;

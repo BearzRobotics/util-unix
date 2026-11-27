@@ -77,8 +77,9 @@ fn checkSimple(c: *Ctx, n: *const ast.Node, s: ast.Simple) Allocator.Error!void 
     if (eq(u8, name, "rm")) {
         var recursive = false;
         for (s.words[1..]) |w| if (wordText(w)) |t| {
-            if (t.len > 1 and t[0] == '-' and std.mem.indexOfScalar(u8, t, 'r') != null) recursive = true;
-            if (eq(u8, t, "-R")) recursive = true;
+            if (eq(u8, t, "--recursive")) recursive = true;
+            // "-r" or "-R" among short options
+            if (t.len > 1 and t[0] == '-' and t[1] != '-' and std.mem.indexOfAny(u8, t[1..], "rR") != null) recursive = true;
         };
         if (recursive) for (s.words[1..]) |w| if (endsWithSlashAfterParam(w)) try c.add(.lint_rm_variable, n, "rm -r");
     }
@@ -122,10 +123,38 @@ test "the function keyword is found where it does not parse" {
     try std.testing.expect(functionKeywordLine("function f") == null);
 }
 
+/// The commands inside a word's substitutions, however deep, are commands of
+/// the script too. Nothing observes whether they fail.
+fn walkWord(c: *Ctx, w: ast.Word) Allocator.Error!void {
+    for (w) |p| switch (p) {
+        .cmdsub => |sub| {
+            const saved = c.checked;
+            c.checked = false;
+            try walk(c, sub.body);
+            c.checked = saved;
+        },
+        .param => |pp| try walkWord(c, pp.arg),
+        .arith => |ar| try walkWord(c, ar.expr),
+        else => {},
+    };
+}
+
+fn walkRedirects(c: *Ctx, redirs: []const *ast.Redirect) Allocator.Error!void {
+    for (redirs) |r| {
+        try walkWord(c, r.target);
+        try walkWord(c, r.body);
+    }
+}
+
 fn walk(c: *Ctx, node: ?*const ast.Node) Allocator.Error!void {
     const n = node orelse return;
     switch (n.kind) {
-        .simple => |s| try checkSimple(c, n, s),
+        .simple => |s| {
+            try checkSimple(c, n, s);
+            for (s.assigns) |as| try walkWord(c, as.value);
+            for (s.words) |w| try walkWord(c, w);
+            try walkRedirects(c, s.redirs);
+        },
         .pipeline => |p| for (p.commands) |x| try walk(c, x),
         .and_or => |ao| {
             const saved = c.checked;
@@ -137,7 +166,10 @@ fn walk(c: *Ctx, node: ?*const ast.Node) Allocator.Error!void {
         .list => |items| for (items) |it| try walk(c, it.node),
         .subshell => |b| try walk(c, b),
         .group => |b| try walk(c, b),
-        .redirected => |r| try walk(c, r.body),
+        .redirected => |r| {
+            try walk(c, r.body);
+            try walkRedirects(c, r.redirs);
+        },
         .if_clause => |i| {
             const saved = c.checked;
             c.checked = true;
@@ -158,9 +190,16 @@ fn walk(c: *Ctx, node: ?*const ast.Node) Allocator.Error!void {
                 try c.add(.lint_unquoted_expansion, n, nm);
                 break;
             };
+            if (f.words) |ws| for (ws) |w| try walkWord(c, w);
             try walk(c, f.body);
         },
-        .case_clause => |cc| for (cc.items) |it| try walk(c, it.body),
+        .case_clause => |cc| {
+            try walkWord(c, cc.word);
+            for (cc.items) |it| {
+                for (it.patterns) |pat| try walkWord(c, pat);
+                try walk(c, it.body);
+            }
+        },
         .function => |f| try walk(c, f.body),
     }
 }
@@ -194,4 +233,38 @@ test "lint finds the common mistakes" {
         cd_count += 1;
     };
     try std.testing.expectEqual(@as(usize, 1), cd_count);
+}
+
+test "lint looks inside substitutions, and knows every spelling of rm -r" {
+    const parser = @import("parser.zig");
+    const t = std.testing;
+    for ([_][]const u8{
+        "x=$(rm -rf $d/)",
+        "echo \"$(rm -rf $d/)\"",
+        "rm -fR \"$dir/\"",
+        "rm -Rf \"$dir/\"",
+        "rm --recursive \"$dir/\"",
+        "case $(rm -r $d/) in *) :;; esac",
+        "case x in $(rm -r $d/)) :;; esac",
+        "for i in $(rm -r $d/); do :; done",
+        ": ${x-$(rm -r $d/)}",
+        ": $(( $(rm -r $d/) + 1 ))",
+        ": >$(rm -r $d/)",
+        "cat <<E\n$(rm -r $d/)\nE",
+        "{ :; } 2>$(rm -r $d/)",
+    }) |script| {
+        var d: parser.Diag = .{};
+        var prog = try parser.parseProgram(t.allocator, script, &d);
+        defer prog.deinit();
+        var arena = std.heap.ArenaAllocator.init(t.allocator);
+        defer arena.deinit();
+        var out: std.ArrayList(Finding) = .empty;
+        try check(arena.allocator(), prog.commands, &out);
+        for (out.items) |f| {
+            if (f.kind == .lint_rm_variable) break;
+        } else {
+            std.debug.print("nothing found in: {s}\n", .{script});
+            return error.TestUnexpectedResult;
+        }
+    }
 }
