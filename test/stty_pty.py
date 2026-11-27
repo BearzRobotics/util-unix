@@ -139,6 +139,15 @@ for words in (["rows", "40", "size"], ["cols", "100", "size"], ["size", "rows", 
     case(" ".join(words), words)
 for words in (["cols", "4294967296"], ["rows", "4294967295"], ["rows", "2147483648"], ["rows", "2147483647", "size"], ["cols", "65537", "size"], ["+9600"], ["ispeed", "+9600"], ["ospeed", "96_00"], ["96_00"]):
     case(" ".join(words), words)
+for words in (["cols", "+5"], ["cols", " 5"], ["cols", "5 "], ["rows", "1b"], ["rows", "1B"], ["rows", "2k"], ["rows", "1c"], ["rows", "0x10"],
+              ["rows", "010"], ["rows", "++1"], ["rows", " +0x1b"], ["min", "+1"], ["min", "1b"], ["time", " 1"], ["line", "+0"], ["intr", "+10"],
+              ["intr", ""], ["intr", "^ab"], ["intr", " 10"], ["intr", "10b"], ["intr", "^-x"], ["intr", "^1"], ["intr", "^["], ["intr", "^a"],
+              ["exta"], ["extb"], ["--all=x"], ["--save=1"], ["--all=x", "-echo"]):
+    case("argument forms: " + repr(words), words, [], ["-a"])
+# musl has one speed for both directions, so a GNU stty built on it cannot show
+# an input speed of its own
+if not REF_OMITS_ISPEED:
+    case("argument forms: ispeed exta", ["ispeed", "exta"], [], ["-a"])
 case("custom settings, raw and back", other, ["raw"], ["-raw"], [], ["-a"])
 case("eof undef, then cooked", ["eof", "undef"], ["cooked"], [], ["-a"])
 for c in chars:

@@ -140,4 +140,14 @@ run_cmp "--w"                          --w "$U"
 POSIXLY_CORRECT=1; export POSIXLY_CORRECT
 run_cmp "POSIXLY_CORRECT: no options after an operand" /dev/null -q
 unset POSIXLY_CORRECT
+# times past 2038 in the 32-bit field, and a login file larger than 256 MiB
+python3 - "$D/late.utmp" <<'PY'
+import struct, sys
+open(sys.argv[1], "wb").write(b"".join(struct.pack("<hxxi32s4s32s256shhiIi16s20s", 7, 1, b"null", b"", b"me", b"", 0, 0, 0, t, 0, b"", b"")
+    for t in (2147483647, 2147483648, 4000000000, 4294967295)))
+PY
+TZ=UTC run_cmp "times after 2038"    "$D/late.utmp"
+cp "$U" "$D/big.utmp"; (ulimit -S -f unlimited 2>/dev/null; truncate -s 300M "$D/big.utmp")
+if [ "$(wc -c < "$D/big.utmp")" -eq 314572800 ]; then run_cmp "a 300 MiB login file" "$D/big.utmp"
+else skip_test "a 300 MiB login file: cannot make one here"; fi
 print_summary

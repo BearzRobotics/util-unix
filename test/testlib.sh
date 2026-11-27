@@ -3,7 +3,8 @@
 # testlib.sh - Shared helpers for all util test scripts
 
 # Safety net: no test may write more than ~100 MB to any one file.
-ulimit -f 200000 2>/dev/null
+# (soft, so that a case that needs a larger file can raise it for its own setup)
+ulimit -S -f 200000 2>/dev/null
 
 PASS=0
 FAIL=0

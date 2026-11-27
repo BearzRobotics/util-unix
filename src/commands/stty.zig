@@ -49,6 +49,11 @@ pub fn main(ctx: cli.Context) u8 {
                     continue;
                 },
             };
+            // --all and --save take no value
+            if (k < 2 and eq != null) {
+                _ = invalidArgument(ctx, a);
+                return 1;
+            }
             switch (k) {
                 0 => seen_all = true,
                 1 => seen_save = true,

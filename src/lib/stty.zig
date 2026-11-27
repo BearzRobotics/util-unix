@@ -245,35 +245,50 @@ pub const CharError = error{ InvalidInteger, OutOfRange };
 /// (control-c), `^?` (delete), `^-` or `undef` (disabled), or a number in the
 /// notation of strtoul with base 0 (decimal, 0x hex, 0 octal).
 pub fn parseControlChar(text: []const u8) CharError!u8 {
+    if (text.len == 0) return 0; // an empty word disables the character
     if (text.len == 1) return text[0];
-    if (text.len == 2 and text[0] == '^') {
-        if (text[1] == '-') return 0;
-        if (text[1] == '?') return 0x7f;
-        return std.ascii.toUpper(text[1]) & 0x1f;
-    }
-    if (std.mem.eql(u8, text, "undef")) return 0;
+    if (std.mem.eql(u8, text, "^-") or std.mem.eql(u8, text, "undef")) return 0;
+    // as GNU, anything after the second character is not looked at
+    if (text[0] == '^') return if (text[1] == '?') 0x7f else text[1] & 0x9f;
     const n = try parseUnsigned(text);
     if (n > 255) return error.OutOfRange;
     return @intCast(n);
 }
 
-/// strtoul with base 0 on the whole text.
+/// A number as GNU stty reads one: blanks and a '+' may come first, "0x"
+/// means hexadecimal and a leading 0 octal, and "b" (512) or "B" (1024) may
+/// follow.
 pub fn parseUnsigned(text: []const u8) CharError!u64 {
-    if (text.len == 0) return error.InvalidInteger;
+    var rest = std.mem.trimStart(u8, text, " \t\n\r\x0b\x0c");
+    if (rest.len > 0 and rest[0] == '+') rest = rest[1..];
     var base: u8 = 10;
-    var digits = text;
-    if (text.len > 2 and text[0] == '0' and (text[1] == 'x' or text[1] == 'X')) {
+    if (rest.len > 2 and rest[0] == '0' and (rest[1] == 'x' or rest[1] == 'X') and std.ascii.isHex(rest[2])) {
         base = 16;
-        digits = text[2..];
-    } else if (text.len > 1 and text[0] == '0') {
+        rest = rest[2..];
+    } else if (rest.len > 1 and rest[0] == '0') {
         base = 8;
-        digits = text[1..];
     }
-    if (digits[0] == '+' or digits[0] == '-') return error.InvalidInteger;
-    return num.parseInt(u64, digits, base) catch |e| switch (e) {
-        error.Overflow => error.OutOfRange,
-        else => error.InvalidInteger,
+    var end: usize = 0;
+    while (end < rest.len and (std.fmt.charToDigit(rest[end], base) catch null) != null) end += 1;
+    if (end == 0) return error.InvalidInteger;
+    const suffix = rest[end..];
+    const factor: u64 = if (suffix.len == 0) 1 else if (std.mem.eql(u8, suffix, "b")) 512 else if (std.mem.eql(u8, suffix, "B")) 1024 else return error.InvalidInteger;
+    const n = num.parseInt(u64, rest[0..end], base) catch |e| switch (e) {
+        error.Overflow => return error.OutOfRange,
+        else => return error.InvalidInteger,
     };
+    return std.math.mul(u64, n, factor) catch error.OutOfRange;
+}
+
+test "numbers as GNU stty reads them" {
+    const t = std.testing;
+    for ([_]struct { []const u8, u64 }{ .{ "+5", 5 }, .{ " 5", 5 }, .{ " +0x1b", 27 }, .{ "1b", 512 }, .{ "1B", 1024 }, .{ "010", 8 }, .{ "0", 0 }, .{ "010b", 8 * 512 } }) |c| {
+        try t.expectEqual(c[1], try parseUnsigned(c[0]));
+    }
+    for ([_][]const u8{ "", "5 ", "-1", "++1", "2k", "1c", "1_0", "08", "b", "+" }) |bad| try t.expectError(error.InvalidInteger, parseUnsigned(bad));
+    try t.expectEqual(@as(u8, 0), try parseControlChar(""));
+    try t.expectEqual(@as(u8, 1), try parseControlChar("^ab"));
+    try t.expectEqual(@as(u8, 13), try parseControlChar("^-x"));
 }
 
 /// How a special character is shown: `^C`, `^?`, `M-x`, or `<undef>` for 0.
@@ -337,6 +352,8 @@ const speed_table = [_]struct { baud: u32, code: u32 }{
 /// "134.5". Null when it is not a speed the kernel interface knows.
 pub fn speedCode(text: []const u8) ?u32 {
     if (std.mem.eql(u8, text, "134.5")) return 0o4;
+    if (std.mem.eql(u8, text, "exta")) return speedCode("19200");
+    if (std.mem.eql(u8, text, "extb")) return speedCode("38400");
     // parseInt would take a sign
     if (text.len == 0 or !std.ascii.isDigit(text[0])) return null;
     const n = num.parseInt(u32, text, 10) catch return null;

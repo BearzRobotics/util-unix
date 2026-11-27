@@ -158,7 +158,9 @@ pub fn recordIn(layout: Layout, data: []const u8, index: usize) ?Record {
         .exit_termination = std.mem.readInt(i16, r[332..334], endian),
         .exit_status = std.mem.readInt(i16, r[334..336], endian),
         .session = if (layout.wide) @truncate(std.mem.readInt(i64, r[336..344], endian)) else std.mem.readInt(i32, r[336..340], endian),
-        .time = if (layout.wide) std.mem.readInt(i64, r[344..352], endian) else std.mem.readInt(i32, r[340..344], endian),
+        // 32 bits count from 1970 without a sign, which reaches 2106: GNU
+        // reads them so, and nothing was recorded before 1970
+        .time = if (layout.wide) std.mem.readInt(i64, r[344..352], endian) else std.mem.readInt(u32, r[340..344], endian),
         .addr = addr,
     };
 }
@@ -176,7 +178,12 @@ pub fn count(data: []const u8) usize {
 /// Read a whole utmp-format file. The caller frees the result with `gpa`.
 /// A missing default file is an empty list; any other file must exist.
 pub fn load(io: Io, gpa: Allocator, path: []const u8) ![]u8 {
-    return Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(256 << 20));
+    // A wtmp that is not rotated grows large, and is then worth reading. The
+    // limit only stops a file without end, such as /dev/zero.
+    return Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(2 << 30)) catch |err| switch (err) {
+        error.StreamTooLong => error.FileTooBig,
+        else => err,
+    };
 }
 
 /// True for a user process whose user name is not empty (GNU `IS_USER_PROCESS`).
@@ -233,4 +240,11 @@ test "both record layouts, whatever this is built for" {
         try t.expectEqual(@as(u32, 0x0100007f), third.addr[0]);
         try t.expect(recordIn(layout, &data, 3) == null);
     }
+}
+
+test "a 32-bit time past 2038 is not before 1970" {
+    var rec: [record_size]u8 = @splat(0);
+    if (native.wide) return error.SkipZigTest;
+    std.mem.writeInt(u32, rec[340..344], 0x8000_0000, builtin.cpu.arch.endian());
+    try std.testing.expectEqual(@as(i64, 2147483648), record(&rec, 0).?.time);
 }
