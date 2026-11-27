@@ -202,6 +202,9 @@ const Reporter = struct {
                 else
                     cli.report(ctx.io, &r.write_error, "mode of {f} changed from {o:0>4} ({s}) to {o:0>4} ({s})\n", .{ cli.quoteaf(c.path), c.old, uu.mode.modeString(&os, c.old), c.new, uu.mode.modeString(&ns, c.new) });
             },
+            .link_skipped => |path| {
+                cli.report(ctx.io, &r.write_error, "neither symbolic link {f} nor referent has been changed\n", .{cli.quoteaf(path)});
+            },
             .could_not_access => |path| {
                 cli.report(ctx.io, &r.write_error, "{f} could not be accessed\n", .{cli.quoteaf(path)});
             },

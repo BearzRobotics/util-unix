@@ -81,6 +81,8 @@ pub const Event = union(enum) {
     changed: struct { path: []const u8, old: u16, new: u16 },
     /// `-v`: an operand or entry could not be examined.
     could_not_access: []const u8,
+    /// `-v`: a symbolic link was left alone, itself and what it names.
+    link_skipped: []const u8,
     problem: Problem,
     /// The umask kept a bit the mode asked to clear or set (a failure,
     /// reported after the change was applied). `wanted` is what the mode text
@@ -173,6 +175,10 @@ const Engine = struct {
         if (err == error.DirectoryChanged) e.problem(.directory_changed, null) else e.problem(.cannot_read_directory, err);
     }
 
+    fn skippedLink(e: *Engine) void {
+        if (e.opts.verbosity == .verbose) e.emit(.{ .link_skipped = e.path.items });
+    }
+
     /// With -v the failed attempt is also named on standard output.
     fn couldNotAccess(e: *Engine) void {
         if (e.opts.verbosity == .verbose) e.emit(.{ .could_not_access = e.path.items });
@@ -217,8 +223,21 @@ const Engine = struct {
             return false;
         };
         // Symbolic links met while recursing are skipped unless -L.
-        if (lst.kind == .sym_link and !is_arg and e.opts.traversal != .logical) return true;
-        const st = if (lst.kind == .sym_link and follow)
+        if (lst.kind == .sym_link and !is_arg and e.opts.traversal != .logical) {
+            e.skippedLink();
+            return true;
+        }
+        // chmod cannot change a symlink's own mode: leave it, as GNU does.
+        // With -h that says nothing about walking: -R still goes through a
+        // link to a directory where -H or -L says so.
+        const walk_only = lst.kind == .sym_link and !follow;
+        if (walk_only) {
+            e.skippedLink();
+            if (!(e.opts.no_dereference and e.opts.recurse and e.opts.traversal.follows(is_arg))) return true;
+            const target = parent.statFile(e.io, name, .{}) catch return true;
+            if (target.kind != .directory) return true;
+        }
+        const st = if (lst.kind == .sym_link)
             parent.statFile(e.io, name, .{}) catch |err| {
                 e.problem(if (err == error.FileNotFound) .dangling_symlink else .cannot_access, err);
                 e.couldNotAccess();
@@ -226,14 +245,11 @@ const Engine = struct {
             }
         else
             lst;
-        // chmod cannot change a symlink's own mode: leave it, as GNU does.
-        if (lst.kind == .sym_link and !follow) return true;
-
         // Links are looked through only for the operand the user named and for
         // an entry that was a link when examined. Anything else that turns into
         // a link before we act (another process can do that in a directory it
         // may write to) must not lead the change somewhere else.
-        const through_link = follow and (is_arg or lst.kind == .sym_link);
+        const through_link = (follow or walk_only) and (is_arg or lst.kind == .sym_link);
         const descend = e.opts.recurse and st.kind == .directory;
         // Which directory was examined, to compare with the one opened below.
         // Linux only; elsewhere the no-follow open is the whole protection.
@@ -251,7 +267,7 @@ const Engine = struct {
             }
         };
 
-        const ok = e.apply(parent, name, st, through_link);
+        const ok = walk_only or e.apply(parent, name, st, through_link);
 
         // A link back to a directory we are inside of: GNU (through fts) does
         // not descend and does not warn; the entry is changed like a leaf.
@@ -329,6 +345,7 @@ const Log = struct {
         const line = switch (ev) {
             .changed => |c| std.fmt.allocPrint(testing.allocator, "changed {s} {o:0>4}->{o:0>4}", .{ c.path, c.old, c.new }),
             .could_not_access => |p| std.fmt.allocPrint(testing.allocator, "noaccess {s}", .{p}),
+            .link_skipped => |p| std.fmt.allocPrint(testing.allocator, "skipped {s}", .{p}),
             .problem => |p| std.fmt.allocPrint(testing.allocator, "problem {s} {s}", .{ @tagName(p.kind), p.path }),
             .umask_kept => |u| std.fmt.allocPrint(testing.allocator, "umask {s} {o:0>4} {o:0>4}", .{ u.path, u.got, u.wanted }),
         } catch @panic("oom");
@@ -390,8 +407,13 @@ test "recursion is pre-order and skips symlinks met on the way" {
     const opts: Options = .{ .change = .{ .mode_text = "go-rwx" }, .recurse = true, .verbosity = .verbose, .reporter = log.reporter(), .base = tmp.dir };
     try testing.expect(try run(testing.io, testing.allocator, "d", opts));
     try testing.expectEqualStrings("changed d", log.list.items[0][0..9]);
-    for (log.list.items) |l| try testing.expect(std.mem.indexOf(u8, l, "link") == null);
-    try testing.expectEqual(@as(usize, 4), log.list.items.len); // d, a, sub, sub/b
+    // the link is named once, as left alone, and nothing is changed through it
+    var skipped: usize = 0;
+    for (log.list.items) |l| {
+        if (std.mem.eql(u8, l, "skipped d/link")) skipped += 1 else try testing.expect(std.mem.indexOf(u8, l, "link") == null);
+    }
+    try testing.expectEqual(@as(usize, 1), skipped);
+    try testing.expectEqual(@as(usize, 5), log.list.items.len); // d, a, sub, sub/b, link
 }
 
 test "a directory keeps setgid unless the mode names it" {

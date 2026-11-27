@@ -28,7 +28,7 @@ All options of GNU chmod 9.7. Differential-tested: octal and symbolic modes (inc
 2. **`read_failed` trigger.** If reading a directory fails part-way, we print `chmod: fts_read failed: CAUSE`. The wording matches GNU 9.7 (`error (0, errno, _("fts_read failed"))` in `main`). Which failures GNU reports this way and which through its per-entry `cannot read directory` message depends on fts internals that were not read, and no test can trigger a mid-walk read error, so this path is untested.
 3. **Unchanged modes** are set anyway; GNU 9.7 calls `fchmodat` unconditionally too (verified in `process_file`).
 4. **Umask is read once at start-up** by setting it to 0 and restoring it (the syscall has no query form). A concurrent file creation by another thread in that instant would see the wrong mask; chmod is single-threaded.
-5. **`-h` on a symbolic link** is silently skipped; Linux cannot change a link's own mode. (GNU behaves the same in the tested cases.)
+5. **A symbolic link that is not followed** is left alone, as in GNU, since Linux cannot change a link's own mode; `-v` reports it. `-h` does not stop `-R` walking through a link to a directory where `-H` or `-L` says to.
 6. **`-P` without `-R` is ignored**, like `-H` and `-L`. GNU 9.7 instead reads the mode of the symbolic link itself (0777), computes the new mode from that and applies it to the target, so `chmod -P u+x l` leaves a 0666 target at 0777 (observed with strace, 2026-11-25). We compute the new mode from the target.
 
 ## Platforms
