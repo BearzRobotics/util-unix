@@ -28,10 +28,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # The whole run is capped (memory, time) in a systemd scope when available and
 # every case runs in its own session and PID namespace (bwrap), so a stray
 # signal cannot reach the host. Without bwrap the corpora are not run.
-if [ -z "${SH_CORPORA_CONTAINED:-}" ] && command -v systemd-run > /dev/null 2>&1 \
-    && systemd-run --user --scope -q true > /dev/null 2>&1; then
-    SH_CORPORA_CONTAINED=1 exec systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 -p RuntimeMaxSec=1800 sh "$0" "$@"
-fi
+[ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" timeout 1800 sh "$0" "$@"
 if command -v bwrap > /dev/null 2>&1 && bwrap --unshare-pid --die-with-parent --dev-bind / / true > /dev/null 2>&1; then
     SANDBOX="setsid -w bwrap --unshare-pid --unshare-ipc --die-with-parent --dev-bind / / --proc /proc"
 else

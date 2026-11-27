@@ -5,6 +5,8 @@
 # Exits 1 if any suite failed. A suite fails if it prints a FAIL line, exits
 # non-zero (a crash, a FATAL refusal, a syntax error) or reports no result at
 # all, so a suite that stops early cannot pass by printing less.
+# a memory-limited scope of its own, so a runaway case cannot take the caller down
+[ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" sh "$0" "$@"
 
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 TOTAL_PASS=0

@@ -1,6 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-or-later
 # testlib.sh - Shared helpers for all util test scripts
+# a memory-limited scope of its own, so a runaway case cannot take the caller down
+[ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" sh "$0" "$@"
 
 # Safety net: no test may write more than ~100 MB to any one file.
 # (soft, so that a case that needs a larger file can raise it for its own setup)

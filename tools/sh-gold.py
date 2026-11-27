@@ -35,6 +35,19 @@ usage: sh-gold.py [--source S]... [--out DIR] [--jobs N] [--ours PATH]
                   [--limit N] [--filter SUBSTR] [--list]
 Writes DIR/results.jsonl (one record per snippet) and prints the statistics.
 """
+import os as _os
+import sys as _sys
+
+# Run only inside test/contain.sh's memory-limited scope.
+try:
+    with open("/proc/self/cgroup") as _f:
+        _cg = _f.read().rstrip("\n")
+except OSError:
+    _cg = ""
+if __name__ == "__main__" and _os.environ.get("TEST_CONTAINED") != "cg:" + _cg:
+    _wrap = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "test", "contain.sh")
+    _os.execvp("sh", ["sh", _wrap, _sys.executable, "-u"] + _sys.argv)
+
 import argparse
 import json
 import os

@@ -9,7 +9,7 @@
 #
 # /zig must hold a Zig toolchain (the zig binary with its lib directory):
 #   docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
-#       --security-opt systempaths=unconfined -v "$PWD:/src:ro" \
+#       --security-opt systempaths=unconfined --memory=6g --memory-swap=6g -v "$PWD:/src:ro" \
 #       -v "$(dirname "$(readlink -f "$(command -v zig)")"):/zig:ro" alpine:3.22 sh /src/scripts/ci-musl.sh
 #
 # It installs packages and creates a user, so it refuses to run outside a container.

@@ -7,6 +7,19 @@ which tests the editor through its effect. Job control and `fc` cases are also
 run under dash and FreeBSD sh (tools/bsdrun.sh) and must match at least one of
 them (both when they agree). Everything else is compared with fixed expectations.
 """
+import os as _os
+import sys as _sys
+
+# Run only inside test/contain.sh's memory-limited scope.
+try:
+    with open("/proc/self/cgroup") as _f:
+        _cg = _f.read().rstrip("\n")
+except OSError:
+    _cg = ""
+if __name__ == "__main__" and _os.environ.get("TEST_CONTAINED") != "cg:" + _cg:
+    _wrap = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "contain.sh")
+    _os.execvp("sh", ["sh", _wrap, _sys.executable, "-u"] + _sys.argv)
+
 import os, re, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sh_pty

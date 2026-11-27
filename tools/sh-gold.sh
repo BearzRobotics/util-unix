@@ -14,8 +14,5 @@ if [ "${1:-}" = "--report" ]; then
     exec python3 -I "$HERE/sh-gold-report.py" "$@"
 fi
 command -v bwrap > /dev/null 2>&1 || { echo "sh-gold: bubblewrap is required" >&2; exit 1; }
-if [ -z "${SH_GOLD_CONTAINED:-}" ] && command -v systemd-run > /dev/null 2>&1 \
-    && systemd-run --user --scope -q true > /dev/null 2>&1; then
-    SH_GOLD_CONTAINED=1 exec systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 -p RuntimeMaxSec=3000 sh "$0" "$@"
-fi
+[ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$HERE/../test/contain.sh" timeout 3000 sh "$0" "$@"
 exec setsid -w python3 -I "$HERE/sh-gold.py" "$@"

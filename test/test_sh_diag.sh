@@ -8,6 +8,8 @@
 #
 #   sh test/test_sh_diag.sh            run
 #   sh test/test_sh_diag.sh freeze     rewrite the frozen files (review the diff!)
+# a memory-limited scope of its own, so a runaway case cannot take the caller down
+[ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" sh "$0" "$@"
 UTIL="sh"
 PASS=0
 FAIL=0

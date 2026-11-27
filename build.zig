@@ -117,7 +117,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }) });
-    test_step.dependOn(&b.addRunArtifact(lib_unit).step);
+    test_step.dependOn(&runUnitTest(b, lib_unit, target).step);
 
     const cli_unit = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/test_all.zig"),
@@ -128,7 +128,22 @@ pub fn build(b: *std.Build) void {
             .{ .name = "build_options", .module = version_opts.createModule() },
         },
     }) });
-    test_step.dependOn(&b.addRunArtifact(cli_unit).step);
+    test_step.dependOn(&runUnitTest(b, cli_unit, target).step);
+}
+
+/// Some unit tests run shell scripts in the test process. On a systemd host,
+/// run them through test/contain.sh: a runaway one must not get the caller's
+/// whole terminal stopped by the OOM killer.
+fn runUnitTest(b: *std.Build, unit: *std.Build.Step.Compile, target: std.Build.ResolvedTarget) *std.Build.Step.Run {
+    const here = @import("builtin");
+    if (here.os.tag != .linux or target.result.os.tag != .linux or target.result.cpu.arch != here.cpu.arch or
+        b.findProgram(.{ .names = &.{"systemd-run"} }) == null) return b.addRunArtifact(unit);
+    const run = b.addSystemCommand(&.{"sh"});
+    run.addFileArg(b.path("test/contain.sh"));
+    run.addArtifactArg(unit);
+    // not the test runner protocol: the binary runs the tests and exits non-zero on failure
+    run.expectExitCode(0);
+    return run;
 }
 
 fn selectCommands(b: *std.Build) []const []const u8 {

@@ -3,6 +3,8 @@
 # --json modes of uname, id and who (decision 0007). GNU has no --json, so
 # these are not differential: the output must parse as JSON and carry the same
 # facts as the plain output. Needs python3 and the built binaries.
+# a memory-limited scope of its own, so a runaway case cannot take the caller down
+[ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" sh "$0" "$@"
 BIN="${OURS_DIR:-$(dirname "$0")/../zig-out/bin}"
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); echo "PASS $1"; }

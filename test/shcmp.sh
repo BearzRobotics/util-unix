@@ -16,6 +16,8 @@
 #
 # To add a shell, append "name|command" to REF_SHELLS in `shcmp_detect`; the
 # runner skips shells that are not installed.
+# a memory-limited scope of its own, so a runaway case cannot take the caller down
+[ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" sh "$0" "$@"
 
 PASS=0
 FAIL=0
@@ -54,12 +56,20 @@ shcmp_norm() {
         -e 's#^sh: \([0-9]*\): #sh: #'
 }
 
+# No file a case writes may grow past 10 MB (512-byte blocks), and it dumps no
+# core. The output is read into a variable below: a shell that let a producer
+# write straight into the capture file would take this script's memory with it.
+shcmp_limits() {
+    ulimit -S -f 20000 2>/dev/null
+    ulimit -S -c 0 2>/dev/null
+}
+
 # shcmp_run NAME CMD ARGS... -- snippet : run one shell, leaves $W.out .err .rc
 shcmp_exec() {
     prefix="$1"; snippet="$2"; w="$3"
     rm -rf "$w"; mkdir -p "$w"
     shcmp_inner_sh $prefix
-    (cd "$w" && PATH="$TEST_TMP/inner:$PATH" SH_DIAGNOSTICS=posix timeout 20 $prefix -c "$snippet" < /dev/null > "$w.out" 2> "$w.err"; echo $? > "$w.rc")
+    (shcmp_limits; cd "$w" && PATH="$TEST_TMP/inner:$PATH" SH_DIAGNOSTICS=posix timeout 20 $prefix -c "$snippet" < /dev/null > "$w.out" 2> "$w.err"; echo $? > "$w.rc")
 }
 
 # A snippet that runs `sh` must get the shell being compared, not the system's:
@@ -80,7 +90,7 @@ fi
 shcmp_bsd() {
     snippet="$1"; w="$2"
     rm -rf "$w"; mkdir -p "$w"
-    (cd "$w" && timeout 30 sh "$SHCMP_HERE/../tools/bsdrun.sh" sh -c "$snippet" < /dev/null > "$w.out" 2> "$w.err"; echo $? > "$w.rc")
+    (shcmp_limits; cd "$w" && timeout 30 sh "$SHCMP_HERE/../tools/bsdrun.sh" sh -c "$snippet" < /dev/null > "$w.out" 2> "$w.err"; echo $? > "$w.rc")
 }
 
 # c DESCRIPTION SNIPPET [FLAGS] [NOTE]

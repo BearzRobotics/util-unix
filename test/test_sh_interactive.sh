@@ -7,6 +7,8 @@
 # the suite is skipped (exit 0).
 #
 #   sh test/test_sh_interactive.sh [SECTION...]   (emacs vi jobs fc prompt signals completion paste input; setid needs root)
+# a memory-limited scope of its own, so a runaway case cannot take the caller down
+[ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" sh "$0" "$@"
 UTIL="sh"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OURS="${OURS:-$HERE/../zig-out/bin/sh}"

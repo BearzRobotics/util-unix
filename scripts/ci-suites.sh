@@ -6,7 +6,7 @@
 #
 #   zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
 #   docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
-#       --security-opt systempaths=unconfined -v "$PWD:/src:ro" ubuntu:26.04 sh /src/scripts/ci-suites.sh
+#       --security-opt systempaths=unconfined --memory=6g --memory-swap=6g -v "$PWD:/src:ro" ubuntu:26.04 sh /src/scripts/ci-suites.sh
 #
 # It installs packages and creates a user, so it refuses to run outside a container.
 set -eu

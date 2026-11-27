@@ -9,6 +9,8 @@
 #    parser accepts exactly what shellcheck parses without an SC1xxx error,
 #    and `sh -n` agrees with `dash -n` on the exit status.
 # Skipped, with a message, when shellcheck is missing.
+# a memory-limited scope of its own, so a runaway case cannot take the caller down
+[ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" sh "$0" "$@"
 UTIL="sh"
 PASS=0
 FAIL=0
