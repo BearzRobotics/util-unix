@@ -149,6 +149,8 @@ pub const Parser = struct {
     blank_marks: std.ArrayList(usize) = .empty,
     /// A line number offset for sub-parsers.
     depth: u32 = 0,
+    /// For `colOf`: where the line holding `off` of this text starts.
+    line_start: struct { src: ?[*]const u8 = null, len: usize = 0, off: usize = 0, start: usize = 0 } = .{},
     /// Commands and `$` expansions the one being read is inside.
     nest: u32 = 0,
 
@@ -175,6 +177,7 @@ pub const Parser = struct {
     pub fn resumeAlias(self: *Parser, c: Carry) Allocator.Error!void {
         if (c.text.len == 0) return;
         self.src = try std.mem.concat(self.a, u8, &.{ c.text, self.src });
+        self.line_start = .{};
         for (c.active) |ac| try self.active.append(self.a, .{ .name = try self.a.dupe(u8, ac.name), .end = ac.end });
         try self.blank_marks.appendSlice(self.a, c.blank_marks);
         self.splice_end = c.text.len;
@@ -199,10 +202,22 @@ pub const Parser = struct {
 
     // --- diagnostics -------------------------------------------------------
 
-    fn colOf(self: *const Parser, off: usize) u32 {
+    fn colOf(self: *Parser, off: usize) u32 {
         if (self.depth > 0) return 0;
-        var ls = @min(off, self.src.len);
-        while (ls > 0 and self.src[ls - 1] != '\n') ls -= 1;
+        const last = @min(off, self.src.len);
+        // Look back for the line's start only as far as the last place asked
+        // about, so that a long line is not walked once for each command on it.
+        const known = self.line_start;
+        const usable = known.src == self.src.ptr and known.len == self.src.len and known.off <= last;
+        var ls = last;
+        while (ls > 0 and self.src[ls - 1] != '\n') {
+            if (usable and ls == known.off) {
+                ls = known.start;
+                break;
+            }
+            ls -= 1;
+        }
+        self.line_start = .{ .src = self.src.ptr, .len = self.src.len, .off = last, .start = ls };
         return @intCast(off - ls + 1);
     }
 
@@ -1178,6 +1193,7 @@ pub const Parser = struct {
         if (val.len > 0 and (val[val.len - 1] == ' ' or val[val.len - 1] == '\t')) try self.blank_marks.append(self.a, val.len);
         self.splice_end = val.len + (self.splice_end -| self.pos);
         self.src = ns;
+        self.line_start = .{};
         self.pos = 0;
         self.peeked = null;
         return true;
@@ -1479,6 +1495,39 @@ pub const Parser = struct {
         return .{ .name = first[0..eq], .value = try value.toOwnedSlice(self.a) };
     }
 
+    /// Append `word`, as spelled in the source, with its quoting removed; true
+    /// when it had any.
+    fn unquote(a: Allocator, out: *std.ArrayList(u8), word: []const u8) Allocator.Error!bool {
+        var quoted = false;
+        var double = false;
+        var i: usize = 0;
+        while (i < word.len) : (i += 1) {
+            const c = word[i];
+            if (c == '\\' and i + 1 < word.len) {
+                if (word[i + 1] == '\n') {
+                    i += 1; // a line continuation, not quoting
+                    continue;
+                }
+                if (!double or std.mem.indexOfScalar(u8, "$`\"\\", word[i + 1]) != null) {
+                    quoted = true;
+                    i += 1;
+                    try out.append(a, word[i]);
+                    continue;
+                }
+            }
+            if (c == '"') {
+                quoted = true;
+                double = !double;
+            } else if (c == '\'' and !double) {
+                quoted = true;
+                const end = std.mem.indexOfScalarPos(u8, word, i + 1, '\'') orelse word.len;
+                try out.appendSlice(a, word[i + 1 .. end]);
+                i = end;
+            } else try out.append(a, c);
+        }
+        return quoted;
+    }
+
     fn tryRedirect(self: *Parser) Error!?*ast.Redirect {
         var t = try self.peek();
         var fd: ?i32 = null;
@@ -1518,6 +1567,7 @@ pub const Parser = struct {
         if (r.op == .heredoc) {
             var delim: std.ArrayList(u8) = .empty;
             var quoted = false;
+            var expansion = false;
             for (target) |p| switch (p) {
                 .text => |s| try delim.appendSlice(self.a, s),
                 .quoted => |s| {
@@ -1527,8 +1577,14 @@ pub const Parser = struct {
                 // a command substitution in the delimiter is an error (dash,
                 // FreeBSD sh); POSIX leaves the delimiter's expansions undefined
                 .cmdsub => return self.failK(.unexpected_token, "Syntax error: Illegal eof marker for << redirection", .{}),
-                else => quoted = quoted,
+                else => expansion = true,
             };
+            // Nothing in the delimiter is expanded: what looks like "$x" or
+            // "~" is part of it, so it is the word as written, less quoting.
+            if (expansion) {
+                delim.clearRetainingCapacity();
+                quoted = try unquote(self.a, &delim, self.src[wt.start..wt.end]);
+            }
             r.target = &.{};
             try self.here.append(self.a, .{ .redir = r, .delim = delim.items, .strip = op == .dlessdash, .quoted = quoted, .line = t.line });
         }

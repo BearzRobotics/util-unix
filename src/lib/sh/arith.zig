@@ -143,7 +143,10 @@ pub const Evaluator = struct {
     // --- variables ---
 
     fn varValue(self: *Evaluator, name: []const u8) Error!i64 {
-        const v = self.host.get(self.host.ctx, name) orelse return 0;
+        const value = self.host.get(self.host.ctx, name) orelse return 0;
+        // blanks may follow the number as well as precede it, and a value of
+        // nothing but blanks is 0 (dash)
+        const v = std.mem.trimEnd(u8, value, " \t\n");
         if (v.len == 0) return 0;
         // a variable whose value does not fit is an error, unlike a literal
         // (dash and FreeBSD sh agree; docs/posix-shell-differences.md)

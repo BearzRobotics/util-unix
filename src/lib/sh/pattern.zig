@@ -27,6 +27,15 @@ fn classMatch(name: []const u8, c: u8) bool {
     return false;
 }
 
+/// Where the ":]" closing a class name that starts at `start` is. A name is a
+/// few letters: looking no further keeps a run of "[:" from taking cubic time.
+fn classEnd(pat: []const u8, start: usize) ?usize {
+    const longest = 16;
+    var i = start;
+    while (i < pat.len and i - start < longest and std.ascii.isAlphabetic(pat[i])) i += 1;
+    return if (i + 1 < pat.len and pat[i] == ':' and pat[i + 1] == ']') i else null;
+}
+
 /// Match `c` against the bracket expression starting at `pat[start]` (the
 /// `[`). Null when the expression is not terminated, in which case the `[`
 /// is an ordinary character.
@@ -44,7 +53,7 @@ fn bracket(pat: []const u8, start: usize, c: u8) ?BracketResult {
         if (lo == ']' and !first) return .{ .end = i + 1, .matched = matched != negate };
         first = false;
         if (lo == '[' and i + 1 < pat.len and pat[i + 1] == ':') {
-            if (std.mem.indexOfPos(u8, pat, i + 2, ":]")) |e| {
+            if (classEnd(pat, i + 2)) |e| {
                 if (classMatch(pat[i + 2 .. e], c)) matched = true;
                 i = e + 2;
                 continue;
@@ -74,6 +83,7 @@ pub fn match(pat: []const u8, s: []const u8) bool {
     var i: usize = 0;
     var star_p: ?usize = null;
     var star_i: usize = 0;
+    const last_close = std.mem.lastIndexOfScalar(u8, pat, ']') orelse 0;
     while (i < s.len) {
         if (p < pat.len) {
             const pc = pat[p];
@@ -88,7 +98,7 @@ pub fn match(pat: []const u8, s: []const u8) bool {
                 },
                 '?' => ok = true,
                 '[' => {
-                    if (bracket(pat, p, s[i])) |r| {
+                    if (if (p < last_close) bracket(pat, p, s[i]) else null) |r| {
                         ok = r.matched;
                         np = r.end;
                     } else ok = s[i] == '[';
@@ -122,12 +132,14 @@ pub fn match(pat: []const u8, s: []const u8) bool {
 /// True when the pattern has an unquoted wildcard (`*`, `?`, or a `[` that
 /// starts a bracket expression).
 pub fn hasMagic(pat: []const u8) bool {
+    // no "[" after the last "]" can open a bracket expression
+    const last_close = std.mem.lastIndexOfScalar(u8, pat, ']') orelse 0;
     var i: usize = 0;
     while (i < pat.len) : (i += 1) {
         switch (pat[i]) {
             '\\' => i += 1,
             '*', '?' => return true,
-            '[' => if (bracket(pat, i, 0) != null) return true,
+            '[' => if (i < last_close and bracket(pat, i, 0) != null) return true,
             else => {},
         }
     }
@@ -166,4 +178,18 @@ test "brackets" {
     try std.testing.expect(!match("[[:digit:]]", "x"));
     try std.testing.expect(match("[a", "[a"));
     try std.testing.expect(match("[a-]", "-"));
+}
+
+test "runs of \"[:\" are matched in good time, and classes still work" {
+    const t = std.testing;
+    try t.expect(match("[[:digit:][:alpha:]]x", "7x"));
+    try t.expect(match("[![:space:]]", "a"));
+    try t.expect(!match("[[:digit:]]", "a"));
+    var runs: [40000]u8 = undefined;
+    for (&runs, 0..) |*c, n| c.* = if (n % 2 == 0) '[' else ':';
+    try t.expect(!hasMagic(&runs));
+    try t.expect(match(&runs, &runs));
+    var closed = runs;
+    closed[closed.len - 1] = ']';
+    _ = hasMagic(&closed);
 }
