@@ -514,6 +514,9 @@ c "shift n" 'set -- a b c d; shift 2; echo $1 $#' B
 c "shift zero" 'set -- a b; shift 0; echo $#' B
 c "shift too many" 'set -- a; shift 2; echo after' B
 c "shift all" 'set -- a b; shift 2; echo $#' B
+# a long message is printed, not dropped
+c "a long \${name?message} is printed whole" 'm=$(printf "%03000d" 0); (: ${nope?$m}) 2>&1 | grep -c "nope: 0\{255\}"; (: ${nope?$m}) 2>&1 | wc -l' P
+c "an arithmetic error about a long value is not empty" 'x=$(printf "%0300d" 0 | tr 0 z); (echo $((x))) 2>&1 | grep -c zzzzzzzzzz' Pe
 # numbers are digits: no "_" separators
 c "test rejects an underscore in a number" 'test 1_0 -eq 10 2>/dev/null; echo $?'
 c "shift rejects an underscore in a number" '(set -- a b c; shift 0_1) 2>/dev/null; echo $?' e

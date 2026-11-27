@@ -8,6 +8,7 @@
 //! messages follow dash 0.5.12 where POSIX leaves them open.
 
 const std = @import("std");
+const diagmod = @import("diag.zig");
 const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
 const ast = @import("ast.zig");
@@ -1438,7 +1439,7 @@ const T = struct {
     st: u8 = 0,
 
     fn fail(self: *T, comptime fmt: []const u8, a: anytype) TestErr {
-        const m = std.fmt.bufPrint(&self.err, fmt, a) catch self.err[0..0];
+        const m = diagmod.bounded(&self.err, fmt, a);
         self.err_len = m.len;
         return error.Syntax;
     }

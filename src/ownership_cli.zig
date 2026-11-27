@@ -302,40 +302,38 @@ const Reporter = struct {
             return;
         }
 
-        var old_spec_buf: [512]u8 = undefined;
-        var new_spec_buf: [512]u8 = undefined;
-        const old_spec = specText(&old_spec_buf, if (user != null) c.old_user else null, if (group != null) c.old_group else null);
-        const new_spec = specText(&new_spec_buf, user, group);
+        const old_spec = Spec.of(if (user != null) c.old_user else null, if (group != null) c.old_group else null);
+        const new_spec = Spec.of(user, group);
 
-        const old = old_spec orelse "";
-        const new = new_spec orelse "";
+        const old: Spec = old_spec orelse .{};
+        const new: Spec = new_spec orelse .{};
         switch (c.status) {
             .succeeded => if (user != null)
-                w.print("changed ownership of {f} from {s} to {s}\n", .{ path, old, new }) catch {}
+                w.print("changed ownership of {f} from {f} to {f}\n", .{ path, old, new }) catch {}
             else if (group != null)
-                w.print("changed group of {f} from {s} to {s}\n", .{ path, old, new }) catch {}
+                w.print("changed group of {f} from {f} to {f}\n", .{ path, old, new }) catch {}
             else
                 w.print("no change to ownership of {f}\n", .{path}) catch {},
             .failed => if (old_spec != null) {
                 if (user != null)
-                    w.print("failed to change ownership of {f} from {s} to {s}\n", .{ path, old, new }) catch {}
+                    w.print("failed to change ownership of {f} from {f} to {f}\n", .{ path, old, new }) catch {}
                 else if (group != null)
-                    w.print("failed to change group of {f} from {s} to {s}\n", .{ path, old, new }) catch {}
+                    w.print("failed to change group of {f} from {f} to {f}\n", .{ path, old, new }) catch {}
                 else
                     w.print("failed to change ownership of {f}\n", .{path}) catch {};
             } else {
                 // No old owner known: "... of FILE to NEW".
                 if (user != null)
-                    w.print("failed to change ownership of {f} to {s}\n", .{ path, new }) catch {}
+                    w.print("failed to change ownership of {f} to {f}\n", .{ path, new }) catch {}
                 else if (group != null)
-                    w.print("failed to change group of {f} to {s}\n", .{ path, new }) catch {}
+                    w.print("failed to change group of {f} to {f}\n", .{ path, new }) catch {}
                 else
                     w.print("failed to change ownership of {f}\n", .{path}) catch {};
             },
             .no_change_requested => if (user != null)
-                w.print("ownership of {f} retained as {s}\n", .{ path, old }) catch {}
+                w.print("ownership of {f} retained as {f}\n", .{ path, old }) catch {}
             else if (group != null)
-                w.print("group of {f} retained as {s}\n", .{ path, old }) catch {}
+                w.print("group of {f} retained as {f}\n", .{ path, old }) catch {}
             else
                 w.print("ownership of {f} retained\n", .{path}) catch {},
             .not_applied => unreachable,
@@ -344,14 +342,22 @@ const Reporter = struct {
     }
 };
 
-/// GNU user_group_str(): "user:group", or just one of them, or null.
-fn specText(buf: []u8, user: ?[]const u8, group: ?[]const u8) ?[]const u8 {
-    if (user) |u| {
-        if (group) |g| return std.fmt.bufPrint(buf, "{s}:{s}", .{ u, g }) catch null;
-        return u;
+/// GNU user_group_str(): "user:group", or just one of them.
+const Spec = struct {
+    user: ?[]const u8 = null,
+    group: ?[]const u8 = null,
+
+    /// Null when there is neither.
+    fn of(user: ?[]const u8, group: ?[]const u8) ?Spec {
+        return if (user == null and group == null) null else .{ .user = user, .group = group };
     }
-    return group;
-}
+
+    pub fn format(spec: Spec, w: *Io.Writer) Io.Writer.Error!void {
+        if (spec.user) |u| try w.writeAll(u);
+        if (spec.user != null and spec.group != null) try w.writeByte(':');
+        if (spec.group) |g| try w.writeAll(g);
+    }
+};
 
 fn helpText(comptime mode: Mode) []const u8 {
     const usage = switch (mode) {

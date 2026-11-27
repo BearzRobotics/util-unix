@@ -47,7 +47,7 @@ pub const Evaluator = struct {
     }
 
     fn fail(self: *Evaluator, kind: diag.Kind, subject: ?[]const u8, comptime fmt: []const u8, args: anytype) Error {
-        const m = std.fmt.bufPrint(&self.msg_buf, fmt, args) catch self.msg_buf[0..0];
+        const m = diag.bounded(&self.msg_buf, fmt, args);
         self.msg_len = m.len;
         self.kind = kind;
         self.subject = subject orelse self.msg_buf[0..self.msg_len];

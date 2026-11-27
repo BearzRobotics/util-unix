@@ -203,7 +203,7 @@ pub const Parser = struct {
     }
 
     fn failK(self: *Parser, kind: diagmod.Kind, comptime fmt: []const u8, args: anytype) Error {
-        const msg = std.fmt.bufPrint(&self.diag.buf, fmt, args) catch self.diag.buf[0..0];
+        const msg = diagmod.bounded(&self.diag.buf, fmt, args);
         self.diag.len = msg.len;
         self.diag.line = self.line;
         self.diag.kind = kind;

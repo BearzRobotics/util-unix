@@ -470,8 +470,16 @@ pub const Shell = struct {
     /// the whole formatted text.
     pub fn diagK(self: *Shell, kind: diagmod.Kind, subject: ?[]const u8, comptime fmt: []const u8, args: anytype) void {
         var buf: [2048]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, fmt, args) catch buf[0..0];
+        const msg = self.wholeMessage(&buf, fmt, args);
+        defer if (msg.ptr != &buf) self.gpa.free(msg);
         self.diagWith2(msg, false, .{ .kind = kind, .subject = subject orelse msg });
+    }
+
+    /// The formatted message: in `buf` if it fits, else allocated (the caller
+    /// frees it). Without memory it is `buf` again, cut off.
+    fn wholeMessage(self: *Shell, buf: []u8, comptime fmt: []const u8, args: anytype) []const u8 {
+        return std.fmt.bufPrint(buf, fmt, args) catch
+            std.fmt.allocPrint(self.gpa, fmt, args) catch diagmod.bounded(buf, fmt, args);
     }
 
     /// Like `diagK` for messages dash prints without any prefix (trap, getopts).
@@ -482,7 +490,8 @@ pub const Shell = struct {
     /// `name: line: cmd: message` for builtins.
     pub fn diagCmdK(self: *Shell, kind: diagmod.Kind, subject: ?[]const u8, cmd: []const u8, comptime fmt: []const u8, args: anytype) void {
         var buf: [2048]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, "{s}: " ++ fmt, .{cmd} ++ args) catch buf[0..0];
+        const msg = self.wholeMessage(&buf, "{s}: " ++ fmt, .{cmd} ++ args);
+        defer if (msg.ptr != &buf) self.gpa.free(msg);
         self.diagWith2(msg, false, .{ .kind = kind, .subject = subject orelse msg });
     }
 

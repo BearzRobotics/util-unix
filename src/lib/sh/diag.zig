@@ -17,6 +17,27 @@ const Allocator = std.mem.Allocator;
 
 pub const Severity = enum { err, warning };
 
+/// Format into `buf`; a message too long for it is cut off with "...", never
+/// left out.
+pub fn bounded(buf: []u8, comptime fmt: []const u8, args: anytype) []const u8 {
+    var w: std.Io.Writer = .fixed(buf);
+    w.print(fmt, args) catch {
+        const mark = "...";
+        const at = @min(w.end, buf.len - mark.len);
+        @memcpy(buf[at..][0..mark.len], mark);
+        return buf[0 .. at + mark.len];
+    };
+    return w.buffered();
+}
+
+test "bounded cuts a long message off visibly" {
+    var buf: [12]u8 = undefined;
+    try std.testing.expectEqualStrings("short", bounded(&buf, "{s}", .{"short"}));
+    try std.testing.expectEqualStrings("exactly 12ch", bounded(&buf, "{s}", .{"exactly 12ch"}));
+    try std.testing.expectEqualStrings("name: abc...", bounded(&buf, "name: {s}", .{"abcdefghijklmnop"}));
+    try std.testing.expectEqualStrings("12345678-...", bounded(&buf, "{d}-{s}", .{ 12345678, "tail that is long" }));
+}
+
 pub const Kind = enum {
     // 1xxx syntax
     unexpected_token,
