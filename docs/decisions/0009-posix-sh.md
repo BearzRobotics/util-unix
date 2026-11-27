@@ -102,9 +102,14 @@ through the library hands its process to the shell. A host must expect:
   can deadlock on a lock one of them held. Pending signals and `errno` are
   global, so two `Shell`s in one process take each other's.
 
-A host that cannot accept this should run the `sh` program as a child process.
-Options that keep `exec` and the final exit inside a child, or wait only for the
-shell's own children, would be new features and are not planned here.
+`Options.keep_process` (added at the maintainer's request, 2026-11-27) removes
+the first of these: `exec command` runs the command in a child and then ends the
+script with its status, running no EXIT trap, as a replaced shell would not; and
+with job control, a foreground job killed by SIGINT ends the script instead of
+the shell sending the signal on to its own process. The rest of the list stands,
+and a script can still signal the process (`kill $$`). Waiting only for the
+shell's own children would be a further feature, not planned here. A host that
+cannot accept what remains should run the `sh` program as a child process.
 
 ## Diagnostics
 
