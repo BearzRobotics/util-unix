@@ -117,6 +117,15 @@ pub fn main(ctx: cli.Context) u8 {
     }
 
     const setting = file != null or operands > 0;
+    // A link by one of these names asks for a domain. It must not fall through
+    // to setting the host name; setting a NIS domain is not implemented.
+    if (domainLink(ctx.invoked)) |wanted| {
+        if (setting) {
+            cli.warn(ctx, "run as '{s}' this program only shows a name: it sets nothing", .{ctx.invoked});
+            return 1;
+        }
+        show = show orelse wanted;
+    }
     // hostname 3.25 acts on -F before it checks for stray operands or display options,
     // so a refused change is reported ("Permission denied") instead of the usage text.
     const file_conflict = file != null and (operands > 0 or show != null);
@@ -174,6 +183,16 @@ fn setDefault(ctx: cli.Context) u8 {
     defer if (text) |t| ctx.gpa.free(t);
     const name = if (text) |t| (hn.fromFileText(t) orelse "localhost") else "localhost";
     return setName(ctx, name);
+}
+
+/// What the program shows when run by the name `invoked`, if that is one of
+/// the domain names.
+fn domainLink(invoked: []const u8) ?Show {
+    if (std.mem.eql(u8, invoked, "dnsdomainname")) return .domain;
+    for ([_][]const u8{ "domainname", "nisdomainname", "ypdomainname" }) |n| {
+        if (std.mem.eql(u8, invoked, n)) return .yp;
+    }
+    return null;
 }
 
 fn unameFailed(ctx: cli.Context) u8 {
@@ -255,9 +274,9 @@ fn help(ctx: cli.Context) u8 {
 const help_text = "Usage: hostname [-b] {hostname|-F file}         set host name (from file)\n" ++
     "       hostname [-a|-A|-d|-f|-i|-I|-s|-y]       display formatted name\n" ++
     "       hostname                                 display host name\n\n" ++
-    "       {yp,nis,}domainname {nisdomain|-F file}  set NIS domain name (from file)\n" ++
     "       {yp,nis,}domainname                      display NIS domain name\n\n" ++
-    "       dnsdomainname                            display dns domain name\n\n" ++
+    "       dnsdomainname                            display dns domain name\n" ++
+    "       (the names above only display: they set nothing)\n\n" ++
     "       hostname -V|--version|-h|--help          print info and exit\n\n" ++
     "Program name:\n" ++
     "       {yp,nis,}domainname=hostname -y\n" ++
@@ -268,7 +287,7 @@ const help_text = "Usage: hostname [-b] {hostname|-F file}         set host name
     "    -b, --boot             set default hostname if none available\n" ++
     "    -d, --domain           DNS domain name\n" ++
     "    -f, --fqdn, --long     long host name (FQDN)\n" ++
-    "    -F, --file             read host name or NIS domain name from given file\n" ++
+    "    -F, --file             read host name from given file\n" ++
     "    -i, --ip-address       addresses for the host name\n" ++
     "    -I, --all-ip-addresses all addresses for the host\n" ++
     "    -s, --short            short host name\n" ++

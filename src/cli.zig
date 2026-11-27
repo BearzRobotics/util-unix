@@ -19,6 +19,9 @@ pub const version = @import("build_options").version;
 pub const Context = struct {
     /// Command name as the user invoked it (used in diagnostics).
     name: []const u8,
+    /// The file name the program was started by, which a link can make
+    /// differ from `name`; empty when not known.
+    invoked: []const u8 = "",
     /// Arguments after the command name. Borrowed; valid for the whole run.
     args: []const [:0]const u8,
     io: Io,

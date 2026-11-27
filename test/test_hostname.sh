@@ -55,4 +55,18 @@ if [ "$(id -u)" != 0 ]; then
 else
     skip_test "set-refusal tests need a non-root user"
 fi
+# links by the domain names show a domain, and never set the host name
+links="$(mktemp -d)"
+for n in domainname nisdomainname ypdomainname dnsdomainname; do
+    ln -s "$BIN_DIR/hostname" "$links/$n"
+    case "$n" in dnsdomainname) opt=-d ;; *) opt=-y ;; esac
+    x="$("$links/$n" 2>&1; echo $?)"; y="$("$BIN_DIR/hostname" "$opt" 2>&1 | sed "s/^hostname:/$n:/"; "$BIN_DIR/hostname" "$opt" > /dev/null 2>&1; echo $?)"
+    if [ "$x" = "$y" ]; then PASS=$((PASS + 1)); echo "PASS run as $n shows what hostname $opt shows"
+    else FAIL=$((FAIL + 1)); echo "FAIL run as $n shows what hostname $opt shows: '$x' not '$y'"; fi
+    # (refused before the kernel is asked, so this is safe as root too)
+    x="$("$links/$n" newname 2>&1; echo $?)"
+    case "$x" in *"sets nothing"*) PASS=$((PASS + 1)); echo "PASS run as $n sets nothing" ;;
+    *) FAIL=$((FAIL + 1)); echo "FAIL run as $n sets nothing: $x" ;; esac
+done
+
 print_summary

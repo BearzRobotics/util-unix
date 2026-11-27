@@ -23,6 +23,7 @@ pub fn main(init: std.process.Init) !u8 {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     return commands.get(options.command)(.{
         .name = options.command,
+        .invoked = if (args.len > 0) std.fs.path.basename(args[0]) else "",
         .args = args[1..],
         .io = init.io,
         .gpa = init.gpa,
