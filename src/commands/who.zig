@@ -126,6 +126,8 @@ pub fn main(ctx: cli.Context) u8 {
     if (as_json) {
         uu.who.writeJson(ctx.io, &w.interface, data, o) catch return 1;
     } else {
+        // a terminal would obey control characters in the file
+        o.mask_controls = Io.File.stdout().isTty(ctx.io) catch false;
         uu.who.write(ctx.io, &w.interface, data, &zone, o) catch return 1;
     }
     w.interface.flush() catch return 1;

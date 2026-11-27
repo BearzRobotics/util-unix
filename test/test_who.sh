@@ -109,4 +109,30 @@ run_loc "classic style (no locale variables)" "LANG=" "$U"
 TZ=Asia/Tokyo run_cmp "TZ=Asia/Tokyo -a"                  -a "$U"
 TZ=America/New_York run_cmp "TZ=America/New_York -b"      -b "$U"
 TZ=UTC run_cmp "TZ=UTC -a"                                -a "$U"
+# on a terminal, control characters in the file are shown as '?'; elsewhere the
+# output stays as GNU writes it
+python3 - "$D/hostile.utmp" <<'PY'
+import struct, sys
+open(sys.argv[1], "wb").write(struct.pack("<hxxi32s4s32s256shhiii16s20s", 7, 1, b"null", b"", b"ev\x1bil",
+    b"a)\nroot  \x1b[2J\xc2\x9b", 0, 0, 0, 1700000000, 0, b"", b""))
+PY
+run_cmp "control characters through a pipe" "$D/hostile.utmp"
+seen="$(python3 - "$BIN_DIR/who" "$D/hostile.utmp" <<'PY'
+import os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], ["who", sys.argv[2]])
+out = b""
+while True:
+    try: chunk = os.read(fd, 4096)
+    except OSError: break
+    if not chunk: break
+    out += chunk
+os.waitpid(pid, 0)
+bad = [c for c in out.replace(b"\r\n", b"") if c < 32 or c == 127] or (b"\xc2\x9b" in out)
+print("masked" if not bad and b"ev?il" in out and b"(a)?root" in out and out.count(b"\n") == 1 else repr(out))
+PY
+)"
+if [ "$seen" = masked ]; then PASS=$((PASS + 1)); echo "PASS control characters on a terminal are masked"
+else FAIL=$((FAIL + 1)); echo "FAIL control characters on a terminal are masked: $seen"; fi
 print_summary

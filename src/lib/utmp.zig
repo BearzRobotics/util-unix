@@ -77,6 +77,59 @@ pub const Record = struct {
     addr: [4]u32,
 };
 
+/// Replace the control characters in `text` with '?', for showing it on a
+/// terminal, which would obey them: C0 and DEL, C1 as UTF-8 (two '?') or as a
+/// lone byte. Other bytes stay. With `layout`, tabs, newlines and the carriage
+/// return of a "\r\n" stay too. The length does not change.
+pub fn maskControls(text: []u8, layout: bool) void {
+    var i: usize = 0;
+    while (i < text.len) {
+        const c = text[i];
+        if (c < 0x80) {
+            const keep = layout and (c == '\n' or c == '\t' or (c == '\r' and i + 1 < text.len and text[i + 1] == '\n'));
+            if ((c < 0x20 and !keep) or c == 0x7f) text[i] = '?';
+            i += 1;
+            continue;
+        }
+        const n: usize = std.unicode.utf8ByteSequenceLength(c) catch 0;
+        const cp: ?u21 = if (n == 0 or n > text.len - i) null else std.unicode.utf8Decode(text[i..][0..n]) catch null;
+        if (cp) |p| {
+            if (p < 0xa0) @memset(text[i..][0..n], '?');
+            i += n;
+        } else {
+            if (c < 0xa0) text[i] = '?';
+            i += 1;
+        }
+    }
+}
+
+test "control characters are masked" {
+    var text = "a\x1b[2J\n\tb\r\nc\r\x7f \u{9b}\u{e9}\u{20ac}\x9b\xe9".*;
+    var layout = text;
+    maskControls(&text, false);
+    try std.testing.expectEqualStrings("a?[2J??b??c?? ??\u{e9}\u{20ac}?\xe9", &text);
+    maskControls(&layout, true);
+    try std.testing.expectEqualStrings("a?[2J\n\tb\r\nc?? ??\u{e9}\u{20ac}?\xe9", &layout);
+}
+
+/// Room for a record's strings while they are masked.
+pub const MaskBuffer = [32 + 32 + host_size + 4]u8;
+
+/// `r` with the control characters of its strings masked, copied into `buf`.
+pub fn masked(r: Record, buf: *MaskBuffer) Record {
+    var out = r;
+    var at: usize = 0;
+    inline for (.{ "user", "line", "host", "id" }) |name| {
+        const from = @field(r, name);
+        const to = buf[at..][0..from.len];
+        @memcpy(to, from);
+        maskControls(to, false);
+        @field(out, name) = to;
+        at += from.len;
+    }
+    return out;
+}
+
 fn field(bytes: []const u8) []const u8 {
     return std.mem.sliceTo(bytes, 0);
 }

@@ -45,7 +45,7 @@ Short: `Login Name TTY Idle When Where`. The terminal column starts with `*` whe
 
 # SECURITY CONSIDERATIONS
 
-.plan and .project files are copied to the output unchanged, control characters included.
+When standard output is a terminal, control characters in login records, account fields and the .plan and .project files are shown as '?' (the files keep their newlines and tabs). Otherwise they are written unchanged, as GNU pinky writes them.
 
 # CONCURRENCY AND ATOMICITY
 

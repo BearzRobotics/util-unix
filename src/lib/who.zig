@@ -46,6 +46,8 @@ pub fn styleForLocale(lc_all: ?[]const u8, lc_time: ?[]const u8, lang: ?[]const 
 }
 
 pub const Options = struct {
+    /// Show control characters in the file's strings as '?': for a terminal.
+    mask_controls: bool = false,
     // Which records to show (GNU need_*).
     users: bool = false,
     boot: bool = false,
@@ -172,7 +174,7 @@ pub fn ttyInfo(io: Io, line: []const u8) TtyInfo {
 
 /// Write the report for the utmp-format `data`.
 pub fn write(io: Io, w: *Io.Writer, data: []const u8, zone: *const localtime.Zone, o: Options) Io.Writer.Error!void {
-    if (o.count) return writeCount(w, data);
+    if (o.count) return writeCount(w, data, o.mask_controls);
     if (o.heading) {
         try printLine(w, o, .{ .user = "NAME", .line = "LINE", .time = "TIME", .idle = "IDLE", .pid = "PID", .comment = "COMMENT", .exit = "EXIT" });
     }
@@ -183,18 +185,20 @@ pub fn write(io: Io, w: *Io.Writer, data: []const u8, zone: *const localtime.Zon
     // "(" + ut_host (256 bytes) + ")"
     var cbuf: [utmp.host_size + 2]u8 = undefined;
     var xbuf: [64]u8 = undefined;
+    var mbuf: utmp.MaskBuffer = undefined;
     var i: usize = 0;
-    while (utmp.record(data, i)) |r| : (i += 1) {
+    while (utmp.record(data, i)) |found| : (i += 1) {
+        const r = if (o.mask_controls) utmp.masked(found, &mbuf) else found;
         const time = formatTime(&tbuf, o.style, zone, r.time);
         switch (r.kind) {
             .user_process => {
                 if (!o.users or !utmp.isUserProcess(r)) continue;
                 if (o.my_line_only) {
                     const mine = o.my_line orelse continue;
-                    const rl = if (std.mem.startsWith(u8, r.line, "/dev/")) r.line[5..] else r.line;
+                    const rl = if (std.mem.startsWith(u8, found.line, "/dev/")) found.line[5..] else found.line;
                     if (!std.mem.eql(u8, rl, mine)) continue;
                 }
-                const info = ttyInfo(io, r.line);
+                const info = ttyInfo(io, found.line);
                 const state: u8 = if (!info.exists) '?' else if (info.group_writable) '+' else '-';
                 const idle = idleText(&ibuf, info.atime, o.now, boot);
                 const host = if (r.host.len > 0) std.fmt.bufPrint(&cbuf, "({s})", .{r.host}) catch unreachable else "";
@@ -217,8 +221,10 @@ pub fn write(io: Io, w: *Io.Writer, data: []const u8, zone: *const localtime.Zon
                 const raw: u32 = @bitCast(r.pid);
                 const current: u8 = @truncate(raw);
                 const last: u8 = @truncate(raw >> 8);
-                const line = std.fmt.bufPrint(&xbuf, "run-level {c}", .{current}) catch "";
-                const comment = if (last != 0) std.fmt.bufPrint(&cbuf, "last={c}", .{last}) catch "" else "";
+                var levels = [2]u8{ current, if (last != 0) last else ' ' };
+                if (o.mask_controls) utmp.maskControls(&levels, false);
+                const line = std.fmt.bufPrint(&xbuf, "run-level {c}", .{levels[0]}) catch "";
+                const comment = if (last != 0) std.fmt.bufPrint(&cbuf, "last={c}", .{levels[1]}) catch "" else "";
                 try printLine(w, o, .{ .line = line, .time = time, .comment = comment });
             },
             .init_process => if (o.init_spawn) {
@@ -330,11 +336,13 @@ fn writeCountJson(w: *Io.Writer, data: []const u8) Io.Writer.Error!void {
     try w.print("],\"count\":{d}}}\n", .{n});
 }
 
-fn writeCount(w: *Io.Writer, data: []const u8) Io.Writer.Error!void {
+fn writeCount(w: *Io.Writer, data: []const u8, mask: bool) Io.Writer.Error!void {
     var n: usize = 0;
     var i: usize = 0;
-    while (utmp.record(data, i)) |r| : (i += 1) {
-        if (!utmp.isUserProcess(r)) continue;
+    var mbuf: utmp.MaskBuffer = undefined;
+    while (utmp.record(data, i)) |found| : (i += 1) {
+        if (!utmp.isUserProcess(found)) continue;
+        const r = if (mask) utmp.masked(found, &mbuf) else found;
         if (n > 0) try w.writeByte(' ');
         try w.writeAll(r.user);
         n += 1;

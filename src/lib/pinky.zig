@@ -22,6 +22,10 @@ const who = @import("who.zig");
 const localtime = @import("localtime.zig");
 
 pub const Options = struct {
+    /// Show control characters in login records, account fields and the
+    /// .project and .plan files as '?' (the files keep their newlines and
+    /// tabs): for a terminal.
+    mask_controls: bool = false,
     /// -l: long format.
     long: bool = false,
     /// -b off: Directory and Shell lines in long format.
@@ -61,14 +65,27 @@ pub fn realName(buf: []u8, gecos: []const u8, login: []const u8) []const u8 {
 pub fn writeLong(io: Io, gpa: Allocator, w: *Io.Writer, db: *const userdb.Db, login: []const u8, o: Options) !void {
     var name_buf: [512]u8 = undefined;
     const pw = db.userByName(login) orelse {
-        try w.print("Login name: {s:<28}In real life:  ???\n", .{login});
+        try w.writeAll("Login name: ");
+        try writeField(w, login, 28, o);
+        try w.writeAll("In real life:  ???\n");
         return;
     };
-    try w.print("Login name: {s:<28}In real life:  {s}\n", .{ pw.name, realName(&name_buf, pw.gecos, pw.name) });
-    if (o.home_and_shell) try w.print("Directory: {s:<29}Shell:  {s}\n", .{ pw.dir, pw.shell });
+    try w.writeAll("Login name: ");
+    try writeField(w, pw.name, 28, o);
+    try w.writeAll("In real life:  ");
+    try writeField(w, realName(&name_buf, pw.gecos, pw.name), 0, o);
+    try w.writeByte('\n');
+    if (o.home_and_shell) {
+        try w.writeAll("Directory: ");
+        try writeField(w, pw.dir, 29, o);
+        try w.writeAll("Shell:  ");
+        try writeField(w, pw.shell, 0, o);
+        try w.writeByte('\n');
+    }
     if (o.project) {
         if (try readHomeFile(io, gpa, pw.dir, ".project")) |text| {
             defer gpa.free(text);
+            if (o.mask_controls) utmp.maskControls(text, true);
             try w.writeAll("Project: ");
             try w.writeAll(text);
         }
@@ -76,11 +93,33 @@ pub fn writeLong(io: Io, gpa: Allocator, w: *Io.Writer, db: *const userdb.Db, lo
     if (o.plan) {
         if (try readHomeFile(io, gpa, pw.dir, ".plan")) |text| {
             defer gpa.free(text);
+            if (o.mask_controls) utmp.maskControls(text, true);
             try w.writeAll("Plan:\n");
             try w.writeAll(text);
         }
     }
     try w.writeByte('\n');
+}
+
+/// Write one value from an account or a login record, padded to `width`.
+fn writeField(w: *Io.Writer, text: []const u8, width: usize, o: Options) Io.Writer.Error!void {
+    if (!o.mask_controls) {
+        try w.writeAll(text);
+    } else {
+        var chunk: [256]u8 = undefined;
+        var rest = text;
+        while (rest.len > 0) {
+            var n = @min(rest.len, chunk.len);
+            // do not cut a UTF-8 character in two
+            while (n < rest.len and n > 0 and rest[n] & 0xc0 == 0x80) n -= 1;
+            if (n == 0) n = @min(rest.len, chunk.len);
+            @memcpy(chunk[0..n], rest[0..n]);
+            utmp.maskControls(chunk[0..n], false);
+            try w.writeAll(chunk[0..n]);
+            rest = rest[n..];
+        }
+    }
+    if (text.len < width) try w.splatByteAll(' ', width - text.len);
 }
 
 fn readHomeFile(io: Io, gpa: Allocator, dir: []const u8, name: []const u8) !?[]u8 {
@@ -128,9 +167,12 @@ pub fn writeShort(
     var tbuf: [64]u8 = undefined;
     var ibuf: [32]u8 = undefined;
     var nbuf: [512]u8 = undefined;
+    var mbuf: utmp.MaskBuffer = undefined;
     var i: usize = 0;
     while (utmp.record(data, i)) |r| : (i += 1) {
         if (!utmp.isUserProcess(r)) continue;
+        // what is shown; `r` is what is looked up
+        const shown = if (o.mask_controls) utmp.masked(r, &mbuf) else r;
         if (users.len > 0) {
             var wanted = false;
             for (users) |u| {
@@ -140,12 +182,16 @@ pub fn writeShort(
         }
         const info = who.ttyInfo(io, r.line);
         const mesg: u8 = if (!info.exists) '?' else if (info.group_writable) ' ' else '*';
-        const line = if (std.mem.startsWith(u8, r.line, "/dev/")) r.line[5..] else r.line;
-        try w.print("{s:<8}", .{r.user});
+        const line = if (std.mem.startsWith(u8, shown.line, "/dev/")) shown.line[5..] else shown.line;
+        try w.print("{s:<8}", .{shown.user});
         if (o.fullname) {
             if (db.userByName(r.user)) |pw| {
                 const name = realName(&nbuf, pw.gecos, pw.name);
-                try w.print(" {s:<19}", .{name[0..@min(name.len, 19)]});
+                var cut: [19]u8 = undefined;
+                const n = @min(name.len, cut.len);
+                @memcpy(cut[0..n], name[0..n]);
+                if (o.mask_controls) utmp.maskControls(cut[0..n], false);
+                try w.print(" {s:<19}", .{cut[0..n]});
             } else try w.print(" {s:>19}", .{"        ???"});
         }
         try w.print(" {c}{s:<8}", .{ mesg, line });
@@ -154,7 +200,7 @@ pub fn writeShort(
             try w.print(" {s:<6}", .{text});
         }
         try w.print(" {s}", .{who.formatTime(&tbuf, o.style, zone, r.time)});
-        if (o.where and r.host.len > 0) try w.print(" {s}", .{r.host});
+        if (o.where and shown.host.len > 0) try w.print(" {s}", .{shown.host});
         try w.writeByte('\n');
     }
 }

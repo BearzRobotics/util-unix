@@ -80,6 +80,8 @@ pub fn main(ctx: cli.Context) u8 {
 
     o.now = Io.Timestamp.now(ctx.io, .real).toSeconds();
     o.style = uu.who.styleForLocale(cli.getenv(ctx, "LC_ALL"), cli.getenv(ctx, "LC_TIME"), cli.getenv(ctx, "LANG"));
+    // a terminal would obey control characters in what is shown
+    o.mask_controls = Io.File.stdout().isTty(ctx.io) catch false;
     var db = uu.userdb.Db.load(ctx.io, ctx.gpa, .{}) catch {
         cli.warn(ctx, "cannot read the account database", .{});
         return 1;

@@ -56,7 +56,7 @@ Columns: name, optional message status, line, time, optional idle (`.` under a m
 
 # SECURITY CONSIDERATIONS
 
-Host names and user names from the file are shown as they are.
+When standard output is a terminal, control characters in the file's strings are shown as '?'. Otherwise they are written unchanged, as GNU who writes them.
 
 # CONCURRENCY AND ATOMICITY
 
