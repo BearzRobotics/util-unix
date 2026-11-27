@@ -505,6 +505,21 @@ def input_and_history_cases():
     has("huge vi put count", ["set -o vi", "raw:x\x1byy" + "9" * 9 + "pdd", "", ALIVE], ["\nal1ve\n"], ["panic", "not found"])
     has("fc -l with the smallest integer", ["fc -l -9223372036854775808", ALIVE], ["al1ve"], ["panic"])
 
+    # SHI-13: control characters in a file name or a line are shown, not sent
+    d = tempfile.mkdtemp(dir=TMP)
+    for n in ("f\x1b]0;PWNED\x07x", "fz\u009d0;C1\u009c"):
+        open(os.path.join(d, n), "w").close()
+    with Session([SH, "-i"], cwd=d) as s:
+        s.expect(r"\$ ?$"); s.take()
+        s.send("ls f"); s.send("\t\t"); s.settle(.6)
+        listed = s.raw
+        # (completion also puts backslashes in the names it lists)
+        ok("completion list shows control characters", "PWNED^G" in listed and "~]" in listed and "PWNED\x07" not in listed and "\u009d" not in listed and "\u009c" not in listed, repr(listed[-400:]))
+    with Session([SH, "-i"]) as s:
+        s.expect(r"\$ ?$"); s.take()
+        s.send(": \u009b31m"); s.settle(.6)
+        ok("the edited line shows C1 controls", "\u009b" not in s.raw and "~[" in s.raw, repr(s.raw[-200:]))
+
     # SHI-21: an fc that selects itself
     has("fc -s that re-runs itself stops", ["echo a", "fc -s 2", "fc -s 2", ("sleep", .5), ALIVE], ["re-runs itself", "al1ve"])
 

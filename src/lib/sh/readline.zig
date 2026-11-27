@@ -43,6 +43,39 @@ fn charAt(s: []const u8, i: usize) Char {
     return .{ .len = n, .cp = cp, .valid = true };
 }
 
+/// How a control character is shown, in two columns; null for any other. A
+/// file name or a history line may hold one, and written as it is it would
+/// command the terminal. C0 and DEL are "^X"; C1 (U+0080 to U+009F), which a
+/// terminal obeys too, are "~X".
+fn controlPicture(cp: u21) ?[2]u8 {
+    if (cp < 32) return .{ '^', @intCast(cp + '@') };
+    if (cp == 0x7f) return .{ '^', '?' };
+    if (cp >= 0x80 and cp < 0xa0) return .{ '~', @intCast(cp - 0x80 + '@') };
+    return null;
+}
+
+/// `s` as it may be written to a terminal: control characters made visible,
+/// bytes that are not UTF-8 replaced.
+fn showable(a: Allocator, s: []const u8) Allocator.Error![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < s.len) {
+        const ch = charAt(s, i);
+        if (controlPicture(ch.cp)) |picture| {
+            try out.appendSlice(a, &picture);
+        } else try out.appendSlice(a, if (ch.valid) s[i..][0..ch.len] else "\u{fffd}");
+        i += ch.len;
+    }
+    return out.items;
+}
+
+test "control characters are shown, not sent" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const got = try showable(arena.allocator(), "a\x1b]0;t\x07\u{9b}2J\x7f\n\xc3\xa9\xff");
+    try std.testing.expectEqualStrings("a^[]0;t^G~[2J^?^J\xc3\xa9\u{fffd}", got);
+}
+
 // --- terminal abstraction ---------------------------------------------------------
 
 pub const ReadResult = union(enum) {
@@ -601,10 +634,7 @@ pub const Editor = struct {
         while (i < upto and i < s.len) {
             const ch = charAt(s, i);
             const cp = ch.cp;
-            if (cp < 32 and cp != '\n') {
-                self.advance(&p, 'x');
-                self.advance(&p, 'x');
-            } else if (cp == 0x7f) {
+            if (cp != '\n' and controlPicture(cp) != null) {
                 self.advance(&p, 'x');
                 self.advance(&p, 'x');
             } else self.advance(&p, cp);
@@ -634,8 +664,7 @@ pub const Editor = struct {
                 self.out.appendSlice(self.gpa, "\r\n") catch return;
                 p.row += 1;
                 p.col = 0;
-            } else if (cp < 32 or cp == 0x7f) {
-                const vis: [2]u8 = .{ '^', if (cp == 0x7f) '?' else @as(u8, @intCast(cp)) + 64 };
+            } else if (controlPicture(cp)) |vis| {
                 self.advance(&p, 'x');
                 self.out.appendSlice(self.gpa, &vis) catch return;
                 self.advance(&p, 'x');
@@ -674,7 +703,7 @@ pub const Editor = struct {
     /// Cheap path for typing at the end of the line.
     fn appendedAtEnd(self: *Editor, bytes: []const u8, cp: u21) bool {
         if (self.cur != self.buf.items.len or self.searching or self.vi_search_mode) return false;
-        if (cp < 32 or cp == 0x7f) return false;
+        if (controlPicture(cp) != null) return false;
         const end = self.layout(self.displayPrompt(), self.buf.items.len);
         // `bytes` is already appended; the old end is the position before it.
         _ = end;
@@ -1264,7 +1293,11 @@ pub const Editor = struct {
         self.showCandidates(comp.candidates);
     }
 
-    fn showCandidates(self: *Editor, cands: []const []const u8) void {
+    fn showCandidates(self: *Editor, names: []const []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.gpa);
+        defer arena.deinit();
+        const cands = arena.allocator().alloc([]const u8, names.len) catch return;
+        for (cands, names) |*c, name| c.* = showable(arena.allocator(), name) catch return;
         // Finish the edit line, list in columns, redraw below.
         self.cur = self.buf.items.len;
         self.redraw();
