@@ -509,8 +509,13 @@ pub fn waitFg(sh: *Shell, j: *Job) u8 {
         var buf: [96]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "{s}{s}\n", .{ signalText(sig), if (sys.statusCoreDumped(last.status)) " (core dumped)" else "" }) catch "";
         sh.errRaw(msg);
-    } else if (sig == 2 and sh.tty_fd >= 0) sh.errRaw("\n");
+    } else if (sig == 2 and sh.tty_fd >= 0 and !(sh.flags.interactive and sh.traps[2] == null)) sh.errRaw("\n");
+    // With job control the terminal's SIGINT reaches only the job. It was meant
+    // for the commands around it too, so the shell sends it to itself: its trap
+    // runs, a script ends, an interactive shell goes back to its prompt.
+    const interrupted = sig == 2 and j.grouped;
     remove(sh, j);
+    if (interrupted) sys.kill(sys.getpid(), 2) catch {};
     return code;
 }
 

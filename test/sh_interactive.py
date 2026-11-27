@@ -483,6 +483,18 @@ def input_and_history_cases():
         has("^C abandons " + name, [line, ("sleep", .6), "^C", ("sleep", .4), "echo status=$?", ALIVE], ["status=130", "al1ve"], ["NOT-CANCELLED-2"])
     has("^C with an INT trap runs the trap and goes on", ["trap 'echo caught-$((1+1))' INT", "read x; echo after-$?-$((2+2))", ("sleep", .6), "^C", "typed", ALIVE], ["caught-2", "al1ve"])
 
+    # JOB-03: ^C that kills a foreground job stops what surrounds it
+    for name, line in (("the rest of the line", "sleep 5; echo " + NO),
+                       ("a while loop", "while :; do sleep 1; done; echo " + NO),
+                       ("a for loop", "for i in 1 2 3; do sleep 1; echo " + NO + "; done"),
+                       ("an and-list", "sleep 5 || echo " + NO),
+                       ("a command given a substitution", "echo " + NO + " $(sleep 5)")):
+        has("^C on a job abandons " + name, [line, ("sleep", .6), "^C", ("sleep", .4), "echo status=$?", ALIVE], ["status=130", "al1ve"], ["NOT-CANCELLED-2\n"])
+    has("^C on a job runs the INT trap", ["trap 'echo caught-$((1+1))' INT", "sleep 5", ("sleep", .6), "^C", ("sleep", .4), ALIVE], ["caught-2", "al1ve"])
+    with Session([SH, "-c", "set -m; sleep 5; echo NOT-CANCELLED-$((1+1))"]) as s:
+        s.settle(.8); s.send("\x03")
+        ok("^C on a job ends a script with set -m", exit_status(s) in (-2, 130) and "CANCELLED-2" not in s.take())
+
     # SHI-05: ENV may set HISTFILE and HISTSIZE without losing saved history
     def history_after(lines, env_extra, rc):
         d = tempfile.mkdtemp(dir=TMP)
