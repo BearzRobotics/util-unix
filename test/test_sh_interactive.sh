@@ -6,7 +6,7 @@
 # fixed expectations elsewhere. Needs python3 with the pty module; otherwise
 # the suite is skipped (exit 0).
 #
-#   sh test/test_sh_interactive.sh [SECTION...]   (emacs vi jobs fc prompt signals completion paste)
+#   sh test/test_sh_interactive.sh [SECTION...]   (emacs vi jobs fc prompt signals completion paste input; setid needs root)
 UTIL="sh"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OURS="${OURS:-$HERE/../zig-out/bin/sh}"

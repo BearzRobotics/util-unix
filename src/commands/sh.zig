@@ -384,6 +384,8 @@ fn runProfiles(shell: *sh.Shell) void {
     defer arena.deinit();
     const a = arena.allocator();
     if (sh.exec.readFile(a, "/etc/profile")) |t| _ = sh.exec.runSource(shell, t, .{}) catch {};
+    // HOME is the caller's word for where to look: not to be run with other ids
+    if (sh.idsDiffer()) return;
     if (shell.getVar("HOME")) |h| {
         const p = std.fmt.allocPrint(a, "{s}/.profile", .{h}) catch return;
         if (sh.exec.readFile(a, p)) |t| _ = sh.exec.runSource(shell, t, .{}) catch {};

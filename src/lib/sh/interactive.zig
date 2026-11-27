@@ -237,6 +237,8 @@ pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
 /// Source the file named by ENV (after parameter expansion) as POSIX
 /// requires for interactive shells.
 pub fn runEnvFile(sh: *Shell) void {
+    // POSIX: ignored when the real and effective ids differ
+    if (sys.idsDiffer()) return;
     const raw = sh.getVar("ENV") orelse return;
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     defer arena.deinit();
@@ -324,7 +326,7 @@ pub fn loop(s: *Session) u8 {
     // Loaded here, after the ENV file: it may set HISTFILE and HISTSIZE, and
     // the file is rewritten at exit from what was loaded.
     s.hist.setMax(varNum(sh, "HISTSIZE") orelse history.default_size);
-    if (sh.getVar("HISTFILE")) |hf| s.hist.load(hf);
+    if (historyFile(sh)) |hf| s.hist.load(hf);
     while (true) {
         var arena = std.heap.ArenaAllocator.init(sh.gpa);
         defer arena.deinit();
@@ -400,9 +402,16 @@ pub fn loop(s: *Session) u8 {
     }
 }
 
+/// HISTFILE, which like ENV is not used when the real and effective ids differ.
+fn historyFile(sh: *Shell) ?[]const u8 {
+    if (sys.idsDiffer()) return null;
+    const path = sh.getVar("HISTFILE") orelse return null;
+    return if (path.len > 0) path else null;
+}
+
 fn finish(s: *Session) u8 {
     const sh = s.sh;
-    if (sh.getVar("HISTFILE")) |hf| if (hf.len > 0) s.hist.save(hf) catch |e| {
+    if (historyFile(sh)) |hf| s.hist.save(hf) catch |e| {
         sh.diagK(.history_error, null, "cannot save the history to {s}: {s}", .{ hf, switch (e) {
             error.Sys => sys.strerror(sys.errno()),
             error.OutOfMemory => "out of memory",

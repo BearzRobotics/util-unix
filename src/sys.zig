@@ -320,6 +320,14 @@ pub fn getegid() u32 {
     return if (comptime is_linux) linux.getegid() else 0;
 }
 
+/// True when the real and effective user or group ids are not the same: the
+/// process has rights that whoever started it, and set its environment, may
+/// not have.
+pub fn idsDiffer() bool {
+    if (comptime !is_linux) return false;
+    return linux.getuid() != linux.geteuid() or linux.getgid() != linux.getegid();
+}
+
 pub fn getppid() i32 {
     return if (comptime is_linux) @intCast(linux.getppid()) else 0;
 }

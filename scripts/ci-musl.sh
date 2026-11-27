@@ -36,7 +36,7 @@ cp -r /src/build.zig /src/build.zig.zon /src/docs /src/src /src/test /src/tools 
 chown -R tester:tester /work
 
 cd /work
-exec su tester -c '
+su tester -c '
 set -eu
 export ZIG_GLOBAL_CACHE_DIR=/tmp/zig-cache-global
 echo "== native build and unit tests on Alpine $(cat /etc/alpine-release) (musl)"
@@ -44,3 +44,6 @@ echo "== native build and unit tests on Alpine $(cat /etc/alpine-release) (musl)
 /zig/zig build test --summary all
 env -u NO_COLOR TERM=xterm LANG=C.UTF-8 UU_REQUIRE_SANDBOX=1 UU_NO_REFERENCE="getent groups hostname who" \
     sh test/run_all_tests.sh'
+
+echo "== sh with differing real and effective ids (needs root)"
+python3 test/sh_interactive.py /work/zig-out/bin/sh setid

@@ -124,7 +124,7 @@ Tab completion completes, at the cursor: a word starting with **$** as a variabl
 
 # HISTORY
 
-An interactive shell keeps the commands it ran (as typed, a multi-line command as one entry) in a list of **HISTSIZE** entries (default 128) numbered upwards. If **HISTFILE** is set the list is read from that file at start-up and saved at exit (no default file). Saving rereads the file under a lock, adds the commands of this session, so that shells sharing a file keep each other's, and replaces it in one step with a file readable by its owner only; a symbolic link stays and its target is replaced. HISTFILE must be a regular file (/dev/null, or another character device, saves nothing), and a failure to save is reported. **fc** lists, edits and re-runs entries:
+An interactive shell keeps the commands it ran (as typed, a multi-line command as one entry) in a list of **HISTSIZE** entries (default 128) numbered upwards. If **HISTFILE** is set the list is read from that file at start-up and saved at exit (no default file). Saving rereads the file under a lock, adds the commands of this session, so that shells sharing a file keep each other's, and replaces it in one step with a file readable by its owner only; a symbolic link stays and its target is replaced. HISTFILE must be a regular file (/dev/null, or another character device, saves nothing), and a failure to save is reported. When the real and effective user or group ids differ, ENV (as POSIX requires), $HOME/.profile and HISTFILE are ignored; /etc/profile is still read by a login shell, and the shell does not give up the effective ids. **fc** lists, edits and re-runs entries:
 
     fc [-r] [-e editor] [first [last]]
     fc -l [-nr] [first [last]]

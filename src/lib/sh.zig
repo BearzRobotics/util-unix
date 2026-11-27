@@ -32,6 +32,10 @@ pub const completion = @import("sh/completion.zig");
 pub const interactive = @import("sh/interactive.zig");
 pub const readline = @import("sh/readline.zig");
 
+/// True when the process's real and effective ids differ: its user's startup
+/// files are then not to be run.
+pub const idsDiffer = @import("../sys.zig").idsDiffer;
+
 pub const Shell = shell.Shell;
 pub const Env = shell.Env;
 pub const Options = shell.Options;
