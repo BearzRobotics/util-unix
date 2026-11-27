@@ -36,6 +36,8 @@ pub const Evaluator = struct {
     /// Non-zero while evaluating an operand that is skipped (`&&`, `||`,
     /// `?:`): no side effects and no division errors.
     skip: u32 = 0,
+    /// Recursion depth: two per parenthesis, one per unary or assignment.
+    nest: u32 = 0,
     msg_buf: [200]u8 = undefined,
     msg_len: usize = 0,
     /// Catalog kind and subject of the failure.
@@ -152,7 +154,18 @@ pub const Evaluator = struct {
 
     // --- grammar ---
 
+    /// An expression can be built from data, so its depth must not be able to
+    /// overflow the stack.
+    const max_nesting = 2500;
+
+    fn enter(self: *Evaluator) Error!void {
+        if (self.nest >= max_nesting) return self.failExpr("nesting too deep");
+        self.nest += 1;
+    }
+
     fn assignment(self: *Evaluator) Error!i64 {
+        try self.enter();
+        defer self.nest -= 1;
         if (self.tok == .name) {
             const save_pos = self.pos;
             const save_tok = self.tok;
@@ -263,6 +276,8 @@ pub const Evaluator = struct {
     }
 
     fn unary(self: *Evaluator) Error!i64 {
+        try self.enter();
+        defer self.nest -= 1;
         if (self.tok == .op) {
             const o = self.tok.op;
             if (std.mem.eql(u8, o, "-")) {

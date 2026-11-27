@@ -209,3 +209,27 @@ test "fc re-runs its own copy of a history line" {
     _ = try s.runString("exec 3>&2 2>/dev/null; fc -s 1; exec 2>&3 3>&-");
     try std.testing.expectEqualStrings("first-entry", seen.text[0..seen.len]);
 }
+
+test "input nested too deeply is an error, not a crash" {
+    const std = @import("std");
+    const t = std.testing;
+    const gpa = t.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_][3][]const u8{
+        .{ "{ ", "echo 1", "; }" },
+        .{ "( ", "echo 1", " )" },
+        .{ "if :; then ", "echo 1", "; fi" },
+        .{ "echo $( ", "echo 1", " )" },
+        .{ "${x-", "1", "}" },
+    }) |kind| {
+        var src: std.ArrayList(u8) = .empty;
+        for (0..100_000) |_| try src.appendSlice(a, kind[0]);
+        try src.appendSlice(a, kind[1]);
+        for (0..100_000) |_| try src.appendSlice(a, kind[2]);
+        var d: parser.Diag = .{};
+        try t.expectError(error.Syntax, parser.parseProgram(gpa, src.items, &d));
+        try t.expectEqualStrings("Syntax error: nesting too deep", d.message());
+    }
+}

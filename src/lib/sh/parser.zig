@@ -149,6 +149,18 @@ pub const Parser = struct {
     blank_marks: std.ArrayList(usize) = .empty,
     /// A line number offset for sub-parsers.
     depth: u32 = 0,
+    /// Commands and `$` expansions the one being read is inside.
+    nest: u32 = 0,
+
+    /// The parser, and all that walks its tree, recurse once per level. Input
+    /// nested deeper than this is refused rather than left to overflow the
+    /// stack.
+    pub const max_nesting = 2000;
+
+    fn enter(self: *Parser) Error!void {
+        if (self.nest >= max_nesting) return self.fail("Syntax error: nesting too deep", .{});
+        self.nest += 1;
+    }
 
     pub fn init(a: Allocator, src: []const u8, diag: *Diag) Parser {
         return .{ .a = a, .src = src, .diag = diag };
@@ -536,6 +548,8 @@ pub const Parser = struct {
     }
 
     fn scanDollar(self: *Parser, b: *Builder, ctx: ScanCtx, in_dq: bool) Error!void {
+        try self.enter();
+        defer self.nest -= 1;
         const a = self.a;
         const n = self.look(1) orelse {
             try b.lit(a, '$', in_dq);
@@ -817,6 +831,7 @@ pub const Parser = struct {
         sub.aliases = self.aliases;
         sub.line = self.line;
         sub.depth = self.depth + 1;
+        sub.nest = self.nest;
         var inner: Builder = .{};
         try sub.scanParts(&inner, .text, true);
         const expr = try inner.finish(self.a);
@@ -893,6 +908,7 @@ pub const Parser = struct {
         sub.aliases = self.aliases;
         sub.line = self.line;
         sub.depth = self.depth + 1;
+        sub.nest = self.nest;
         const body = try sub.parseList(.compound);
         const t = try sub.next();
         if (t.tag != .eof) return sub.unexpected(t, null);
@@ -931,6 +947,7 @@ pub const Parser = struct {
                 sub.aliases = self.aliases;
                 sub.line = self.line;
                 sub.depth = self.depth + 1;
+                sub.nest = self.nest;
                 var inner: Builder = .{};
                 try sub.scanParts(&inner, .text, true);
                 h.redir.body = try inner.finish(a);
@@ -1221,6 +1238,8 @@ pub const Parser = struct {
     }
 
     fn parseCommand(self: *Parser) Error!*const Node {
+        try self.enter();
+        defer self.nest -= 1;
         try self.maybeAlias();
         const t = try self.peek();
         switch (t.tag) {

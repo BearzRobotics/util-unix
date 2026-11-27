@@ -517,6 +517,9 @@ c "shift all" 'set -- a b; shift 2; echo $#' B
 # a long message is printed, not dropped
 c "a long \${name?message} is printed whole" 'm=$(printf "%03000d" 0); (: ${nope?$m}) 2>&1 | grep -c "nope: 0\{255\}"; (: ${nope?$m}) 2>&1 | wc -l' P
 c "an arithmetic error about a long value is not empty" 'x=$(printf "%0300d" 0 | tr 0 z); (echo $((x))) 2>&1 | grep -c zzzzzzzzzz' Pe
+c "moderately deep nesting works" 'p=; q=; i=0; while [ $i -lt 200 ]; do p="$p("; q="$q)"; i=$((i+1)); done; e="${p}1$q"; echo $(($e)); p=; q=; i=0; while [ $i -lt 200 ]; do p="$p{ "; q="$q; }"; i=$((i+1)); done; eval "${p}echo ok$q"'
+c "arithmetic nested past the limit is an error, not a crash" 'v=$(printf "%010000d" 0 | tr 0 "("); e="$v 1"; (echo $(($e))) 2>/dev/null; echo $?' e
+c "commands nested past the limit are an error, not a crash" 'v=$(printf "%020000d" 0 | tr 0 "("); (eval "$v :") 2>/dev/null; echo $?' Pe
 # numbers are digits: no "_" separators
 c "test rejects an underscore in a number" 'test 1_0 -eq 10 2>/dev/null; echo $?'
 c "shift rejects an underscore in a number" '(set -- a b c; shift 0_1) 2>/dev/null; echo $?' e
