@@ -117,5 +117,25 @@ for o in --help=1 --usage=1 --version=1; do
     if [ "$rc" = 64 ]; then PASS=$((PASS + 1)); echo "PASS no value for $o"
     else FAIL=$((FAIL + 1)); echo "FAIL no value for $o (exit $rc)"; fi
 done
+# a made-up /etc/aliases, compared inside a private /etc. (No doubled commas:
+# glibc never returns from those.)
+if command -v bwrap > /dev/null 2>&1 && bwrap --ro-bind / / true 2> /dev/null && ldd --version 2>&1 | grep -qi 'glibc\|gnu'; then
+    al="$(mktemp -d)"; echo 'aliases: files' > "$al/nsswitch.conf"
+    printf '# c\n  indented, two words\nthree\n\n:include:/nonexistent\n' > "$al/list"; : > "$al/empty"
+    printf '%s\n' '# comment' 'postmaster: root' 'team: alice,' '  bob,' '	carol' 'q: "|/bin/prog a b", other' \
+        "inc: :include:$al/list, tail" 'miss: :include:/nonexistent' 'after: x # y' 'continued: a' '# between' '  b' \
+        'blank: a' '' '  b' 'empty:' '  late' 'nothing:' 'z:  a b , c  ' 'UPPER: z' 'nocolon' \
+        'a-very-long-alias-name-beyond-sixteen: v' "none: :include:$al/empty, y" > "$al/aliases"
+    in_al() { timeout -s KILL 10 bwrap --die-with-parent --ro-bind / / --tmpfs /etc --ro-bind "$al/aliases" /etc/aliases \
+        --ro-bind "$al/nsswitch.conf" /etc/nsswitch.conf "$@" 2>&1; echo "rc=$?"; }
+    for k in "" team q inc miss after continued blank empty nothing z upper a-very-long-alias-name-beyond-sixteen none nosuch; do
+        x="$(in_al /usr/bin/getent aliases ${k:+"$k"})"; y="$(in_al "$BIN_DIR/getent" aliases ${k:+"$k"})"
+        if [ "$x" = "$y" ]; then PASS=$((PASS + 1)); echo "PASS aliases '$k'"
+        else FAIL=$((FAIL + 1)); echo "FAIL aliases '$k'"; echo "     GNU : $x"; echo "     OURS: $y"; fi
+    done
+else
+    skip_test "aliases comparison needs bwrap and glibc"
+fi
+
 print_summary
 [ "$FAIL" -eq 0 ]

@@ -156,7 +156,7 @@ pub fn query(io: Io, gpa: Allocator, db: Database, key: ?[]const u8, opts: Optio
         // Without a key glibc lists the hosts file like `hosts` does.
         .ahosts, .ahostsv4, .ahostsv6 => any = if (key) |k| try addrinfo(&lines, k, db, w) else try hosts(&lines, null, w),
         .ethers => any = try ethers(&lines, key, w),
-        .aliases => any = try aliases(&lines, key, w),
+        .aliases => any = try aliases(io, gpa, opts.dir orelse Io.Dir.cwd(), &lines, key, w),
         .initgroups => any = try initgroups(text, key.?, w),
         .netgroup => unreachable,
     }
@@ -585,27 +585,89 @@ fn ethers(lines: *std.mem.SplitIterator(u8, .scalar), key: ?[]const u8, w: *Io.W
     return any;
 }
 
-fn aliases(lines: *std.mem.SplitIterator(u8, .scalar), key: ?[]const u8, w: *Io.Writer) !bool {
+/// aliases(5) as glibc's files backend reads it. An entry is "name: member,
+/// ..." and goes on over lines that begin with a blank; a comment or an empty
+/// line ends it. A member ":include:FILE" stands for the members listed in
+/// FILE (one level), and an entry whose file cannot be read is left out. An
+/// entry without members is not listed. (Where there are two commas in a row
+/// glibc 2.43 never returns; the empty member is skipped here.)
+fn aliases(io: Io, gpa: Allocator, dir: Io.Dir, lines: *std.mem.SplitIterator(u8, .scalar), key: ?[]const u8, w: *Io.Writer) !bool {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
     var any = false;
-    while (lines.next()) |raw| {
-        const line = stripComment(raw);
-        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
-        const name = std.mem.trim(u8, line[0..colon], " \t");
+    var pending: ?[]const u8 = null; // a line that starts the next entry
+    while (true) {
+        _ = arena.reset(.retain_capacity);
+        const a = arena.allocator();
+        const first = stripAliasComment(pending orelse lines.next() orelse break);
+        pending = null;
+        const colon = std.mem.indexOfScalar(u8, first, ':') orelse continue;
+        const name = std.mem.trim(u8, first[0..colon], " \t");
         if (name.len == 0) continue;
+        var parts: std.ArrayList([]const u8) = .empty;
+        try parts.append(a, first[colon + 1 ..]);
+        while (lines.next()) |raw| {
+            const line = stripAliasComment(raw);
+            if (line.len > 0 and (line[0] == ' ' or line[0] == '\t')) {
+                try parts.append(a, line);
+            } else {
+                // an entry of its own; a comment or an empty line is nothing
+                if (line.len > 0) pending = raw;
+                break;
+            }
+        }
         if (key) |k| if (!std.ascii.eqlIgnoreCase(name, k)) continue;
+
+        var members: std.ArrayList([]const u8) = .empty;
+        const complete = for (parts.items) |part| {
+            if (!try addMembers(io, a, dir, &members, part, true)) break false;
+        } else true;
+        if (!complete or members.items.len == 0) continue;
         try w.print("{s}: ", .{name});
-        var members = std.mem.tokenizeAny(u8, line[colon + 1 ..], ", \t");
-        var first = true;
-        while (members.next()) |m| {
-            if (!first) try w.writeAll(", ");
+        // glibc's getent pads short names to a column
+        if (name.len < 14) try w.splatByteAll(' ', 14 - name.len);
+        for (members.items, 0..) |m, n| {
+            if (n > 0) try w.writeAll(", ");
             try w.writeAll(m);
-            first = false;
         }
         try w.writeByte('\n');
         any = true;
         if (key != null) break;
     }
     return any;
+}
+
+fn stripAliasComment(line: []const u8) []const u8 {
+    return std.mem.trimEnd(u8, line[0 .. std.mem.indexOfScalar(u8, line, '#') orelse line.len], "\r");
+}
+
+/// Add the members of one line: separated by commas outside double quotes,
+/// without the blanks before each. With `expand`, ":include:FILE" is replaced
+/// by FILE's members; false when that file cannot be read.
+fn addMembers(io: Io, a: Allocator, dir: Io.Dir, out: *std.ArrayList([]const u8), text: []const u8, expand: bool) Error!bool {
+    var start: usize = 0;
+    var quoted = false;
+    var i: usize = 0;
+    while (i <= text.len) : (i += 1) {
+        if (i < text.len) {
+            if (text[i] == '"') quoted = !quoted;
+            if (text[i] != ',' or quoted) continue;
+        }
+        const member = std.mem.trimStart(u8, text[start..i], " \t");
+        start = i + 1;
+        if (member.len == 0) continue;
+        const prefix = ":include:";
+        if (expand and std.mem.startsWith(u8, member, prefix)) {
+            const path = std.mem.trim(u8, member[prefix.len..], " \t");
+            const file = dir.readFileAlloc(io, path, a, .limited(max_file_bytes)) catch |err| switch (err) {
+                error.OutOfMemory, error.Canceled => |e| return e,
+                else => return false,
+            };
+            var lines = std.mem.splitScalar(u8, file, '\n');
+            while (lines.next()) |line| _ = try addMembers(io, a, dir, out, stripAliasComment(line), false);
+        } else try out.append(a, member);
+    }
+    return true;
 }
 
 // -- initgroups -----------------------------------------------------------------
@@ -733,4 +795,23 @@ test "netgroup and missing files" {
     defer aw.deinit();
     const r = try query(testing.io, testing.allocator, .passwd, "root", .{ .path = "absent", .dir = tmp.dir }, &aw.writer);
     try testing.expectEqual(Outcome.not_found, r);
+}
+
+test "aliases: continuation lines, quotes and the column, as glibc" {
+    const file =
+        "# c\n" ++
+        "team: alice,\n  bob,\n\tcarol\n" ++
+        "q: \"|/bin/prog a,b\", other\n" ++
+        "no members:\n" ++
+        "broken: a\n# ends it\n  b\n" ++
+        "twice: a,,b,\n" ++
+        "lost: :include:no-such-file\n";
+    try expectQuery(.aliases, "team", file, .found, "team:           alice, bob, carol\n");
+    try expectQuery(.aliases, "Q", file, .found, "q:              \"|/bin/prog a,b\", other\n");
+    try expectQuery(.aliases, "broken", file, .found, "broken:         a\n");
+    try expectQuery(.aliases, "twice", file, .found, "twice:          a, b\n");
+    try expectQuery(.aliases, "no members", file, .not_found, "");
+    try expectQuery(.aliases, "lost", file, .not_found, "");
+    // expectQuery's file is "data": including it from itself goes one level
+    try expectQuery(.aliases, "self", "x\nself: :include:data\n", .found, "self:           x, self: :include:data\n");
 }

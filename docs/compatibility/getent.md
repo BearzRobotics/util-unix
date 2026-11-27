@@ -27,6 +27,8 @@ Lookups by name or number in the files backend for every database listed in `get
 3. **Shadow databases** read as empty for an unprivileged user, as glibc's files backend does.
 4. **Numbers too large for an id** (`passwd 4294967296`) are not found. glibc 2.43 wraps them, so that key prints root's entry. As in glibc, a passwd, group or services key is a number only when it is all digits, after optional blanks and "+"; "-0", which glibc reads as 0, is looked up as a name here.
 
+**aliases** is read as glibc's files backend reads it (continuation lines, one level of `:include:`, glibc's column), except that where an entry has two commas in a row glibc 2.43 never returns, and the empty member is skipped here.
+
 ## Platforms
 
 Linux only so far (tested on 6.18, WSL2, against the reference binary named
