@@ -55,4 +55,8 @@ run_full "full disk" root
 POSIXLY_CORRECT=1; export POSIXLY_CORRECT
 run_cmp "POSIXLY_CORRECT: no options after an operand" root -u
 unset POSIXLY_CORRECT
+for o in -Gz -Gnz -Grz -uz -gz; do
+    run_cmp "$o with two users"       $o root nobody
+done
+run_cmp "-Gz with one user"            -Gz root
 print_summary

@@ -337,6 +337,8 @@ const speed_table = [_]struct { baud: u32, code: u32 }{
 /// "134.5". Null when it is not a speed the kernel interface knows.
 pub fn speedCode(text: []const u8) ?u32 {
     if (std.mem.eql(u8, text, "134.5")) return 0o4;
+    // parseInt would take a sign
+    if (text.len == 0 or !std.ascii.isDigit(text[0])) return null;
     const n = num.parseInt(u32, text, 10) catch return null;
     for (speed_table) |s| if (s.baud == n) return s.code;
     return null;

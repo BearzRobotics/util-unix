@@ -143,6 +143,8 @@ pub fn main(ctx: cli.Context) u8 {
         if (as_json) {
             uu.identity.writeJson(w, &db, ids) catch return cli.outputFailed(ctx, &stdout, 1);
         } else if (!(uu.identity.write(w, &db, opts, ids) catch return cli.outputFailed(ctx, &stdout, 1))) status = 1;
+        // with -Gz an empty entry ends each user's list, as in GNU
+        if (opts.which == .groups and opts.zero and users.items.len > 1 and !as_json) w.writeByte(0) catch return cli.outputFailed(ctx, &stdout, 1);
     }
     w.flush() catch return cli.outputFailed(ctx, &stdout, 1);
     return status;

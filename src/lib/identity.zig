@@ -51,8 +51,9 @@ pub const Options = struct {
     unnamed: ?Unnamed = null,
 };
 
-/// The ids to describe. `groups` are supplementary groups in any order; the
-/// primary group is placed first and not repeated.
+/// The ids to describe. `groups` are supplementary groups in any order. A list
+/// of groups begins with the real group, then the effective one if it differs,
+/// and repeats neither.
 pub const Ids = struct {
     uid: u32,
     euid: u32,
@@ -99,12 +100,16 @@ pub fn write(w: *Io.Writer, db: *const userdb.Db, opts: Options, ids: Ids) Io.Wr
             return ok;
         },
         .groups => {
-            // The primary group first, then the others without repeating it.
-            const primary = if (opts.real) ids.gid else ids.egid;
+            // As GNU: the real group, then the effective one if it differs,
+            // then the others without repeating either.
             const sep: u8 = if (opts.zero) 0 else ' ';
-            var ok = try writeOne(w, db, opts, .group, primary);
+            var ok = try writeOne(w, db, opts, .group, ids.gid);
+            if (ids.egid != ids.gid) {
+                try w.writeByte(sep);
+                ok = (try writeOne(w, db, opts, .group, ids.egid)) and ok;
+            }
             for (ids.groups) |g| {
-                if (g == primary) continue;
+                if (g == ids.gid or g == ids.egid) continue;
                 try w.writeByte(sep);
                 ok = (try writeOne(w, db, opts, .group, g)) and ok;
             }
@@ -227,8 +232,9 @@ test "-u -g -G with -n -r -z" {
     try expectWrite(.{ .which = .user }, ids, "0\n", true);
     try expectWrite(.{ .which = .user, .real = true, .names = true }, ids, "alice\n", true);
     try expectWrite(.{ .which = .group, .names = true }, ids, "root\n", true);
-    try expectWrite(.{ .which = .groups, .names = true }, ids, "root staff\n", true);
-    try expectWrite(.{ .which = .groups, .zero = true }, ids, "0\x0050\x00", true);
+    // the real group, then the effective one, as GNU
+    try expectWrite(.{ .which = .groups, .names = true }, ids, "alice root staff\n", true);
+    try expectWrite(.{ .which = .groups, .zero = true }, ids, "1000\x000\x0050\x00", true);
 }
 
 test "an unnamed id is printed as a number, reported, and makes the result false" {

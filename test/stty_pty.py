@@ -135,6 +135,10 @@ case("-raw after raw", ["raw"], ["-raw"], [], ["-a"])
 other = ["intr", "^X", "eof", "^Y", "eol", "^Z", "min", "5", "time", "7", "iutf8", "ixany", "-brkint", "inlcr", "-echo"]
 for c in combos + ["-" + x for x in ("raw", "cooked", "cbreak", "nl", "evenp", "pass8", "litout", "decctlq", "lcase")] + ["lcase"]:
     case("custom settings, then " + c, other, [c], [], ["-a"])
+for words in (["rows", "40", "size"], ["cols", "100", "size"], ["size", "rows", "40", "size"], ["rows", "30", "size", "cols", "90", "size"]):
+    case(" ".join(words), words)
+for words in (["cols", "4294967296"], ["rows", "4294967295"], ["rows", "2147483648"], ["rows", "2147483647", "size"], ["cols", "65537", "size"], ["+9600"], ["ispeed", "+9600"], ["ospeed", "96_00"], ["96_00"]):
+    case(" ".join(words), words)
 case("custom settings, raw and back", other, ["raw"], ["-raw"], [], ["-a"])
 case("eof undef, then cooked", ["eof", "undef"], ["cooked"], [], ["-a"])
 for c in chars:

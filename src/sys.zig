@@ -527,7 +527,8 @@ pub fn listDir(gpa: std.mem.Allocator, path: []const u8, out: *std.ArrayList([]u
         if (n == 0) break;
         var off: usize = 0;
         while (off < n) {
-            const reclen = std.mem.readInt(u16, buf[off + 16 ..][0..2], .little);
+            // the kernel writes it in the processor's own byte order
+            const reclen = std.mem.readInt(u16, buf[off + 16 ..][0..2], builtin.cpu.arch.endian());
             const name_z = buf[off + 19 .. off + reclen];
             const name = name_z[0..std.mem.indexOfScalar(u8, name_z, 0).?];
             off += reclen;

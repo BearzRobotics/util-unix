@@ -171,8 +171,6 @@ pub fn main(ctx: cli.Context) u8 {
     }
 
     var need_set = false;
-    var new_rows: ?u16 = null;
-    var new_cols: ?u16 = null;
     for (ops.items) |op| switch (op) {
         .mode => |m| {
             st.applyMode(&term, m.mode.*, m.reversed);
@@ -207,8 +205,9 @@ pub fn main(ctx: cli.Context) u8 {
             need_set = true;
         },
         .noop => {},
-        .rows => |n| new_rows = n,
-        .cols => |n| new_cols = n,
+        // at once, so that a later "size" shows it
+        .rows => |n| if (setSize(ctx, name, fd, n, null)) |status| return status,
+        .cols => |n| if (setSize(ctx, name, fd, null, n)) |status| return status,
         .restore => |text| {
             term = st.parseSave(term, text).?;
             need_set = true;
@@ -225,13 +224,6 @@ pub fn main(ctx: cli.Context) u8 {
             } else out.print("{d} {d}\n", .{ i_speed, o_speed }) catch return cli.outputFailed(ctx, &ow, 1);
         },
     };
-
-    if (new_rows != null or new_cols != null) {
-        var ws = st.getWinSize(fd) catch |e| return deviceError(ctx, name, e);
-        if (new_rows) |r| ws.rows = r;
-        if (new_cols) |c| ws.cols = c;
-        st.setWinSize(fd, &ws) catch |e| return deviceError(ctx, name, e);
-    }
 
     if (need_set) {
         st.setTermios(fd, &term, .drain) catch |e| return deviceError(ctx, name, e);
@@ -323,8 +315,8 @@ fn parseSettings(ctx: cli.Context, items: []const []const u8, ops: *std.ArrayLis
                 if (k + 1 >= items.len) return missingArgument(ctx, arg);
                 k += 1;
                 const n = st.parseUnsigned(items[k]) catch |e| return badInteger(ctx, items[k], e);
-                // The kernel field is 16 bits wide and GNU stores the number
-                // there without a range check.
+                // GNU takes any int and stores it in the kernel's 16-bit field.
+                if (n > std.math.maxInt(i32)) return badInteger(ctx, items[k], error.OutOfRange);
                 const v: u16 = @truncate(n);
                 break :op if (eql(u8, arg, "rows")) .{ .rows = v } else .{ .cols = v };
             }
@@ -340,6 +332,15 @@ fn parseSettings(ctx: cli.Context, items: []const []const u8, ops: *std.ArrayLis
         };
     }
     return true;
+}
+
+/// Change the window size; the exit status when that fails.
+fn setSize(ctx: cli.Context, name: []const u8, fd: i32, rows: ?u16, cols: ?u16) ?u8 {
+    var ws = st.getWinSize(fd) catch |e| return deviceError(ctx, name, e);
+    if (rows) |r| ws.rows = r;
+    if (cols) |c| ws.cols = c;
+    st.setWinSize(fd, &ws) catch |e| return deviceError(ctx, name, e);
+    return null;
 }
 
 fn oneDevice(ctx: cli.Context) u8 {
