@@ -22,6 +22,24 @@ const is_linux = builtin.os.tag == .linux;
 /// Longest host name the Linux kernel accepts (HOST_NAME_MAX, not counting the NUL).
 pub const max_len = 64;
 
+/// A name hostname(1) accepts: letters, digits, '-' and '.', where no part
+/// between dots is empty or begins or ends with '-'. (The kernel takes any
+/// bytes, which then reach prompts and logs.) The length is the kernel's to
+/// judge.
+pub fn valid(name: []const u8) bool {
+    var labels = std.mem.splitScalar(u8, name, '.');
+    while (labels.next()) |label| {
+        if (label.len == 0 or label[0] == '-' or label[label.len - 1] == '-') return false;
+        for (label) |c| if (!std.ascii.isAlphanumeric(c) and c != '-') return false;
+    }
+    return true;
+}
+
+test "the names hostname 3.25 accepts" {
+    for ([_][]const u8{ "a", "1", "123", "a-b.c-d" }) |n| try std.testing.expect(valid(n));
+    for ([_][]const u8{ "", "-a", "a-", ".a", "a.", "a..b", "a.-b", "a-.b", "a_b", "a b", "-x", "a\x1b[31m", "\xc3\xa9" }) |n| try std.testing.expect(!valid(n));
+}
+
 pub const SetError = error{ PermissionDenied, NameTooLong, Unexpected, Unsupported };
 
 /// Set the host name with sethostname(2). Needs CAP_SYS_ADMIN in the UTS

@@ -81,8 +81,6 @@ pub const Options = struct {
     path: ?[]const u8 = null,
     /// Directory that relative `path`s are resolved against; null is cwd.
     dir: ?Io.Dir = null,
-    /// For `initgroups`: the passwd file used to find the user.
-    passwd_path: []const u8 = "/etc/passwd",
 };
 
 pub const Error = error{ OutOfMemory, WriteFailed } || Io.Dir.ReadFileAllocError;
@@ -159,7 +157,7 @@ pub fn query(io: Io, gpa: Allocator, db: Database, key: ?[]const u8, opts: Optio
         .ahosts, .ahostsv4, .ahostsv6 => any = if (key) |k| try addrinfo(&lines, k, db, w) else try hosts(&lines, null, w),
         .ethers => any = try ethers(&lines, key, w),
         .aliases => any = try aliases(&lines, key, w),
-        .initgroups => any = try initgroups(io, gpa, opts, opts.dir orelse Io.Dir.cwd(), text, key.?, w),
+        .initgroups => any = try initgroups(text, key.?, w),
         .netgroup => unreachable,
     }
     return if (any) .found else .not_found;
@@ -615,18 +613,9 @@ fn aliases(lines: *std.mem.SplitIterator(u8, .scalar), key: ?[]const u8, w: *Io.
 /// `getent initgroups USER`: the groups USER is a listed member of, in group
 /// file order, after the user name padded to 21 columns. glibc leaves the
 /// user's primary group out of this list, and so do we.
-fn initgroups(io: Io, gpa: Allocator, opts: Options, dir: Io.Dir, group_text: []const u8, user: []const u8, w: *Io.Writer) !bool {
-    const passwd_text = try readFile(io, gpa, dir, opts.passwd_path);
-    defer gpa.free(passwd_text);
-    var known = false;
-    var pl = std.mem.splitScalar(u8, passwd_text, '\n');
-    while (pl.next()) |line| if (userdb.parsePasswd(line)) |e| {
-        if (std.mem.eql(u8, e.name, user)) {
-            known = true;
-            break;
-        }
-    };
-    // glibc answers for unknown users too (with no groups).
+fn initgroups(group_text: []const u8, user: []const u8, w: *Io.Writer) !bool {
+    // Whether or not USER is in the passwd file, as for glibc: a deleted
+    // account's memberships show.
     try w.print("{s:<21}", .{user});
     var gl = std.mem.splitScalar(u8, group_text, '\n');
     while (gl.next()) |line| {
@@ -635,7 +624,7 @@ fn initgroups(io: Io, gpa: Allocator, opts: Options, dir: Io.Dir, group_text: []
         const member = while (members.next()) |m| {
             if (std.mem.eql(u8, m, user)) break true;
         } else false;
-        if (!member or !known) continue;
+        if (!member) continue;
         try w.print(" {d}", .{g.gid});
     }
     try w.writeByte('\n');
@@ -650,10 +639,9 @@ fn runQuery(db: Database, key: ?[]const u8, text: []const u8, out: *std.ArrayLis
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "data", .data = text });
-    try tmp.dir.writeFile(testing.io, .{ .sub_path = "passwd", .data = "alice:x:1000:1000::/h:/bin/sh\nbob:x:1001:1001::/h:/bin/sh\n" });
     var aw: Io.Writer.Allocating = .init(testing.allocator);
     defer aw.deinit();
-    const r = try query(testing.io, testing.allocator, db, key, .{ .path = "data", .dir = tmp.dir, .passwd_path = "passwd" }, &aw.writer);
+    const r = try query(testing.io, testing.allocator, db, key, .{ .path = "data", .dir = tmp.dir }, &aw.writer);
     try out.appendSlice(testing.allocator, aw.written());
     return r;
 }
@@ -725,6 +713,7 @@ test "IPv6 formatting follows RFC 5952" {
 test "initgroups lists memberships without the primary group" {
     try expectQuery(.initgroups, "alice", "adm:x:4:alice,bob\nalice:x:1000:\nusers:x:100:alice\n", .found, "alice                 4 100\n");
     try expectQuery(.initgroups, "nosuch", "adm:x:4:alice\n", .found, "nosuch               \n");
+    try expectQuery(.initgroups, "ghost", "adm:x:4:ghost\nlp:x:7:ghost,root\n", .found, "ghost                 4 7\n");
     try expectQuery(.initgroups, null, "", .enumeration_unsupported, "");
 }
 

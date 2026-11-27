@@ -53,6 +53,7 @@ pub fn main(ctx: cli.Context) u8 {
                 0 => seen_all = true,
                 1 => seen_save = true,
                 2 => {
+                    if (device != null) return oneDevice(ctx);
                     if (eq) |e| {
                         device = a[e + 1 ..];
                     } else if (i + 1 < ctx.args.len) {
@@ -90,6 +91,7 @@ pub fn main(ctx: cli.Context) u8 {
                 'a' => seen_all = true,
                 'g' => seen_save = true,
                 else => { // 'F': the rest of the argument, or the next one
+                    if (device != null) return oneDevice(ctx);
                     if (j + 1 < a.len) {
                         device = a[j + 1 ..];
                     } else {
@@ -338,6 +340,11 @@ fn parseSettings(ctx: cli.Context, items: []const []const u8, ops: *std.ArrayLis
         };
     }
     return true;
+}
+
+fn oneDevice(ctx: cli.Context) u8 {
+    cli.warn(ctx, "only one device may be specified", .{});
+    return 1;
 }
 
 fn finish(ctx: cli.Context, w: *Io.File.Writer) u8 {

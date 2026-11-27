@@ -43,6 +43,16 @@ open(sys.argv[1], "wb").write(
 PY
 check "who --json parses, escapes and repairs bytes" \
     "$BIN/who --json -u $d/utmp | python3 -c 'import json,sys;r=json.load(sys.stdin);assert [x[\"user\"] for x in r]==[\"al\\\"ice\",\"bob\"];assert r[0][\"host\"]==\"h�ost\";assert r[0][\"time\"]==200'"
+python3 - "$d/levels" <<'PY'
+import struct, sys
+def rec(pid):
+    b = bytearray(384)
+    struct.pack_into("<hxx", b, 0, 1); struct.pack_into("<i", b, 4, pid)
+    return bytes(b)
+open(sys.argv[1], "wb").write(rec(0) + rec(34) + rec(255) + rec(ord("5") | ord("S") << 8))
+PY
+check "who --json: run levels of any bytes still parse" \
+    "$BIN/who --json -r $d/levels | python3 -c 'import json,sys;r=json.load(sys.stdin);assert [x[\"runlevel\"] for x in r]==[None,chr(34),chr(0xfffd),\"5\"];assert r[3][\"previous\"]==\"S\" and r[0][\"previous\"] is None'"
 check "who --json -b selects the boot record" \
     "[ \"\$($BIN/who --json -b $d/utmp | python3 -c 'import json,sys;print(json.load(sys.stdin)[0][\"type\"])')\" = boot ]"
 check "who --json -q" \

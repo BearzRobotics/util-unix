@@ -44,4 +44,6 @@ g="$(gnu --help | sed 's#/usr/bin/stty#stty#g' | sed '/^GNU coreutils online hel
 o="$(ours --help | sed 's#^\(Usage: \|  or:  \)[^ ]*stty#\1stty#')"
 if [ "$g" = "$o" ]; then PASS=$((PASS + 1)); echo "PASS --help"; else FAIL=$((FAIL + 1)); echo "FAIL --help"; fi
 run_full "--help, full disk" --help
+run_cmp "two devices"            -F /dev/null -F /dev/null -echo
+run_cmp "two devices, attached"  -F/dev/null --file=/dev/null
 print_summary

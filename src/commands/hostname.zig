@@ -166,6 +166,11 @@ fn setName(ctx: cli.Context, name: []const u8) u8 {
 /// `from_file`: hostname 3.25 reports a refused change from -F with the bare system
 /// message ("Permission denied"), and from an operand with "you must be root ...".
 fn setNameFrom(ctx: cli.Context, name: []const u8, from_file: bool) u8 {
+    if (!hn.valid(name)) {
+        // for a file, hostname 3.25 tells an ordinary user only the permission
+        if (from_file and uu.proc.identity().euid != 0) cli.warn(ctx, "Permission denied", .{}) else cli.warn(ctx, "the specified hostname is invalid", .{});
+        return 1;
+    }
     hn.set(name) catch |e| {
         switch (e) {
             error.PermissionDenied => if (from_file) cli.warn(ctx, "Permission denied", .{}) else cli.warn(ctx, "you must be root to change the host name", .{}),

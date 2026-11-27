@@ -313,14 +313,23 @@ pub fn writeJson(io: Io, w: *Io.Writer, data: []const u8, o: Options) Io.Writer.
                 const raw: u32 = @bitCast(r.pid);
                 const current: u8 = @truncate(raw);
                 const last: u8 = @truncate(raw >> 8);
-                try w.print(",\"runlevel\":\"{c}\",\"previous\":", .{current});
-                if (last != 0) try w.print("\"{c}\"", .{last}) else try w.writeAll("null");
+                // the bytes are whatever the file holds
+                try w.writeAll(",\"runlevel\":");
+                try writeLevel(w, current);
+                try w.writeAll(",\"previous\":");
+                try writeLevel(w, last);
             },
             else => {},
         }
         try w.writeByte('}');
     }
     try w.writeAll(if (n == 0) "]\n" else "\n]\n");
+}
+
+/// A run level character as a JSON string; 0, which means none, as null.
+fn writeLevel(w: *Io.Writer, level: u8) Io.Writer.Error!void {
+    if (level == 0) return w.writeAll("null");
+    try json.writeString(w, &.{level});
 }
 
 fn writeCountJson(w: *Io.Writer, data: []const u8) Io.Writer.Error!void {
@@ -416,4 +425,13 @@ test "json: -q form" {
     var w: Io.Writer = .fixed(&buf);
     try writeJson(std.testing.io, &w, &data, .{ .count = true, .now = 0 });
     try std.testing.expectEqualStrings("{\"users\":[\"bob\",\"eve\"],\"count\":2}\n", w.buffered());
+}
+
+test "run levels are valid JSON whatever the bytes" {
+    var buf: [64]u8 = undefined;
+    for ([_]struct { u8, []const u8 }{ .{ 0, "null" }, .{ '5', "\"5\"" }, .{ '"', "\"\\\"\"" }, .{ 255, "\"\\ufffd\"" }, .{ 1, "\"\\u0001\"" } }) |case| {
+        var w: Io.Writer = .fixed(&buf);
+        try writeLevel(&w, case[0]);
+        try std.testing.expectEqualStrings(case[1], w.buffered());
+    }
 }

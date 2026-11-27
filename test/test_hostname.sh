@@ -42,6 +42,14 @@ run_cmp "operand with -s" -s foo
 run_cmp "operand with -f" -f foo
 if [ "$(id -u)" != 0 ]; then
     run_cmp "set (not root)"   somename
+    # checked before the kernel is asked, as hostname 3.25 does
+    for n in "bad name" a_b .lead a. a..b -- "-x" ""; do
+        [ "$n" = -- ] && continue
+        run_cmp "invalid name '$n' (not root)" -- "$n"
+    done
+    BAD="$(mktemp)"; : > "$BAD"
+    run_cmp "-F empty file (not root)" -F "$BAD"
+    rm -f "$BAD"
     run_cmp "set too long (not root)" "$(printf 'a%.0s' $(seq 1 70))"
     F="$(mktemp)"; printf '# c\n\n  filehost \nother\n' > "$F"
     run_cmp "-F file (not root)"      -F "$F"
