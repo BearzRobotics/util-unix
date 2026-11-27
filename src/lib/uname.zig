@@ -99,7 +99,7 @@ pub fn writeJson(info: *const proc.Uname, fields: Fields, w: *Io.Writer) Io.Writ
 
 test "json: no selection prints every field, a selection only those" {
     if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
-    const info = proc.uname();
+    const info = try proc.uname();
     var buf: [2048]u8 = undefined;
     var w: Io.Writer = .fixed(&buf);
     try writeJson(&info, .{ .machine = true, .kernel_name = true }, &w);
@@ -113,7 +113,7 @@ test "json: no selection prints every field, a selection only those" {
 
 test "fields print in POSIX/GNU order regardless of selection order" {
     if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
-    const info = proc.uname();
+    const info = try proc.uname();
     var buf: [512]u8 = undefined;
     var w: Io.Writer = .fixed(&buf);
     try write(&info, .{ .machine = true, .kernel_name = true }, &w);
@@ -124,7 +124,7 @@ test "fields print in POSIX/GNU order regardless of selection order" {
 
 test "no selection prints the kernel name" {
     if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
-    const info = proc.uname();
+    const info = try proc.uname();
     var buf: [512]u8 = undefined;
     var w: Io.Writer = .fixed(&buf);
     try write(&info, .{}, &w);

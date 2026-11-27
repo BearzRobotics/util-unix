@@ -133,13 +133,13 @@ pub fn main(ctx: cli.Context) u8 {
         return usageStderr(ctx);
     }
 
-    var info = uu.proc.uname();
+    var info = uu.proc.uname() catch return unameFailed(ctx);
     if (boot) {
         const cur = info.nodename();
         if (cur.len == 0 or std.mem.eql(u8, cur, "(none)")) {
             const rc = setDefault(ctx);
             if (rc != 0) return rc;
-            info = uu.proc.uname();
+            info = uu.proc.uname() catch return unameFailed(ctx);
         }
     }
     return display(ctx, show orelse .name, info.nodename(), info.domainname());
@@ -169,6 +169,11 @@ fn setDefault(ctx: cli.Context) u8 {
     defer if (text) |t| ctx.gpa.free(t);
     const name = if (text) |t| (hn.fromFileText(t) orelse "localhost") else "localhost";
     return setName(ctx, name);
+}
+
+fn unameFailed(ctx: cli.Context) u8 {
+    cli.warn(ctx, "cannot get the host name", .{});
+    return 1;
 }
 
 fn display(ctx: cli.Context, show: Show, node: []const u8, nis: []const u8) u8 {

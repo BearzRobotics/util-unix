@@ -23,6 +23,8 @@ pub fn name(io: Io, file: Io.File, buf: []u8) ?[]const u8 {
     var link: [64]u8 = undefined;
     const path = std.fmt.bufPrint(&link, "/proc/self/fd/{d}", .{file.handle}) catch return null;
     const n = Io.Dir.readLinkAbsolute(io, path, buf) catch return null;
+    // readlink cuts a name short without a word: a full buffer may be one
+    if (n >= buf.len) return null;
     return buf[0..n];
 }
 

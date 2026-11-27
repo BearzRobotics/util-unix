@@ -97,6 +97,8 @@ const want: linux.STATX = .{ .TYPE = true, .MODE = true, .UID = true, .GID = tru
 pub fn statAt(dir: Io.Dir, name: []const u8, follow: bool) Error!Stat {
     if (comptime builtin.os.tag != .linux) return error.Unsupported;
     var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    // the kernel would stop at a NUL and act on a shorter name
+    if (std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidArgument;
     if (name.len >= buf.len) return error.NameTooLong;
     @memcpy(buf[0..name.len], name);
     buf[name.len] = 0;
@@ -125,6 +127,8 @@ pub fn statHandle(handle: std.posix.fd_t) Error!Stat {
 pub fn openPath(dir: Io.Dir, name: []const u8, follow: bool) Error!std.posix.fd_t {
     if (comptime builtin.os.tag != .linux) return error.Unsupported;
     var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    // the kernel would stop at a NUL and act on a shorter name
+    if (std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidArgument;
     if (name.len >= buf.len) return error.NameTooLong;
     @memcpy(buf[0..name.len], name);
     buf[name.len] = 0;
@@ -140,6 +144,8 @@ pub fn openPath(dir: Io.Dir, name: []const u8, follow: bool) Error!std.posix.fd_
 pub fn openForChange(dir: Io.Dir, name: []const u8, access: enum { read, write }) Error!std.posix.fd_t {
     if (comptime builtin.os.tag != .linux) return error.Unsupported;
     var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    // the kernel would stop at a NUL and act on a shorter name
+    if (std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidArgument;
     if (name.len >= buf.len) return error.NameTooLong;
     @memcpy(buf[0..name.len], name);
     buf[name.len] = 0;
@@ -168,6 +174,8 @@ pub fn closeHandle(handle: std.posix.fd_t) void {
 pub fn chownAt(dir: Io.Dir, name: []const u8, uid: ?u32, gid: ?u32, follow: bool) Error!void {
     if (comptime builtin.os.tag != .linux) return error.Unsupported;
     var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    // the kernel would stop at a NUL and act on a shorter name
+    if (std.mem.indexOfScalar(u8, name, 0) != null) return error.InvalidArgument;
     if (name.len >= buf.len) return error.NameTooLong;
     @memcpy(buf[0..name.len], name);
     buf[name.len] = 0;
@@ -176,4 +184,16 @@ pub fn chownAt(dir: Io.Dir, name: []const u8, uid: ?u32, gid: ?u32, follow: bool
     const rc = linux.fchownat(dir.handle, @ptrCast(&buf), uid orelse std.math.maxInt(u32), gid orelse std.math.maxInt(u32), flags);
     const e = linux.errno(rc);
     if (e != .SUCCESS) return toError(e);
+}
+
+test "a name with a NUL in it is refused, not cut short" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "safe", .data = "" });
+    const name = "safe\x00.suffix";
+    try std.testing.expectError(error.InvalidArgument, statAt(tmp.dir, name, false));
+    try std.testing.expectError(error.InvalidArgument, openPath(tmp.dir, name, false));
+    try std.testing.expectError(error.InvalidArgument, openForChange(tmp.dir, name, .read));
+    try std.testing.expectError(error.InvalidArgument, chownAt(tmp.dir, name, null, null, false));
 }

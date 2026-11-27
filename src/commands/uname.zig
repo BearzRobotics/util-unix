@@ -71,7 +71,10 @@ pub fn main(ctx: cli.Context) u8 {
         };
     }
 
-    const info = uu.proc.uname();
+    const info = uu.proc.uname() catch {
+        cli.warn(ctx, "cannot get system name", .{});
+        return 1;
+    };
     var buf: [1024]u8 = undefined;
     var stdout = Io.File.stdout().writerStreaming(ctx.io, &buf);
     if (as_json) {

@@ -149,6 +149,8 @@ pub fn describe(e: XattrError) []const u8 {
 }
 
 fn cstr(buf: []u8, text: []const u8) XattrError![:0]const u8 {
+    // the kernel would stop at a NUL and act on a shorter path
+    if (std.mem.indexOfScalar(u8, text, 0) != null) return error.InvalidArgument;
     if (text.len >= buf.len) return error.NameTooLong;
     @memcpy(buf[0..text.len], text);
     buf[text.len] = 0;
