@@ -59,14 +59,7 @@ pub fn jobsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     } else {
         for (sh.jobs.items) |j| picked.append(a, j) catch |oe| return sh.oom(oe);
         // current job first, then the previous one, then the rest newest first
-        std.mem.sort(*jobs.Job, picked.items, {}, struct {
-            fn lt(_: void, l: *jobs.Job, r: *jobs.Job) bool {
-                const ls = l.state() == .stopped;
-                const rs = r.state() == .stopped;
-                if (ls != rs) return ls;
-                return l.stamp > r.stamp;
-            }
-        }.lt);
+        std.mem.sort(*jobs.Job, picked.items, {}, jobs.listsBefore);
     }
     for (picked.items) |j| {
         jobs.format(sh, a, &out, j, mode) catch |oe| return sh.oom(oe);

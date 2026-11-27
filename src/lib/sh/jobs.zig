@@ -171,6 +171,15 @@ fn forgetOld(sh: *Shell) void {
     }
 }
 
+/// The order jobs are listed in: the current one first, then the previous one,
+/// then the rest newest first.
+pub fn listsBefore(_: void, l: *Job, r: *Job) bool {
+    const ls = l.state() == .stopped;
+    const rs = r.state() == .stopped;
+    if (ls != rs) return ls;
+    return l.stamp > r.stamp;
+}
+
 pub fn find(sh: *const Shell, id: u32) ?*Job {
     for (sh.jobs.items) |j| if (j.id == id) return j;
     return null;
@@ -396,6 +405,9 @@ fn apply(sh: *Shell, r: sys.WaitResult) void {
     } else {
         f.p.state = .done;
         f.p.status = r.status;
+        // that the job ran or was stopped may have been reported; that it
+        // has ended has not
+        if (f.j.state() == .done) f.j.notified = false;
     }
 }
 
@@ -563,14 +575,10 @@ pub fn notify(sh: *Shell) void {
     defer arena.deinit();
     const a = arena.allocator();
     var out: std.ArrayList(u8) = .empty;
-    // Oldest first, like the order the user started them.
+    // The current job first, in the order of `jobs`, as dash does.
     var tmp: std.ArrayList(*Job) = .empty;
     for (sh.jobs.items) |j| tmp.append(a, j) catch return;
-    std.mem.sort(*Job, tmp.items, {}, struct {
-        fn lt(_: void, l: *Job, r: *Job) bool {
-            return l.id < r.id;
-        }
-    }.lt);
+    std.mem.sort(*Job, tmp.items, {}, listsBefore);
     for (tmp.items) |j| {
         if (j.foreground) continue;
         const st = j.state();

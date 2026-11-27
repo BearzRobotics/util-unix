@@ -296,6 +296,13 @@ def transcript(argv, steps, cwd=None, env=None, settle=0.35):
         out = out[2:]
     return norm(out)
 
+def single_echo(out, steps):
+    """A reference that was slow to start (FreeBSD sh in its sandbox, on a busy
+    machine) can have the first line echoed twice, by the terminal and then by
+    its own editor. For references only: from ours that would be a failure."""
+    first = norm(steps[0]) + "\n"
+    return out[len(first):] if out.startswith(first + first) else out
+
 def diffcase(name, steps, shells=("dash", "bsd"), env=None, cwd=None, must=None, collapse=False):
     """Ours must equal the transcript of dash or FreeBSD sh (when both ran and
     agree, ours must equal that one)."""
@@ -304,9 +311,9 @@ def diffcase(name, steps, shells=("dash", "bsd"), env=None, cwd=None, must=None,
     ours = transcript([SH, "-i"], steps, cwd=cwd, env=dict(env or {}, SH_DIAGNOSTICS="posix"))
     refs = {}
     if "dash" in shells and HAVE_DASH:
-        refs["dash"] = transcript(["dash", "-i"], steps, cwd=cwd, env=env)
+        refs["dash"] = single_echo(transcript(["dash", "-i"], steps, cwd=cwd, env=env), steps)
     if "bsd" in shells and HAVE_BSD:
-        refs["bsd"] = transcript([BSD, "/bin/sh", "-i"], steps, cwd=cwd, env=env)
+        refs["bsd"] = single_echo(transcript([BSD, "/bin/sh", "-i"], steps, cwd=cwd, env=env), steps)
     if not refs:
         print("SKIP %s (no reference shell)" % name)
         return
@@ -317,14 +324,17 @@ def diffcase(name, steps, shells=("dash", "bsd"), env=None, cwd=None, must=None,
     ok("diff: " + name, good, detail)
 
 def job_cases():
+    # A step that ends jobs ends with a sleep. `kill` returns before its target
+    # has died: without it, whether the notice precedes the next prompt or the
+    # one after is a matter of timing, in every shell.
     d = diffcase
     d("jobs with no jobs", ["jobs"])
-    d("background job listed", ["sleep 30 &", "jobs", "kill %1", ("w", .4), "jobs"])
-    d("jobs -l and -p", ["sleep 31 &", "jobs -l", "jobs -p", "kill %1", ("w", .4), "jobs"])
-    d("current and previous markers", ["sleep 32 &", "sleep 33 &", "jobs", "kill %1 %2", ("w", .4)])
-    d("fg, stop, bg, kill", ["sleep 34 &", "fg", "^Z", "jobs", "bg", "jobs", "kill %1", ("w", .4), "jobs"])
-    d("job spec %%, %+, %-", ["sleep 35 &", "sleep 36 &", "jobs %%", "jobs %+", "jobs %-", "jobs %1", "kill %1 %2", ("w", .4)])
-    d("job spec %string", ["sleep 37 &", "sleep 38 &", "jobs %sleep\\ 37", "jobs %?38", "kill %1 %2", ("w", .4)])
+    d("background job listed", ["sleep 30 &", "jobs", "kill %1; sleep .5", "jobs"])
+    d("jobs -l and -p", ["sleep 31 &", "jobs -l", "jobs -p", "kill %1; sleep .5", "jobs"])
+    d("current and previous markers", ["sleep 32 &", "sleep 33 &", "jobs", "kill %1 %2; sleep .5"])
+    d("fg, stop, bg, kill", ["sleep 34 &", "fg", "^Z", "jobs", "bg", "jobs", "kill %1; sleep .5", "jobs"])
+    d("job spec %%, %+, %-", ["sleep 35 &", "sleep 36 &", "jobs %%", "jobs %+", "jobs %-", "jobs %1", "kill %1 %2; sleep .5"])
+    d("job spec %string", ["sleep 37 &", "sleep 38 &", "jobs %sleep\\ 37", "jobs %?38", "kill %1 %2; sleep .5"])
     d("fg with no job", ["fg"])
     d("bg with no job", ["bg"])
     d("fg %9", ["fg %9"])
@@ -332,23 +342,23 @@ def job_cases():
     d("kill %9", ["kill %9"])
     d("wait %9", ["wait %9"])
     d("jobs %9", ["jobs %9"])
-    d("finished job is announced", ["true &", ("w", .4), "", "jobs"])
-    d("failed job announced with status", ["false &", ("w", .4), "", "jobs"])
+    d("finished job is announced", ["true & sleep .5", "", "jobs"])
+    d("failed job announced with status", ["false & sleep .5", "", "jobs"])
     d("exit status of a background job", ["(exit 3) &", "wait $!", "echo $?"])
-    d("pipeline as one job", ["sleep 39 | sleep 40 &", "jobs", "jobs -l", "kill %1", ("w", .4), "jobs"])
-    d("$! after &", ["sleep 41 &", "echo $! | grep -c '^[0-9][0-9]*$'", "kill %1", ("w", .4), "jobs"])
-    d("status of a stopped foreground job", ["sleep 42", "^Z", "echo $?", "kill %1", ("w", .4), "jobs"])
-    d("exit warns about stopped jobs", ["sleep 43", "^Z", "exit", "jobs", "kill -CONT %1", "kill %1", ("w", .4), "jobs"])
+    d("pipeline as one job", ["sleep 39 | sleep 40 &", "jobs", "jobs -l", "kill %1; sleep .5", "jobs"])
+    d("$! after &", ["sleep 41 &", "echo $! | grep -c '^[0-9][0-9]*$'", "kill %1; sleep .5", "jobs"])
+    d("status of a stopped foreground job", ["sleep 42", "^Z", "echo $?", "kill %1; sleep .5", "jobs"])
+    d("exit warns about stopped jobs", ["sleep 43", "^Z", "exit", "jobs", "kill -CONT %1", "kill %1; sleep .5", "jobs"])
     d("wait for all", ["sleep 0.5 &", "wait", "echo done"])
-    d("fg by spec", ["sleep 44 &", "sleep 45 &", "fg %1", "^Z", "jobs", "kill %1 %2", ("w", .4)])
+    d("fg by spec", ["sleep 44 &", "sleep 45 &", "fg %1", "^Z", "jobs", "kill %1 %2; sleep .5"])
     # dash does not notice that a stopped job was continued and still says
     # Stopped, so the expectation is fixed rather than a reference's
     has("kill -CONT resumes", ["sleep 46", "^Z", "kill -CONT %1", ("w", .3), "jobs", "kill %1"], ["+ Running"])
-    d("killed by signal reported", ["sleep 47 &", "kill -9 %1", ("w", .4), "jobs"])
-    d("two stops, current moves", ["sleep 48", "^Z", "sleep 49", "^Z", "jobs", "kill %1 %2", "kill -CONT %1 %2", ("w", .4)])
+    d("killed by signal reported", ["sleep 47 &", "kill -9 %1; sleep .5", "jobs"])
+    d("two stops, current moves", ["sleep 48", "^Z", "sleep 49", "^Z", "jobs", "kill %1 %2", "kill -CONT %1 %2; sleep .5"])
     d("flags show i and m", ["echo $- | grep -c i", "echo $- | grep -c m"])
-    d("bg prints the job", ["sleep 50", "^Z", "bg", "kill %1", ("w", .4), "jobs"])
-    d("subshell as a job", ["(sleep 51; echo x) &", "jobs", "kill %1", ("w", .4), "jobs"])
+    d("bg prints the job", ["sleep 50", "^Z", "bg", "kill %1; sleep .5", "jobs"])
+    d("subshell as a job", ["(sleep 51; echo x) &", "jobs", "kill %1; sleep .5", "jobs"])
     d("set +m then background", ["set +m", "sleep 52 &", "jobs", "kill %1"], shells=("bsd",), collapse=True)
 
 def fc_cases():
