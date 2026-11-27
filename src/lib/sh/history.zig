@@ -14,6 +14,7 @@ const numparse = @import("../num.zig");
 const sys = @import("../../sys.zig");
 const shell = @import("shell.zig");
 const exec = @import("exec.zig");
+const builtins = @import("builtins.zig");
 const Shell = shell.Shell;
 const Allocator = std.mem.Allocator;
 
@@ -131,7 +132,7 @@ pub const History = struct {
     /// symbolic link stays, and the file it names is replaced. Saving to a
     /// character device such as /dev/null does nothing. When `sys` failed,
     /// `sys.errno` says why; the old file is then still whole.
-    pub fn save(self: *const History, path: []const u8) SaveError!void {
+    pub fn save(self: *History, path: []const u8, durable: bool) SaveError!void {
         var link_buf: [2][4096]u8 = undefined;
         const target = try followLinks(path, &link_buf);
         if (sys.stat(target, true)) |info| {
@@ -173,12 +174,36 @@ pub const History = struct {
             // someone else's file (a shell run through su keeps HOME) stays theirs
             if (info.uid != sys.geteuid()) try sys.fchown(fd, info.uid, info.gid);
             try sys.writeAll(fd, out.items);
-            try sys.fsync(fd);
+            if (durable) try sys.fsync(fd);
         }
         try sys.rename(temp, target);
         keep = true;
+        // these are in the file now: a later save must not add them again
+        self.loaded_from = std.hash.Wyhash.hash(0, path);
+        self.session_start = self.nextNumber();
+    }
+
+    /// Whether commands have been entered since the history was last saved.
+    pub fn unsaved(self: *const History) bool {
+        return self.nextNumber() > self.session_start;
     }
 };
+
+/// A new file of this user's alone for an editor: `$TMPDIR/sh-KIND.PID.RANDOM`.
+/// It is created exclusively: a file or link someone else made under the name
+/// is never opened.
+pub fn tempFile(sh: *Shell, a: Allocator, kind: []const u8) (Allocator.Error || sys.Error)!struct { path: []const u8, fd: i32 } {
+    const dir = sh.getVar("TMPDIR") orelse "/tmp";
+    var tries: usize = 0;
+    while (true) : (tries += 1) {
+        const path = try std.fmt.allocPrint(a, "{s}/sh-{s}.{d}.{x:0>8}", .{ dir, kind, sys.getpid(), sys.random32() });
+        const fd = sys.open(path, .{ .read = false, .write = true, .create = true, .excl = true, .cloexec = true }, 0o600) catch |e| {
+            if (sys.errno() == sys.E_EXIST and tries < 100) continue;
+            return e;
+        };
+        return .{ .path = path, .fd = fd };
+    }
+}
 
 /// The most of a history file that is read.
 const max_file_bytes = 32 << 20;
@@ -390,23 +415,21 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         body.append(a, '\n') catch |oe| return sh.oom(oe);
     }
     const ed = editor orelse sh.getVar("FCEDIT") orelse "ed";
-    const tmpdir = sh.getVar("TMPDIR") orelse "/tmp";
-    const path = std.fmt.allocPrint(a, "{s}/sh-fc.{d}", .{ tmpdir, sys.getpid() }) catch |oe| return sh.oom(oe);
-    const fd = sys.open(path, .{ .read = false, .write = true, .create = true, .trunc = true, .cloexec = true }, 0o600) catch {
-        sh.diagCmdK(.cannot_create, path, "fc", "cannot create {s}", .{path});
+    const temp = tempFile(sh, a, "fc") catch {
+        sh.diagCmdK(.cannot_create, "sh-fc", "fc", "cannot create a temporary file: {s}", .{sys.strerror(sys.errno())});
         return 1;
     };
-    sys.writeAll(fd, body.items) catch {};
-    sys.close(fd);
-    defer {
-        var buf: [4097]u8 = undefined;
-        if (path.len < 4096) {
-            @memcpy(buf[0..path.len], path);
-            buf[path.len] = 0;
-            _ = std.os.linux.unlink(@ptrCast(&buf));
-        }
+    const path = temp.path;
+    defer sys.unlink(path) catch {};
+    {
+        defer sys.close(temp.fd);
+        sys.writeAll(temp.fd, body.items) catch {
+            sh.diagCmdK(.cannot_create, path, "fc", "cannot write {s}: {s}", .{ path, sys.strerror(sys.errno()) });
+            return 1;
+        };
     }
-    const cmd = std.fmt.allocPrint(a, "{s} '{s}'", .{ ed, path }) catch |oe| return sh.oom(oe);
+    const quoted = builtins.quoteSingle(a, path) catch |oe| return sh.oom(oe);
+    const cmd = std.fmt.allocPrint(a, "{s} {s}", .{ ed, quoted }) catch |oe| return sh.oom(oe);
     const st = exec.runSource(sh, cmd, .{}) catch |oe| return sh.oom(oe);
     if (st != 0) return st;
     const rfd = sys.open(path, .{ .cloexec = true }, 0) catch return 1;

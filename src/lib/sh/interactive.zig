@@ -15,6 +15,7 @@ const numparse = @import("../num.zig");
 const sys = @import("../../sys.zig");
 const shell = @import("shell.zig");
 const exec = @import("exec.zig");
+const builtins = @import("builtins.zig");
 const expand = @import("expand.zig");
 const parser = @import("parser.zig");
 const ast = @import("ast.zig");
@@ -161,9 +162,11 @@ fn tRaw(ctx: ?*anyopaque, on: bool) void {
         const cur = sys.tcgetattr(t.in_fd) catch return;
         t.saved = cur;
         const raw = sys.termiosRaw(cur);
+        sys.guardTerminal(t.in_fd, t.out_fd, cur);
         sys.tcsetattr(t.in_fd, &raw) catch {};
     } else if (t.saved) |s| {
         sys.tcsetattr(t.in_fd, &s) catch {};
+        sys.unguardTerminal();
         t.saved = null;
     }
 }
@@ -299,24 +302,22 @@ fn readOne(s: *Session, a: Allocator, prompt: []const u8) Read {
 /// Edit `text` with $VISUAL/$EDITOR/vi (vi-mode `v`) and return what the user
 /// left in the file.
 fn externalEdit(sh: *Shell, a: Allocator, text: []const u8) ?[]const u8 {
-    const tmpdir = sh.getVar("TMPDIR") orelse "/tmp";
-    const path = std.fmt.allocPrint(a, "{s}/sh-edit.{d}", .{ tmpdir, sys.getpid() }) catch return null;
-    const fd = sys.open(path, .{ .read = false, .write = true, .create = true, .trunc = true, .cloexec = true }, 0o600) catch return null;
-    sys.writeAll(fd, text) catch {};
-    sys.writeAll(fd, "\n") catch {};
-    sys.close(fd);
+    const temp = history.tempFile(sh, a, "edit") catch {
+        sh.diagK(.history_error, null, "cannot create a temporary file: {s}", .{sys.strerror(sys.errno())});
+        return null;
+    };
+    defer sys.unlink(temp.path) catch {};
+    {
+        defer sys.close(temp.fd);
+        sys.writeAll(temp.fd, text) catch return null;
+        sys.writeAll(temp.fd, "\n") catch return null;
+    }
     const ed = sh.getVar("VISUAL") orelse sh.getVar("EDITOR") orelse "vi";
-    const cmd = std.fmt.allocPrint(a, "{s} '{s}'", .{ ed, path }) catch return null;
+    const quoted = builtins.quoteSingle(a, temp.path) catch return null;
+    const cmd = std.fmt.allocPrint(a, "{s} {s}", .{ ed, quoted }) catch return null;
     // only what a successful editor leaves is run (POSIX fc and vi `v`)
     const st = exec.runSource(sh, cmd, .{}) catch 2;
-    const out = if (st == 0) exec.readFile(a, path) else null;
-    var buf: [4097]u8 = undefined;
-    if (path.len < 4096) {
-        @memcpy(buf[0..path.len], path);
-        buf[path.len] = 0;
-        _ = std.os.linux.unlink(@ptrCast(&buf));
-    }
-    return out;
+    return if (st == 0) exec.readFile(a, temp.path) else null;
 }
 
 /// Run the interactive loop until `exit` or end of input; returns the exit
@@ -394,6 +395,7 @@ pub fn loop(s: *Session) u8 {
         sh.hist_pending = true;
         _ = exec.runSource(sh, src, .{}) catch |oe| return sh.oom(oe);
         sh.hist_pending = false;
+        saveHistory(sh);
         if (sh.flow == .exit_shell and sh.explicit_exit) return finish(s);
         // start the prompt on a line of its own, after the terminal's "^C"
         if (sh.flow == .interrupt) sh.errRaw("\n");
@@ -409,9 +411,18 @@ fn historyFile(sh: *Shell) ?[]const u8 {
     return if (path.len > 0) path else null;
 }
 
+/// Save what is new in the history, so that it is not lost with a shell that
+/// is killed, whose terminal goes away or that is replaced by `exec`. A failure
+/// is left for `finish` to report.
+pub fn saveHistory(sh: *Shell) void {
+    const hist = sh.history orelse return;
+    if (!hist.unsaved()) return;
+    if (historyFile(sh)) |hf| hist.save(hf, false) catch {};
+}
+
 fn finish(s: *Session) u8 {
     const sh = s.sh;
-    if (historyFile(sh)) |hf| s.hist.save(hf) catch |e| {
+    if (historyFile(sh)) |hf| s.hist.save(hf, true) catch |e| {
         sh.diagK(.history_error, null, "cannot save the history to {s}: {s}", .{ hf, switch (e) {
             error.Sys => sys.strerror(sys.errno()),
             error.OutOfMemory => "out of memory",

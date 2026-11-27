@@ -14,6 +14,7 @@ const sys = @import("../../sys.zig");
 const ast = @import("ast.zig");
 const lexer = @import("lexer.zig");
 const exec = @import("exec.zig");
+const interactive = @import("interactive.zig");
 const expand = @import("expand.zig");
 const shell = @import("shell.zig");
 const arith = @import("arith.zig");
@@ -115,7 +116,7 @@ fn parseNum(s: []const u8) ?i64 {
     return num.parseInt(i64, s, 10) catch null;
 }
 
-fn quoteSingle(a: Allocator, s: []const u8) Allocator.Error![]const u8 {
+pub fn quoteSingle(a: Allocator, s: []const u8) Allocator.Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.append(a, '\'');
     for (s) |c| {
@@ -312,6 +313,7 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         sh.diagCmdK(.not_found, name, "exec", "{s}: not found", .{name});
         return die(sh, 127);
     };
+    if (sh.flags.interactive and !sh.in_subshell) interactive.saveHistory(sh);
     const env = sh.environ(a) catch |oe| return sh.oom(oe);
     // For a host that is to live on, the program runs in a child. A subshell
     // is a child already.

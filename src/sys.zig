@@ -761,6 +761,69 @@ pub fn tcsetattr(fd: i32, t: *const Termios) Error!void {
     _ = try check(linux.ioctl(fd, TCSETSW, @intFromPtr(t)));
 }
 
+// --- a terminal in raw mode must not outlive the shell ------------------------
+
+/// What `dieRestoring` puts back, while a line is being edited.
+var guard: struct { armed: bool = false, tty: i32 = 0, out: i32 = 1, modes: Termios = .{}, held: [nsig]bool = @splat(false) } = .{};
+
+/// The signals that end a process which does nothing about them.
+const fatal_signals = [_]u8{ 1, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 24, 25, 26, 27 };
+
+/// Async-signal-safe: system calls only. The handler is installed to be used
+/// once, so the signal raised again ends the process as it would have.
+fn dieRestoring(sig: linux.SIG) callconv(.c) void {
+    if (guard.armed) {
+        // not TCSETSW: a terminal that has gone away must not hold the shell
+        _ = linux.ioctl(guard.tty, TCSETS, @intFromPtr(&guard.modes));
+        const paste_off = "\x1b[?2004l";
+        _ = linux.write(guard.out, paste_off, paste_off.len);
+    }
+    _ = linux.kill(linux.getpid(), sig);
+}
+
+/// While the terminal `tty` is in another mode than `modes`: put them back
+/// (and end bracketed paste on `out`) if a signal ends the process. Signals
+/// that are caught or ignored are left as they are.
+pub fn guardTerminal(tty: i32, out: i32, modes: Termios) void {
+    if (comptime !is_linux) return;
+    unguardTerminal();
+    guard.tty = tty;
+    guard.out = out;
+    guard.modes = modes;
+    guard.armed = true;
+    for (fatal_signals) |s| {
+        if (getSignal(s) != .default) continue;
+        const act: linux.Sigaction = .{ .handler = .{ .handler = &dieRestoring }, .mask = linux.sigemptyset(), .flags = linux.SA.RESETHAND };
+        guard.held[s] = linux.errno(linux.sigaction(@fromBackingInt(@intCast(s)), &act, null)) == .SUCCESS;
+    }
+}
+
+pub fn unguardTerminal() void {
+    if (comptime !is_linux) return;
+    if (!guard.armed) return;
+    for (fatal_signals) |s| if (guard.held[s]) {
+        guard.held[s] = false;
+        // one that has been given a trap in the meantime keeps it
+        var old: linux.Sigaction = undefined;
+        if (linux.errno(linux.sigaction(@fromBackingInt(@intCast(s)), null, &old)) != .SUCCESS) continue;
+        if (old.handler.handler == &dieRestoring) _ = setSignal(s, .default);
+    };
+    guard.armed = false;
+}
+
+/// A random number, for names that others must not guess. Falls back to the
+/// clock where there is no source of randomness.
+pub fn random32() u32 {
+    var v: u32 = 0;
+    if (comptime is_linux) {
+        if (linux.getrandom(std.mem.asBytes(&v), 4, 0) == 4) return v;
+        var ts: linux.timespec = undefined;
+        _ = linux.clock_gettime(.MONOTONIC, &ts);
+        return @truncate(@as(u64, @bitCast(@as(i64, ts.nsec))));
+    }
+    return v;
+}
+
 /// `t` with the modes a line editor needs: no echo, no canonical mode, no
 /// signal characters, no flow control, 8-bit input, reads return after one
 /// byte. Output processing is left alone so "\n" still ends a line.

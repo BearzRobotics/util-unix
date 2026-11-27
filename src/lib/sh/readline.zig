@@ -1667,6 +1667,12 @@ pub const Editor = struct {
     }
 
     fn viInsertKey(self: *Editor, k: Key) void {
+        // The line being typed is a search pattern behind its `/` or `?`: keys
+        // that would move in it, delete the `/` or fetch a history line do not apply.
+        if (self.vi_search_mode) {
+            if (k.kind == .char and !k.alt) self.viSearchInput(k.cp);
+            return;
+        }
         if (k.kind != .char or k.alt) {
             switch (k.kind) {
                 .left => self.cur = self.prevBoundary(self.cur),
@@ -1683,10 +1689,6 @@ pub const Editor = struct {
             return;
         }
         const c = k.cp;
-        if (self.vi_search_mode) {
-            self.viSearchInput(c);
-            return;
-        }
         if (c == 27) {
             self.vi_insert = false;
             self.vi_replace = false;

@@ -20,7 +20,7 @@ if __name__ == "__main__" and _os.environ.get("TEST_CONTAINED") != "cg:" + _cg:
     _wrap = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "contain.sh")
     _os.execvp("sh", ["sh", _wrap, _sys.executable, "-u"] + _sys.argv)
 
-import os, re, subprocess, sys, time
+import os, re, signal, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sh_pty
 from sh_pty import Session, strip
@@ -100,8 +100,16 @@ HIST = os.path.join(TMP, "hist")
 with open(HIST, "w") as f:
     f.write("echo one\necho two\necho three\n")
 
+def history_copy(path):
+    """A copy of the history file at `path`: a shell adds what it runs to its
+    HISTFILE at once, so a case must not share one with the next."""
+    fd, copy = tempfile.mkstemp(prefix="histcopy", dir=TMP)
+    os.close(fd)
+    shutil.copyfile(path, copy)
+    return copy
+
 def hist_ed(mode, name, keys, want, extra_env=None):
-    env = {"HISTFILE": HIST}
+    env = {"HISTFILE": history_copy(HIST)}
     env.update(extra_env or {})
     ed = Ed(mode, env=env)
     got = ed.out(keys)
@@ -555,8 +563,8 @@ def input_and_history_cases():
         s.expect(r"\$ ?$"); s.take()
         s.send("ls f"); s.send("\t\t"); s.settle(.6)
         listed = s.raw
-        # (completion also puts backslashes in the names it lists)
-        ok("completion list shows control characters", "PWNED^G" in listed and "~]" in listed and "PWNED\x07" not in listed and "\u009d" not in listed and "\u009c" not in listed, repr(listed[-400:]))
+        # (completion writes a name with control bytes as $'...', in text)
+        ok("completion list shows control characters", "PWNED\\007" in listed and "~]" in listed and "PWNED\x07" not in listed and "\u009d" not in listed and "\u009c" not in listed, repr(listed[-400:]))
     with Session([SH, "-i"]) as s:
         s.expect(r"\$ ?$"); s.take()
         s.send(": \u009b31m"); s.settle(.6)
@@ -631,6 +639,44 @@ def input_and_history_cases():
     has("a history that cannot be saved is reported", [ALIVE, "exit"], ["al1ve", "cannot save the history"], env={"HISTFILE": "/nonexistent-dir/hist"})
     has("HISTFILE=/dev/null is quiet", [ALIVE, "exit"], ["al1ve"], ["cannot save", "regular"], env={"HISTFILE": "/dev/null"})
 
+def session_safety_cases():
+    d = tempfile.mkdtemp(prefix="safe", dir=TMP)
+    # SHI-15: keys that edit a line must not edit the vi search pattern
+    has("vi search: deleting the slash does not crash", ["set -o vi", "echo seen", "raw:" + ESC + "/" + HOME + DEL + "\n", "raw:" + ESC + "cc" + ALIVE + "\n"], ["al1ve"], ["panic"])
+    # SHI-17: nothing that was run is lost with the shell
+    for what, last in (("killed", None), ("replaced by exec", "exec true")):
+        hist = os.path.join(d, "hist-" + what.split()[0])
+        with Session([SH, "-i"], env={"HISTFILE": hist}) as s:
+            s.expect(r"\$ ?$")
+            s.send("echo kept\n"); s.settle(.4)
+            if last:
+                s.send(last + "\n"); s.settle(.5)
+        got = open(hist).read() if os.path.exists(hist) else ""
+        want = "echo kept\n" + (last + "\n" if last else "")
+        ok("the history of a shell that is %s is saved, once" % what, got == want, repr(got))
+    # SHI-16: a signal that ends the shell leaves the terminal as it was
+    outer = [SH, "-c", "'%s' -i; stty -a" % SH]
+    for sig in ("HUP", "USR1", "SEGV", "ILL"):
+        with Session(outer) as s:
+            s.expect(r"\$ ?$", 6)
+            inner = [p for p in sh_pty.session_members(s.pid) if p != s.pid]
+            for p in inner:
+                os.kill(p, getattr(signal, "SIG" + sig))
+            s.settle(1.0)
+            text = s.take()
+        modes = text.split()
+        ok("the terminal is restored after SIG" + sig, "icanon" in modes and "echo" in modes and "isig" in modes, repr(text[-400:]))
+    # SHI-19: the editor's file is new, whatever is already there
+    tmp = os.path.join(d, "tmp 'q")
+    os.makedirs(tmp)
+    ed = os.path.join(d, "ed.sh")
+    open(ed, "w").write("#!/bin/sh\nstat -c '%%a %%h' \"$1\"; basename \"$1\" >> '%s/names'; echo 'echo edited' > \"$1\"\n" % d)
+    os.chmod(ed, 0o755)
+    has("fc: the temporary file is private and its path is quoted", ["echo hi", "FCEDIT=" + ed + " fc", "FCEDIT=" + ed + " fc"], ["600 1", "edited"], env={"TMPDIR": tmp})
+    names = open(os.path.join(d, "names")).read().split() if os.path.exists(os.path.join(d, "names")) else []
+    ok("fc: each temporary file has its own unpredictable name", len(names) == 2 and names[0] != names[1] and all(re.match(r"sh-fc\.\d+\.[0-9a-f]{8}$", n) for n in names), repr(names))
+    ok("fc: no temporary file is left", os.listdir(tmp) == [], repr(os.listdir(tmp)))
+
 def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
     has("PS1 command substitution", ["PS1='$(echo X)> '", "echo hi"], ["X> echo hi"])
@@ -676,9 +722,9 @@ def prompt_cases():
         s.send("exit\n"); s.settle(.5)
     saved = open(hf).read() if os.path.exists(hf) else ""
     ok("HISTFILE is written at exit", "echo saved1\necho saved2\nexit" in saved or "echo saved1\necho saved2\n" in saved, repr(saved))
-    has("HISTFILE is read at start", ["fc -l"], ["echo saved1", "echo saved2"], env={"HISTFILE": hf})
-    has("up arrow recalls the file's history", ["raw:" + UP + UP + "\n"], ["saved2"], env={"HISTFILE": hf})
-    has("HISTSIZE limits the history", ["fc -l"], ["echo saved2"], ["echo saved1"], env={"HISTFILE": hf, "HISTSIZE": "3"})
+    has("HISTFILE is read at start", ["fc -l"], ["echo saved1", "echo saved2"], env={"HISTFILE": history_copy(hf)})
+    has("up arrow recalls the file's history", ["raw:" + UP + UP + "\n"], ["saved2"], env={"HISTFILE": history_copy(hf)})
+    has("HISTSIZE limits the history", ["fc -l"], ["echo saved2"], ["echo saved1"], env={"HISTFILE": history_copy(hf), "HISTSIZE": "3"})
     # input that is not a terminal
     p = subprocess.run([SH, "-i"], input=b"echo a\necho b\nexit 4\n", capture_output=True, env={"PATH": os.environ["PATH"], "PS1": "P> ", "ENV": "/dev/null"})
     ok("-i with piped input: prompts go to stderr", p.stdout == b"a\nb\n" and b"P> " in p.stderr and p.returncode == 4, repr((p.stdout, p.stderr, p.returncode)))
@@ -877,7 +923,7 @@ def paste_render_cases():
         got = s.raw[before:]
         ok("no editing mode: the tty's own line discipline", "plai\x01Z\r\n" in got and "\x1b[?2004h" not in got, repr(got))
 
-EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases}
+EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases, "safety": session_safety_cases}
 
 def setid_cases():
     """SHX-18, SHI-20: with differing ids, sh gives up the effective ones, or
