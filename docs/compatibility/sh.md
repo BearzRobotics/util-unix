@@ -20,7 +20,7 @@ Status: milestone 1 (non-interactive core) implemented and its recorded gaps clo
 
 ## Supported
 
-Lexer and parser for the complete POSIX grammar (incremental, one complete command at a time, so commands before a syntax error run); every expansion; redirections with any descriptor number including `<>` and `>|`; pipelines, `!`, `&&`, `||`, `;`, `&`; `if`, `while`, `until`, `for`, `case`, groups, subshells, functions; `set -e -u -x -f -n -v -C -a` and `set -o` names; positional parameters and `$@ $* $# $? $$ $! $- $0`; special builtins `: . break continue eval exec exit export readonly return set shift times trap unset`; regular builtins `alias cd command echo false getopts hash kill local printf pwd read test [ true type ulimit umask unalias wait`; traps for `EXIT` and signals (run between commands and after a foreground command ends); exit statuses 126, 127 and 2 as dash; the consequences of shell errors of 2.8.1.
+Lexer and parser for the complete POSIX grammar (incremental, one complete command at a time, so commands before a syntax error run); every expansion; redirections (a descriptor number is one digit, as in dash) including `<>` and `>|`; pipelines, `!`, `&&`, `||`, `;`, `&`; `if`, `while`, `until`, `for`, `case`, groups, subshells, functions; `set -e -u -x -f -n -v -C -a` and `set -o` names; positional parameters and `$@ $* $# $? $$ $! $- $0`; special builtins `: . break continue eval exec exit export readonly return set shift times trap unset`; regular builtins `alias cd command echo false getopts hash kill local printf pwd read test [ true type ulimit umask unalias wait`; traps for `EXIT` and signals (run between commands and after a foreground command ends); exit statuses 126, 127 and 2 as dash; the consequences of shell errors of 2.8.1.
 
 ## Extensions
 
@@ -124,7 +124,6 @@ Per decision 0008. stdout and exit status stay dash's.
 | `set -e` ends the shell | silent | rich style names the command and line | diagnostic |
 | Unterminated quote/`$(`/`$((` | "Unterminated quoted string" etc. | rich style says where it was opened | diagnostic |
 | `. file arg` | args ignored | args become `$1...` | POSIX-defined (2024) |
-| `exec 10>f` | rejected | accepted | POSIX-defined (2.7) |
 | `eval() { :; }` | "Bad function name" | same | matches dash (POSIX leaves it undefined) |
 
 ## Tests

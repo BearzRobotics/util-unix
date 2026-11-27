@@ -49,11 +49,12 @@ fn unquotedExpansion(w: ast.Word) ?[]const u8 {
     return null;
 }
 
-fn endsWithSlashAfterParam(w: ast.Word) bool {
-    var saw_param = false;
-    for (w) |p| switch (p) {
-        .param => saw_param = true,
-        .text, .quoted => |t| if (saw_param and std.mem.indexOfScalar(u8, t, '/') != null) return true,
+/// True for a path that starts with a variable and goes on with a "/": were
+/// the variable empty, it would name something under the root.
+fn startsWithParamAndSlash(w: ast.Word) bool {
+    if (w.len == 0 or w[0] != .param) return false;
+    for (w[1..]) |p| switch (p) {
+        .text, .quoted => |t| if (std.mem.indexOfScalar(u8, t, '/') != null) return true,
         else => {},
     };
     return false;
@@ -81,7 +82,7 @@ fn checkSimple(c: *Ctx, n: *const ast.Node, s: ast.Simple) Allocator.Error!void 
             // "-r" or "-R" among short options
             if (t.len > 1 and t[0] == '-' and t[1] != '-' and std.mem.indexOfAny(u8, t[1..], "rR") != null) recursive = true;
         };
-        if (recursive) for (s.words[1..]) |w| if (endsWithSlashAfterParam(w)) try c.add(.lint_rm_variable, n, "rm -r");
+        if (recursive) for (s.words[1..]) |w| if (startsWithParamAndSlash(w)) try c.add(.lint_rm_variable, n, "rm -r");
     }
     for (s.words[1..]) |w| if (unquotedExpansion(w)) |nm| {
         try c.add(.lint_unquoted_expansion, n, nm);

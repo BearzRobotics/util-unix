@@ -218,6 +218,9 @@ pub const Parser = struct {
             ls -= 1;
         }
         self.line_start = .{ .src = self.src.ptr, .len = self.src.len, .off = last, .start = ls };
+        // no column on a line that holds an alias value: it is not the line
+        // the user wrote
+        if (ls < self.splice_end) return 0;
         return @intCast(off - ls + 1);
     }
 
@@ -376,7 +379,10 @@ pub const Parser = struct {
 
     fn lexRaw(self: *Parser) Error!Token {
         while (true) {
-            self.tok_start = self.pos;
+            const begin = self.pos;
+            self.tok_start = begin;
+            // reading "$(...)" inside the word lexes tokens, which move it
+            defer self.tok_start = begin;
             const c = self.cur() orelse return .{ .tag = .eof, .line = self.line };
             if (lexer.isBlank(c)) {
                 self.pos += 1;
@@ -964,7 +970,7 @@ pub const Parser = struct {
         self.pos += 1;
         var sub = Parser.init(a, text.items, self.diag);
         sub.aliases = self.aliases;
-        sub.line = self.line;
+        sub.line = bline;
         sub.depth = self.depth + 1;
         sub.nest = self.nest;
         const body = try sub.parseList(.compound);
@@ -980,6 +986,7 @@ pub const Parser = struct {
         for (self.here.items) |h| {
             var body: std.ArrayList(u8) = .empty;
             var found = false;
+            const body_line = self.line;
             while (self.pos < self.src.len) {
                 const end = std.mem.indexOfScalarPos(u8, self.src, self.pos, '\n') orelse self.src.len;
                 var ln = self.src[self.pos..end];
@@ -1003,7 +1010,7 @@ pub const Parser = struct {
             } else {
                 var sub = Parser.init(a, body.items, self.diag);
                 sub.aliases = self.aliases;
-                sub.line = self.line;
+                sub.line = body_line;
                 sub.depth = self.depth + 1;
                 sub.nest = self.nest;
                 var inner: Builder = .{};

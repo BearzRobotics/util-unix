@@ -532,6 +532,8 @@ c "a braced parameter as here-document delimiter" 'cat <<${x}
 a
 ${x}
 echo after'
+c "set -v echoes the input, not what an alias made of it" 'printf "set -v\nalias e=echo\ne a\necho b\necho c\n" > v.sh; . ./v.sh'
+c "an error in a here-document names its own line" 'printf "x=1\ncat <<E\n\$(nosuchcmd)\na\nb\nE\n" > h.sh; sh ./h.sh 2>&1 | sed "s/.*: \([0-9]*\): .*/line \1/"' P
 c "a quoted ) does not end arithmetic" 'x=")"; echo $((1+${x#")"}2)); echo $(( $(echo ")" | wc -c) + 1 )); echo $(( (1+2) * $(echo "((" | wc -c) ))'
 c "a case inside a substitution inside arithmetic" 'echo $(( $(case a in a) echo 1;; esac) + 1 ))'
 c "backquotes inside arithmetic" 'echo $(( `echo ")" | wc -c` + 1 ))'

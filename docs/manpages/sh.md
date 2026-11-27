@@ -100,7 +100,7 @@ file
 
 # LANGUAGE
 
-Quoting (backslash, single and double quotes), comments, simple commands with assignments and redirections, pipelines with **!**, the lists **;**, **&**, **&&**, **||**, and the compound commands **if**/**elif**/**else**, **while**, **until**, **for**, **case**, brace groups, subshells and function definitions. Expansions in the POSIX order: tilde, parameter (all of `-` `=` `?` `+` with and without `:`, `#` `##` `%` `%%` and `${#name}`), command substitution (`$(...)` and backquotes), arithmetic (`$((...))`, signed 64-bit, C operators without `,` `**` `++` `--`), field splitting by IFS, pathname expansion, quote removal. Redirections: `<` `>` `>>` `>|` `<>`, `n>&m`, `n<&m`, `>&-`, here-documents `<<` and `<<-` (quoted and unquoted delimiters), with any descriptor number. Not implemented: `$'...'`, aliases that end in a blank expanding the next word, `fc`, `jobs`, `fg`, `bg`, and `printf` floating-point conversions.
+Quoting (backslash, single and double quotes), comments, simple commands with assignments and redirections, pipelines with **!**, the lists **;**, **&**, **&&**, **||**, and the compound commands **if**/**elif**/**else**, **while**, **until**, **for**, **case**, brace groups, subshells and function definitions. Expansions in the POSIX order: tilde, parameter (all of `-` `=` `?` `+` with and without `:`, `#` `##` `%` `%%` and `${#name}`), command substitution (`$(...)` and backquotes), arithmetic (`$((...))`, signed 64-bit, C operators without `,` `**` `++` `--`), field splitting by IFS, pathname expansion, quote removal. Redirections: `<` `>` `>>` `>|` `<>`, `n>&m`, `n<&m`, `>&-`, here-documents `<<` and `<<-` (quoted and unquoted delimiters). A descriptor number before an operator is one digit, as in dash: in `exec 10>f`, `10` is a word.
 
 # INTERACTIVE USE
 
@@ -290,7 +290,6 @@ Each row is an improvement of a message or a deliberate choice; stdout and the e
 | `set -e` exit | silent | rich and json styles name the command and line (SH4005); posix style is silent |
 | Unterminated quote or `$(` | `Syntax error: Unterminated quoted string` | rich style names where it was opened |
 | `.` with arguments | positional parameters unchanged | arguments become the positional parameters during the file (as POSIX XCU dot, bash, FreeBSD) |
-| Descriptor numbers of two or more digits (`exec 10>f`) | rejected (`exec: 10: not found`) | accepted, per POSIX 2.7 |
 | `$((` without a matching `))` | `Missing '))'` | same |
 | Here-document ended by end of input | no warning | warning SH1003 in rich and json styles; posix style is silent |
 | `kill -n 9 pid` | error | sends the signal (POSIX.1-2024 kill) |

@@ -65,8 +65,8 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
     sh.cur_src = src;
     defer sh.cur_src = saved_src;
     var last: u8 = 0;
+    var echoed: usize = 0; // how much of `src` `set -v` has been through
     while (true) {
-        const start = p.pos;
         const maybe = p.nextCommand() catch |e| switch (e) {
             error.Syntax => {
                 sh.line = d.line;
@@ -85,10 +85,10 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
             sh.emit(&wd);
         }
         const node = maybe orelse break;
-        if (sh.flags.verbose) {
-            const end = @min(p.pos, src.len);
-            if (end > start) sh.errRaw(std.mem.trimStart(u8, src[start..end], "\n"));
-        }
+        // (`p.pos` is no place in `src` once an alias has been put in)
+        const end = src.len - @min(p.origTailLen(), src.len);
+        if (sh.flags.verbose and end > echoed) sh.errRaw(std.mem.trimStart(u8, src[echoed..end], "\n"));
+        echoed = @max(echoed, end);
         if (sh.flags.noexec) continue;
         last = execNode(sh, node);
         checkTraps(sh);
