@@ -399,13 +399,14 @@ fn testRecord(buf: []u8, index: usize, kind: i16, user: []const u8, line: []cons
 test "json: selects the same records as write and escapes text" {
     var data: [3 * utmp.record_size]u8 = undefined;
     testRecord(&data, 0, 2, "", "~", 100); // boot
-    testRecord(&data, 1, 7, "al\"ice", "pts/9", 200); // user (tty does not exist: mesg ?)
+    // (a name no terminal can have: /dev/pts/9 exists on a busy machine)
+    testRecord(&data, 1, 7, "al\"ice", "pts/none", 200); // user (tty does not exist: mesg ?)
     testRecord(&data, 2, 8, "", "pts/1", 300); // dead
     var buf: [2048]u8 = undefined;
     var w: Io.Writer = .fixed(&buf);
     try writeJson(std.testing.io, &w, &data, .{ .users = true, .now = 0 });
     try std.testing.expectEqualStrings(
-        "[\n{\"type\":\"user\",\"user\":\"al\\\"ice\",\"line\":\"pts/9\",\"id\":\"\",\"pid\":99,\"host\":\"\",\"time\":200,\"mesg\":\"?\"}\n]\n",
+        "[\n{\"type\":\"user\",\"user\":\"al\\\"ice\",\"line\":\"pts/none\",\"id\":\"\",\"pid\":99,\"host\":\"\",\"time\":200,\"mesg\":\"?\"}\n]\n",
         w.buffered(),
     );
     var w2: Io.Writer = .fixed(&buf);
