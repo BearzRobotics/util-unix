@@ -30,7 +30,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # signal cannot reach the host. Without bwrap the corpora are not run.
 [ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" timeout 1800 sh "$0" "$@"
 if command -v bwrap > /dev/null 2>&1 && bwrap --unshare-pid --die-with-parent --dev-bind / / true > /dev/null 2>&1; then
-    SANDBOX="setsid -w bwrap --unshare-pid --unshare-ipc --die-with-parent --dev-bind / / --proc /proc"
+    # Oils cases share /tmp/oil-spec-test and one removes a directory in it: each
+    # case, run in parallel with others, gets its own
+    SANDBOX="setsid -w bwrap --unshare-pid --unshare-ipc --die-with-parent --dev-bind / / --proc /proc --tmpfs /tmp/oil-spec-test"
 else
     echo "SKIP corpora: bwrap is needed to contain the signals the cases send (install bubblewrap)"
     exit 0
