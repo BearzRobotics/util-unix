@@ -15,6 +15,11 @@
 //! zone is UTC. Standard zoneinfo files built "fat" (Debian's) carry
 //! transitions up to 2037, so this matters only for unusual setups.
 //!
+//! The std parser trusts the record counts and leap-second values in the file,
+//! so a damaged or hostile one (TZ may name any file) could make it overflow or
+//! allocate gigabytes. The counts are checked against the file's size first,
+//! and the leap-second records, which nothing here uses, are removed.
+//!
 //! References: tzfile(5); Zig std.tz for the file parser.
 
 const std = @import("std");
@@ -58,7 +63,14 @@ pub const Zone = struct {
         if (std.mem.indexOf(u8, path, "/../") != null) return .{};
         const data = Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1 << 20)) catch return .{};
         defer gpa.free(data);
-        var reader: Io.Reader = .fixed(data);
+        return parse(gpa, data);
+    }
+
+    /// The zone in the TZif file `data`, which is changed on the way; UTC when
+    /// it is not a usable one.
+    fn parse(gpa: Allocator, data: []u8) Zone {
+        const usable = prepare(data) orelse return .{};
+        var reader: Io.Reader = .fixed(usable);
         const tz = std.tz.Tz.parse(gpa, &reader) catch return .{};
         return .{ .tz = tz };
     }
@@ -83,17 +95,69 @@ pub const Zone = struct {
 
     pub fn local(z: *const Zone, ts: i64) Local {
         const off = z.offsetAt(ts);
-        var l = civil(ts + off);
+        var l = civil(ts +| off);
         l.offset = off;
         return l;
     }
 };
 
+const header_len = 44;
+/// Where the leap-second count is in a header.
+const leapcnt_at = 28;
+
+const Block = struct {
+    /// Bytes before the leap-second records, after them, and the records'.
+    before: u64,
+    leaps: u64,
+    after: u64,
+};
+
+/// The sizes of the data that the TZif header at the start of `data` announces,
+/// with transition times of `time_size` bytes. Null unless all of it is there.
+fn block(data: []const u8, time_size: u64) ?Block {
+    if (data.len < header_len or !std.mem.eql(u8, data[0..4], "TZif")) return null;
+    var counts: [6]u64 = undefined;
+    for (&counts, 0..) |*c, i| c.* = std.mem.readInt(u32, data[20 + 4 * i ..][0..4], .big);
+    const isutcnt, const isstdcnt, const leapcnt, const timecnt, const typecnt, const charcnt = counts;
+    // 32-bit counts and small factors: none of this overflows 64 bits
+    const b: Block = .{
+        .before = timecnt * (time_size + 1) + typecnt * 6 + charcnt,
+        .leaps = leapcnt * (time_size + 4),
+        .after = isstdcnt + isutcnt,
+    };
+    if (b.before + b.leaps + b.after > data.len - header_len) return null;
+    return b;
+}
+
+/// Check the counts of the TZif file `data` and take out the leap-second
+/// records of the block that will be read. Returns what to parse, or null.
+fn prepare(data: []u8) ?[]u8 {
+    var at: usize = 0;
+    var time_size: u64 = 4;
+    const first = block(data, time_size) orelse return null;
+    if (data[4] != 0) {
+        // a version 1 block, which is skipped, then the one with 64-bit times
+        at = header_len + @as(usize, @intCast(first.before + first.leaps + first.after));
+        time_size = 8;
+    }
+    const b = block(data[at..], time_size) orelse return null;
+    const leaps_at = at + header_len + @as(usize, @intCast(b.before));
+    const leaps: usize = @intCast(b.leaps);
+    @memmove(data[leaps_at .. data.len - leaps], data[leaps_at + leaps ..]);
+    @memset(data[at + leapcnt_at ..][0..4], 0);
+    return data[0 .. data.len - leaps];
+}
+
+/// The seconds `civil` can represent: the year must fit its field.
+const civil_limit = 1 << 55;
+
 /// Calendar fields of `secs` seconds since 1970-01-01 00:00:00 (proleptic
 /// Gregorian, no offset applied).
 pub fn civil(secs: i64) Local {
-    const days = @divFloor(secs, 86400);
-    const rem: u32 = @intCast(@mod(secs, 86400));
+    // further than a billion years either way is given as that
+    const s = std.math.clamp(secs, -civil_limit, civil_limit);
+    const days = @divFloor(s, 86400);
+    const rem: u32 = @intCast(@mod(s, 86400));
     // Howard Hinnant's civil_from_days.
     const z = days + 719468;
     const era = @divFloor(z, 146097);
@@ -148,4 +212,69 @@ test "UTC zone has offset 0 and an unknown name falls back to UTC" {
     var u = Zone.load(std.testing.io, std.testing.allocator, "No/Such_Zone");
     defer u.deinit();
     try std.testing.expectEqual(@as(i32, 0), u.offsetAt(0));
+}
+
+/// A TZif header for a test: counts in file order.
+fn testHeader(version: u8, counts: [6]u32) [header_len]u8 {
+    var h: [header_len]u8 = @splat(0);
+    @memcpy(h[0..4], "TZif");
+    h[4] = version;
+    for (counts, 0..) |c, i| std.mem.writeInt(u32, h[20 + 4 * i ..][0..4], c, .big);
+    return h;
+}
+
+test "counts larger than the file are refused before parsing" {
+    const t = std.testing;
+    const huge = std.math.maxInt(u32);
+    for ([_][6]u32{
+        .{ 0, 0, 0, huge, 1, 4 },
+        .{ 0, 0, huge, 0, 1, 4 },
+        .{ 0, 0, 0, 0, huge, 4 },
+        .{ huge, huge, 0, 0, 1, 4 },
+        .{ 0, 0, 0, 0x04000000, 1, 4 },
+    }) |counts| {
+        for ([_]u8{ 0, '2' }) |version| {
+            // as the first header, and as the second
+            var one = testHeader(version, counts) ++ @as([10]u8, @splat(0));
+            var z = Zone.parse(t.failing_allocator, &one);
+            try t.expect(z.tz == null);
+            var two = testHeader('2', @splat(0)) ++ testHeader('2', counts) ++ @as([10]u8, @splat(0));
+            z = Zone.parse(t.failing_allocator, &two);
+            try t.expect(z.tz == null);
+        }
+    }
+}
+
+test "leap-second records are not given to the parser" {
+    const t = std.testing;
+    const be = struct {
+        fn int(comptime T: type, v: T) [@sizeOf(T)]u8 {
+            var b: [@sizeOf(T)]u8 = undefined;
+            std.mem.writeInt(T, &b, v, .big);
+            return b;
+        }
+    };
+    // one zone, an hour east, with two leap records whose times and
+    // corrections overflow the std parser's arithmetic
+    const zone = be.int(i32, 3600) ++ [2]u8{ 0, 0 } ++ "ABC\x00".*;
+    const far: i64 = (1 << 47) - 1;
+    const leaps = be.int(i64, far) ++ be.int(i32, 1) ++ be.int(i64, far) ++ be.int(i32, std.math.maxInt(i32));
+    var data = testHeader('2', @splat(0)) ++ testHeader('2', .{ 0, 0, 2, 0, 1, 4 }) ++ zone ++ leaps ++ "\n\n".*;
+    var z = Zone.parse(t.allocator, &data);
+    defer z.deinit();
+    try t.expectEqual(@as(i32, 3600), z.offsetAt(0));
+
+    // version 1: 32-bit times, no second header
+    const old_leaps = be.int(i32, 0) ++ be.int(i32, 1) ++ be.int(i32, 3000000) ++ be.int(i32, std.math.maxInt(i32));
+    var old = testHeader(0, .{ 0, 0, 2, 0, 1, 4 }) ++ zone ++ old_leaps;
+    var y = Zone.parse(t.allocator, &old);
+    defer y.deinit();
+    try t.expectEqual(@as(i32, 3600), y.offsetAt(0));
+}
+
+test "any time has a calendar date" {
+    _ = civil(std.math.maxInt(i64));
+    _ = civil(std.math.minInt(i64));
+    var z: Zone = .{};
+    _ = z.local(std.math.maxInt(i64));
 }

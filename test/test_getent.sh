@@ -33,6 +33,8 @@ for k in 0abc 0x0 1000x " 0" "+0" "  00" "0 " 0.0 + 18446744073709551616; do
     run_cmp "group key '$k'"             group "$k"
 done
 run_cmp "services keys that only start like a port" services 22abc 22abc/tcp 80x
+# a port or id too large for its type names nothing (and once crashed services)
+run_cmp "services port too large"        services 4294967296 99999999999/tcp 18446744073709551616
 # 2^32 must not wrap to 0 (glibc's does, and prints root: not compared)
 if [ -z "$(ours passwd 4294967296)" ]; then PASS=$((PASS + 1)); echo "PASS passwd 4294967296 is not root"
 else FAIL=$((FAIL + 1)); echo "FAIL passwd 4294967296 is not root"; fi
