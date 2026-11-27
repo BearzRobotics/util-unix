@@ -108,4 +108,37 @@ run_full "full disk"
 POSIXLY_CORRECT=1; export POSIXLY_CORRECT
 run_cmp "POSIXLY_CORRECT: no options after an operand" root -l
 unset POSIXLY_CORRECT
+# what a home directory offers as .plan: only a regular file the account owns or
+# everyone may read is shown. The account is made up, in a private /etc/passwd.
+if command -v bwrap > /dev/null 2>&1 && bwrap --ro-bind / / true 2> /dev/null; then
+    ph="$(mktemp -d)"; mkdir "$ph/home" "$ph/elsewhere"
+    me="$(id -u)"; other=$((me + 1))
+    printf 'root:x:0:0:r:/root:/bin/sh\nmine:x:%s:%s:%s:%s:/bin/sh\ntheirs:x:%s:%s::%s:/bin/sh\n' \
+        "$me" "$me" "$(printf 'n%.0s' $(seq 600))" "$ph/home" "$other" "$other" "$ph/home" > "$ph/passwd"
+    show() { bwrap --ro-bind / / --ro-bind "$ph/passwd" /etc/passwd timeout 10 "$BIN_DIR/pinky" -l -b "$1" 2>&1; }
+    plan_case() { # description, user, text expected ("" for no Plan:)
+        got="$(show "$2")"
+        if [ -n "$3" ]; then case "$got" in *"$3"*) ok=1 ;; *) ok=0 ;; esac
+        else case "$got" in *Plan:*) ok=0 ;; *"Login name"*) ok=1 ;; *) ok=0 ;; esac; fi
+        if [ "$ok" = 1 ]; then PASS=$((PASS + 1)); echo "PASS .plan: $1"
+        else FAIL=$((FAIL + 1)); echo "FAIL .plan: $1"; printf '%s\n' "$got" | tail -c 300; fi
+    }
+    echo secret-text > "$ph/elsewhere/private"; chmod 600 "$ph/elsewhere/private"
+    ln -s ../elsewhere/private "$ph/home/.plan"
+    plan_case "a link to the account's own file is followed" mine secret-text
+    plan_case "a link to another's private file shows nothing" theirs ""
+    chmod 644 "$ph/elsewhere/private"
+    plan_case "a file everyone may read is shown" theirs secret-text
+    rm "$ph/home/.plan"; mkfifo "$ph/home/.plan"
+    plan_case "a FIFO does not block" mine ""
+    rm "$ph/home/.plan"; ln -s /dev/zero "$ph/home/.plan"
+    plan_case "a device is not read" mine ""
+    rm "$ph/home/.plan"; { head -c 17000000 /dev/zero | tr '\0' a; echo END-OF-PLAN; } > "$ph/home/.plan"
+    plan_case "a large file is shown to its end" mine END-OF-PLAN
+    if show mine | grep -q "$(printf 'n%.0s' $(seq 600))"; then PASS=$((PASS + 1)); echo "PASS a long real name is not cut"
+    else FAIL=$((FAIL + 1)); echo "FAIL a long real name is not cut"; fi
+else
+    skip_test ".plan safety needs bwrap"
+fi
+
 print_summary

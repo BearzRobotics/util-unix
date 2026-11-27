@@ -16,6 +16,8 @@ Short format (the default) lists the user sessions in /var/run/utmp, optionally 
 
 **-l**: long format. **-s**: short format. The last of the two on the line wins.
 
+A .plan or .project file is shown only if it is a regular file that the account owns or that everyone may read, so that a link in a home directory cannot make **pinky**, run by someone with more rights, print another's private file (GNU pinky prints whatever the path leads to, and waits on a FIFO).
+
 **-b**: omit the directory and shell in long format. **-h**: omit the .project file. **-p**: omit the .plan file.
 
 **-f**: omit the heading line. **-w**: omit the real name. **-i**: omit the real name and the remote host. **-q**: omit the real name, remote host and idle time.

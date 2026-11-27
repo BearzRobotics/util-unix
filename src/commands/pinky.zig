@@ -94,10 +94,20 @@ pub fn main(ctx: cli.Context) u8 {
 
     if (o.long) {
         for (users.items) |u| {
-            uu.pinky.writeLong(ctx.io, ctx.gpa, out, &db, u, o) catch return cli.outputFailed(ctx, &w, 1);
+            uu.pinky.writeLong(ctx.io, ctx.gpa, out, &db, u, o) catch |e| {
+                if (w.err == null) cli.warn(ctx, "{f}: {s}", .{ cli.quotef(u), cli.errText(e) });
+                return cli.outputFailed(ctx, &w, 1);
+            };
         }
     } else {
-        const data = uu.utmp.load(ctx.io, ctx.gpa, uu.utmp.default_path) catch ctx.gpa.alloc(u8, 0) catch return 1;
+        // only a missing file means that nobody is logged in
+        const data = uu.utmp.load(ctx.io, ctx.gpa, uu.utmp.default_path) catch |e| switch (e) {
+            error.FileNotFound => ctx.gpa.alloc(u8, 0) catch return 1,
+            else => {
+                cli.warn(ctx, "{f}: {s}", .{ cli.quotef(uu.utmp.default_path), cli.errText(e) });
+                return 1;
+            },
+        };
         defer ctx.gpa.free(data);
         var zone = uu.localtime.Zone.load(ctx.io, ctx.gpa, cli.getenv(ctx, "TZ")) catch |e| utc: {
             cli.warn(ctx, "cannot load the time zone, times are in UTC: {s}", .{cli.errText(e)});

@@ -18,6 +18,7 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const userdb = @import("userdb.zig");
 const utmp = @import("utmp.zig");
+const fsown = @import("fsown.zig");
 const who = @import("who.zig");
 const localtime = @import("localtime.zig");
 
@@ -63,7 +64,6 @@ pub fn realName(buf: []u8, gecos: []const u8, login: []const u8) []const u8 {
 /// project and plan files, then a blank line. An unknown login gets only its
 /// first line, with `???` as the name.
 pub fn writeLong(io: Io, gpa: Allocator, w: *Io.Writer, db: *const userdb.Db, login: []const u8, o: Options) !void {
-    var name_buf: [512]u8 = undefined;
     const pw = db.userByName(login) orelse {
         try w.writeAll("Login name: ");
         try writeField(w, login, 28, o);
@@ -73,7 +73,10 @@ pub fn writeLong(io: Io, gpa: Allocator, w: *Io.Writer, db: *const userdb.Db, lo
     try w.writeAll("Login name: ");
     try writeField(w, pw.name, 28, o);
     try w.writeAll("In real life:  ");
-    try writeField(w, realName(&name_buf, pw.gecos, pw.name), 0, o);
+    // room for the whole name, each '&' in it standing for the login name
+    const name_buf = try gpa.alloc(u8, pw.gecos.len + std.mem.count(u8, pw.gecos, "&") * pw.name.len);
+    defer gpa.free(name_buf);
+    try writeField(w, realName(name_buf, pw.gecos, pw.name), 0, o);
     try w.writeByte('\n');
     if (o.home_and_shell) {
         try w.writeAll("Directory: ");
@@ -82,22 +85,8 @@ pub fn writeLong(io: Io, gpa: Allocator, w: *Io.Writer, db: *const userdb.Db, lo
         try writeField(w, pw.shell, 0, o);
         try w.writeByte('\n');
     }
-    if (o.project) {
-        if (try readHomeFile(io, gpa, pw.dir, ".project")) |text| {
-            defer gpa.free(text);
-            if (o.mask_controls) utmp.maskControls(text, true);
-            try w.writeAll("Project: ");
-            try w.writeAll(text);
-        }
-    }
-    if (o.plan) {
-        if (try readHomeFile(io, gpa, pw.dir, ".plan")) |text| {
-            defer gpa.free(text);
-            if (o.mask_controls) utmp.maskControls(text, true);
-            try w.writeAll("Plan:\n");
-            try w.writeAll(text);
-        }
-    }
+    if (o.project) try showHomeFile(io, gpa, w, pw, ".project", "Project: ", o);
+    if (o.plan) try showHomeFile(io, gpa, w, pw, ".plan", "Plan:\n", o);
     try w.writeByte('\n');
 }
 
@@ -122,13 +111,68 @@ fn writeField(w: *Io.Writer, text: []const u8, width: usize, o: Options) Io.Writ
     if (text.len < width) try w.splatByteAll(' ', width - text.len);
 }
 
-fn readHomeFile(io: Io, gpa: Allocator, dir: []const u8, name: []const u8) !?[]u8 {
-    const path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dir, name });
+/// Write `heading` and the file `name` from `pw`'s home directory, if there is
+/// one to show. The user decides what is at that path, and whoever runs this
+/// may be able to read more than they can. So only a regular file is shown (a
+/// FIFO would block, a device may never end), and only one that the account
+/// owns or that anyone may read: a link to another's private file shows
+/// nothing. A missing or unreadable file is skipped, as GNU does.
+fn showHomeFile(io: Io, gpa: Allocator, w: *Io.Writer, pw: userdb.Passwd, name: []const u8, heading: []const u8, o: Options) !void {
+    const path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ pw.dir, name });
     defer gpa.free(path);
-    return Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(16 << 20)) catch |e| switch (e) {
-        error.OutOfMemory, error.Canceled => |err| err,
-        else => null, // unreadable or missing: skipped, as GNU does
-    };
+    try io.checkCancel();
+    const fd = fsown.openForChange(Io.Dir.cwd(), path, .read) catch return;
+    defer fsown.closeHandle(fd);
+    const st = fsown.statHandle(fd) catch return;
+    if (!st.isReg() or (st.uid != pw.uid and st.mode & 0o004 == 0)) return;
+    try w.writeAll(heading);
+    try copyFile(io, w, fd, o.mask_controls);
+}
+
+/// Copy the open file to `w`, however long it is.
+fn copyFile(io: Io, w: *Io.Writer, fd: std.posix.fd_t, mask: bool) !void {
+    const file: Io.File = .{ .handle = fd, .flags = .{ .nonblocking = false } };
+    var buf: [4096]u8 = undefined;
+    var kept: usize = 0;
+    while (true) {
+        const n = file.readStreaming(io, &.{buf[kept..]}) catch |err| switch (err) {
+            error.EndOfStream => 0,
+            else => return err,
+        };
+        const have = kept + n;
+        // when masking, hold back what the next read may complete
+        const ready = if (mask and n > 0) completeLength(buf[0..have]) else have;
+        if (mask) utmp.maskControls(buf[0..ready], true);
+        try w.writeAll(buf[0..ready]);
+        if (n == 0) return;
+        kept = have - ready;
+        @memmove(buf[0..kept], buf[ready..have]);
+    }
+}
+
+/// The length of `text` without a final carriage return or the start of a
+/// UTF-8 character that is not all there.
+fn completeLength(text: []const u8) usize {
+    if (text.len > 0 and text[text.len - 1] == '\r') return text.len - 1;
+    var back: usize = 1;
+    while (back <= @min(text.len, 3)) : (back += 1) {
+        const c = text[text.len - back];
+        if (c & 0xc0 == 0x80) continue;
+        const need = std.unicode.utf8ByteSequenceLength(c) catch return text.len;
+        return if (need > back) text.len - back else text.len;
+    }
+    return text.len;
+}
+
+test "what is held back between reads" {
+    const t = std.testing;
+    try t.expectEqual(@as(usize, 2), completeLength("ab"));
+    try t.expectEqual(@as(usize, 2), completeLength("ab\r"));
+    try t.expectEqual(@as(usize, 2), completeLength("ab\xc3"));
+    try t.expectEqual(@as(usize, 4), completeLength("ab\xc3\xa9"));
+    try t.expectEqual(@as(usize, 1), completeLength("a\xe2\x82"));
+    try t.expectEqual(@as(usize, 1), completeLength("a\xf0\x9f\x98"));
+    try t.expectEqual(@as(usize, 3), completeLength("a\x80\x80"));
 }
 
 /// Idle column text: blank under a minute, `HH:MM` under a day, else `Nd`.
