@@ -20,7 +20,7 @@ Status: implemented; 278 differential cases pass against GNU chmod 9.7 in indivi
 
 ## Supported
 
-All options of GNU chmod 9.7. Differential-tested: octal and symbolic modes (including `X`, `s`, `t`, copy-from-class `u`/`g`/`o`), umask interplay for five umasks, `-c`/`-v`/`-f`, `--reference`, `-R` with `-H`/`-L`/`-P`/`-h`, dangling and directory links, `--preserve-root`, mode-looking words such as `-w` taken as MODE, and GNU's quoting of names with spaces and quotes.
+All options of GNU chmod 9.7. Differential-tested: octal and symbolic modes (including `X`, `s`, `t`, copy-from-class `u`/`g`/`o`), umask interplay for five umasks, `-c`/`-v`/`-f`, `--reference`, `-R` with `-H`/`-L`/`-P`/`-h`, dangling and directory links, `--preserve-root`, mode-looking words such as `-w` taken as MODE, and GNU's quoting of names with spaces and quotes, in the C locale and in a UTF-8 locale (taken from LC_ALL, LC_CTYPE or LANG). In a UTF-8 locale every valid character is written as it is except C0, DEL, C1 and U+2028/U+2029; GNU also escapes code points its C library does not consider printable, such as unassigned ones.
 
 ## Deliberate deviations and gaps
 

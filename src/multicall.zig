@@ -27,6 +27,7 @@ pub const panic = if (builtin.mode == .debug) std.debug.FullPanic(std.debug.defa
 pub fn main(init: std.process.Init) !u8 {
     sys.restoreInheritedSignals(init.io);
     const args = try init.minimal.args.toSlice(init.arena.allocator());
+    cli.setLocale(init.environ_map);
     var ctx: cli.Context = .{
         .name = "",
         .args = args[1..],

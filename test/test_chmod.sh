@@ -203,4 +203,17 @@ case "$x" in *": write error
 "*) y="$(printf '%s' "$y" | sed 's/\(: write error\): No space left on device$/\1/')" ;; esac
 if [ "$x" = "$y" ]; then PASS=$((PASS + 1)); echo "PASS -v, full disk"
 else FAIL=$((FAIL + 1)); echo "FAIL -v, full disk"; echo "     GNU : $x"; echo "     OURS: $y"; fi
+for n in '\t'"'"'q' '\t'"'"'' '\t'"''"'' '\t'"'"'\tz' "a'"'\tb'"'" "'"'\t' '\t'"'"' x'; do
+    run_cmp "a ' beside escapes: $n"   600 "$(printf "$n")"
+done
+# in a UTF-8 locale printable names stay as they are; others are escaped
+utf="$(mktemp -d)"
+for n in 'caf\303\251' 'a b \303\251' '\303\251'"'"'q' '\346\227\245\346\234\254' 'c1\302\233z' 'bad\377' 'tab\t\303\251'; do
+    name="$(printf "$n")"
+    x="$(cd "$utf" && LC_ALL=C.UTF-8 /usr/bin/chmod 600 "$name" 2>&1; echo $?)"
+    y="$(cd "$utf" && LC_ALL=C.UTF-8 "$BIN_DIR/chmod" 600 "$name" 2>&1; echo $?)"
+    x="$(printf '%s' "$x" | sed 's/^[^:]*chmod:/chmod:/')"
+    if [ "$x" = "$y" ]; then PASS=$((PASS + 1)); echo "PASS UTF-8 locale name: $n"
+    else FAIL=$((FAIL + 1)); echo "FAIL UTF-8 locale name: $n"; echo "     GNU : $x"; echo "     OURS: $y"; fi
+done
 print_summary

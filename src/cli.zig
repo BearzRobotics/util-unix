@@ -4,9 +4,10 @@
 //! helpers that follow getopt_long, and diagnostics.
 //!
 //! This file is wrapper-side only; the reusable logic is in `util_unix`
-//! (src/root.zig). Nothing here owns process-wide state: commands receive
-//! everything through `Context`, so one implementation serves the individual
-//! and multicall executables (SPEC §8).
+//! (src/root.zig). Commands receive everything through `Context`, so one
+//! implementation serves the individual and multicall executables (SPEC §8).
+//! The one exception is whether the locale is UTF-8, which the entry points set
+//! once: it decides how a name is quoted wherever one is formatted.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -212,6 +213,46 @@ pub fn errText(err: anyerror) []const u8 {
     };
 }
 
+/// True when the user's locale is UTF-8: names are then quoted with their
+/// printable characters as they are, and not byte by byte as in the C locale.
+var utf8_names = false;
+
+/// Take the character set from the first of LC_ALL, LC_CTYPE and LANG that is
+/// set. Call once, before running a command.
+pub fn setLocale(environ: *const std.process.Environ.Map) void {
+    utf8_names = for ([_][]const u8{ "LC_ALL", "LC_CTYPE", "LANG" }) |key| {
+        const value = environ.get(key) orelse continue;
+        if (value.len == 0) continue;
+        break isUtf8Locale(value);
+    } else false;
+}
+
+fn isUtf8Locale(name: []const u8) bool {
+    const dot = std.mem.indexOfScalar(u8, name, '.') orelse return false;
+    const end = std.mem.indexOfScalarPos(u8, name, dot, '@') orelse name.len;
+    const codeset = name[dot + 1 .. end];
+    return std.ascii.eqlIgnoreCase(codeset, "utf-8") or std.ascii.eqlIgnoreCase(codeset, "utf8");
+}
+
+/// How many bytes at `i` make one character that has to be escaped, or 0 when
+/// what is there may be written as it is.
+fn escaped(text: []const u8, i: usize) usize {
+    const c = text[i];
+    if (c < 0x80) return if (c < 0x20 or c == 0x7f) 1 else 0;
+    if (!utf8_names) return 1;
+    const n: usize = std.unicode.utf8ByteSequenceLength(c) catch return 1;
+    if (n > text.len - i) return 1;
+    const cp = std.unicode.utf8Decode(text[i..][0..n]) catch return 1;
+    // C1 controls, and the line and paragraph separators
+    return if (cp < 0xa0 or cp == 0x2028 or cp == 0x2029) n else 0;
+}
+
+/// The length of the character at `i`, which `escaped` let through.
+fn plainLen(text: []const u8, i: usize) usize {
+    if (text[i] < 0x80) return 1;
+    return std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+}
+
 /// A file name formatted the way GNU's quotef()/quoteaf() show it in the C
 /// locale: `quotef` quotes only when needed, `quoteaf` always. Use with `{f}`.
 pub const Quoted = struct {
@@ -225,11 +266,17 @@ pub const Quoted = struct {
         var needs = false;
         var has_squote = false;
         var has_other = false; // specials other than the single quote
-        for (name, 0..) |c, i| {
-            if (c < 0x20 or c >= 0x7f) {
+        var at: usize = 0;
+        while (at < name.len) {
+            const bad = escaped(name, at);
+            if (bad > 0) {
                 has_ctl = true;
+                at += bad;
                 continue;
             }
+            const i = at;
+            const c = name[i];
+            at += plainLen(name, i);
             switch (c) {
                 '\'' => has_squote = true,
                 ' ', '!', '"', '$', '&', '(', ')', '*', ';', '<', '=', '>', '?', '[', '\\', '^', '`', '|', ':' => has_other = true,
@@ -258,9 +305,9 @@ pub const Quoted = struct {
         var i: usize = 0;
         var first = true;
         while (i < name.len) {
-            const ctl = name[i] < 0x20 or name[i] >= 0x7f;
+            const ctl = escaped(name, i) > 0;
             var j = i;
-            while (j < name.len and ((name[j] < 0x20 or name[j] >= 0x7f) == ctl)) j += 1;
+            while (j < name.len and (escaped(name, j) > 0) == ctl) j += if (ctl) escaped(name, j) else plainLen(name, j);
             if (ctl) {
                 if (first) try w.writeAll("''");
                 try w.writeAll("$'");
@@ -276,8 +323,13 @@ pub const Quoted = struct {
                 };
                 try w.writeByte('\'');
             } else {
-                try w.writeByte('\'');
-                for (name[i..j]) |c| {
+                var from = i;
+                // right after $'...' there is no quote to close before a '
+                if (!first and name[i] == '\'') {
+                    try w.writeAll("\\''");
+                    from += 1;
+                } else try w.writeByte('\'');
+                for (name[from..j]) |c| {
                     if (c == '\'') try w.writeAll("'\\''") else try w.writeByte(c);
                 }
                 try w.writeByte('\'');
@@ -335,18 +387,31 @@ pub const QuotedC = struct {
 
     pub fn format(q: QuotedC, w: *Io.Writer) Io.Writer.Error!void {
         try w.writeByte('\'');
-        for (q.text) |c| switch (c) {
-            '\\' => try w.writeAll("\\\\"),
-            '\'' => try w.writeAll("\\'"),
-            7 => try w.writeAll("\\a"),
-            8 => try w.writeAll("\\b"),
-            9 => try w.writeAll("\\t"),
-            10 => try w.writeAll("\\n"),
-            11 => try w.writeAll("\\v"),
-            12 => try w.writeAll("\\f"),
-            13 => try w.writeAll("\\r"),
-            else => if (c < 0x20 or c >= 0x7f) try w.print("\\{o:0>3}", .{c}) else try w.writeByte(c),
-        };
+        var at: usize = 0;
+        while (at < q.text.len) {
+            const bad = escaped(q.text, at);
+            if (bad == 0) {
+                const n = plainLen(q.text, at);
+                if (n > 1) {
+                    try w.writeAll(q.text[at..][0..n]);
+                    at += n;
+                    continue;
+                }
+            }
+            for (q.text[at..][0..@max(bad, 1)]) |c| switch (c) {
+                '\\' => try w.writeAll("\\\\"),
+                '\'' => try w.writeAll("\\'"),
+                7 => try w.writeAll("\\a"),
+                8 => try w.writeAll("\\b"),
+                9 => try w.writeAll("\\t"),
+                10 => try w.writeAll("\\n"),
+                11 => try w.writeAll("\\v"),
+                12 => try w.writeAll("\\f"),
+                13 => try w.writeAll("\\r"),
+                else => if (c < 0x20 or c >= 0x7f) try w.print("\\{o:0>3}", .{c}) else try w.writeByte(c),
+            };
+            at += @max(bad, 1);
+        }
         try w.writeByte('\'');
     }
 };
@@ -366,4 +431,22 @@ test "quotef/quoteaf follow GNU C-locale quoting" {
     try t.expectEqualStrings("\"it's\"", try std.fmt.bufPrint(&buf, "{f}", .{quotef("it's")}));
     try t.expectEqualStrings("'it'\\''s a'", try std.fmt.bufPrint(&buf, "{f}", .{quotef("it's a")}));
     try t.expectEqualStrings("'a'$'\\n''b'", try std.fmt.bufPrint(&buf, "{f}", .{quotef("a\nb")}));
+}
+
+test "names in a UTF-8 locale and in the C locale (as GNU 9.7 prints them)" {
+    defer utf8_names = false;
+    var buf: [128]u8 = undefined;
+    const cases = [_][3][]const u8{
+        .{ "caf\xc3\xa9", "'caf'$'\\303\\251'", "'caf\xc3\xa9'" },
+        .{ "a b\xc3\xa9", "'a b'$'\\303\\251'", "'a b\xc3\xa9'" },
+        .{ "\xc3\xa9'q", "''$'\\303\\251'\\''q'", "\"\xc3\xa9'q\"" },
+        .{ "c1\xc2\x9bz", "'c1'$'\\302\\233''z'", "'c1'$'\\302\\233''z'" },
+        .{ "bad\xff", "'bad'$'\\377'", "'bad'$'\\377'" },
+        .{ "\t' x", "''$'\\t'\\'' x'", "''$'\\t'\\'' x'" },
+    };
+    for (cases) |c| for ([_]bool{ false, true }) |utf8| {
+        utf8_names = utf8;
+        try std.testing.expectEqualStrings(c[if (utf8) 2 else 1], try std.fmt.bufPrint(&buf, "{f}", .{quoteaf(c[0])}));
+    };
+    try std.testing.expect(isUtf8Locale("en_US.UTF-8") and isUtf8Locale("C.utf8") and !isUtf8Locale("C") and !isUtf8Locale("en_US.ISO-8859-1"));
 }
