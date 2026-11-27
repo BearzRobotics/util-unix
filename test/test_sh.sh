@@ -539,6 +539,11 @@ c "a redirection that cannot be undone is not made" 'ulimit -n 10; { echo a >/de
 # with stdout to the capture file (yash does). It is larger than a pipe holds.
 c "a failed pipe does not hang the shell" 'ulimit -n 5; head -c 1000000 /dev/zero | cat | cat >/dev/null; echo reached' e
 c "a command that may not be run is not missing" 'mkdir -p ne; : > ne/zzcmd; chmod -x ne/zzcmd; (PATH=$PWD/ne; zzcmd) 2>&1 | grep -c "Permission denied"; (PATH=$PWD/ne; exec zzcmd) 2>/dev/null; echo $?' P
+c "exit in a login startup file ends the shell" 'echo "exit 3" > .profile; HOME=$PWD sh -l -c "echo ran"; echo $?' e
+c "errexit in a login startup file ends the shell" 'echo "set -e; false" > .profile; HOME=$PWD sh -l -c "echo ran"; echo $?' e
+c "return in a login startup file ends only that file" 'printf "return 0\necho not\n" > .profile; HOME=$PWD sh -l -c "echo one
+echo two"; echo $?' e
+c "the EXIT trap of a startup file that exits runs" 'echo "trap \"echo bye\" EXIT; exit 4" > .profile; HOME=$PWD sh -l -c "echo ran"; echo $?' e
 c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
 c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
 c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'

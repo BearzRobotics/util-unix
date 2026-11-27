@@ -358,7 +358,8 @@ pub fn main(ctx: cli.Context) u8 {
         }
     }
     shell.setParams(rest) catch return outOfMemory(ctx);
-    if (login) runProfiles(shell);
+    // a startup file that exits ends the shell before anything else runs
+    if (login and !runProfiles(shell)) return shell.finish();
     var session: sh.interactive.Session = undefined;
     var have_session = false;
     defer if (have_session) session.deinit();
@@ -388,18 +389,34 @@ pub fn main(ctx: cli.Context) u8 {
     return shell.finish();
 }
 
-/// Login shell: /etc/profile, then ~/.profile (POSIX sh -l).
-fn runProfiles(shell: *sh.Shell) void {
+/// Login shell: /etc/profile, then ~/.profile (POSIX sh -l). False when one of
+/// them ended the shell.
+fn runProfiles(shell: *sh.Shell) bool {
     var arena = std.heap.ArenaAllocator.init(shell.gpa);
     defer arena.deinit();
     const a = arena.allocator();
-    if (sh.exec.readFile(a, "/etc/profile")) |t| _ = sh.exec.runSource(shell, t, .{}) catch {};
+    if (sh.exec.readFile(a, "/etc/profile")) |t| if (!runProfile(shell, t)) return false;
     // HOME is the caller's word for where to look: not to be run with other ids
-    if (sh.idsDiffer()) return;
+    if (sh.idsDiffer()) return true;
     if (shell.getVar("HOME")) |h| {
-        const p = std.fmt.allocPrint(a, "{s}/.profile", .{h}) catch return;
-        if (sh.exec.readFile(a, p)) |t| _ = sh.exec.runSource(shell, t, .{}) catch {};
+        const p = std.fmt.allocPrint(a, "{s}/.profile", .{h}) catch return true;
+        if (sh.exec.readFile(a, p)) |t| return runProfile(shell, t);
     }
+    return true;
+}
+
+fn runProfile(shell: *sh.Shell, text: []const u8) bool {
+    _ = sh.exec.runSource(shell, text, .{}) catch {};
+    switch (shell.flow) {
+        // `return` ends the file, as in one read by `.`
+        .return_func, .interrupt => shell.flow = .none,
+        .exit_shell => {
+            // an error does not close an interactive shell (as for ENV)
+            if (shell.flags.interactive and !shell.explicit_exit) shell.flow = .none else return false;
+        },
+        else => {},
+    }
+    return true;
 }
 
 fn outOfMemory(ctx: cli.Context) u8 {
