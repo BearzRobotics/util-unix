@@ -24,7 +24,7 @@ const fsown = @import("fsown.zig");
 const treewalk = @import("treewalk.zig");
 const selinux = @import("selinux.zig");
 
-pub const Traversal = enum { physical, command_line, logical };
+pub const Traversal = treewalk.Traversal;
 
 /// What the new context is.
 pub const Target = union(enum) {
@@ -109,11 +109,7 @@ const Engine = struct {
     }
 
     fn examine(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) fsown.Error!fsown.Stat {
-        const follow = switch (e.opts.traversal) {
-            .physical => false,
-            .command_line => level == 0,
-            .logical => true,
-        };
+        const follow = e.opts.traversal.follows(level == 0);
         return fsown.statAt(parent, name, follow) catch |err| {
             if (follow and err == error.FileNotFound) return fsown.statAt(parent, name, false) catch err;
             return err;
@@ -144,43 +140,38 @@ const Engine = struct {
     /// directory's contents before the directory.
     fn walk(e: *Engine, path: []const u8) Allocator.Error!bool {
         var ok = try e.visit(e.stack.base, path, 0);
-        while (e.stack.depth() > 0) {
-            const top = e.stack.top();
-            e.path.shrinkRetainingCapacity(top.path_len);
-            const dir = e.stack.topDir() catch |err| {
+        while (e.stack.depth() > 0) switch (try e.stack.step(&e.path)) {
+            .entry => |at| ok = (try e.visit(at.dir, at.entry.name, e.stack.depth())) and ok,
+            .lost => |err| {
                 e.lost(err);
                 ok = false;
                 e.stack.pop();
-                continue;
-            };
-            if (top.nextEntry()) |entry| {
-                if (e.path.items.len == 0 or e.path.items[e.path.items.len - 1] != '/') try e.path.append(e.gpa, '/');
-                try e.path.appendSlice(e.gpa, entry.name);
-                ok = (try e.visit(dir, entry.name, e.stack.depth())) and ok;
-                continue;
-            }
-            if (top.read_error) |err| {
-                e.problem(.read_failed, err);
-                ok = false;
-            }
-            if (e.stack.parentDir()) |parent| {
-                ok = e.change(.{
-                    .parent = parent,
-                    .name = top.name,
-                    .level = e.stack.depth() - 1,
-                    .follow = top.data.follow,
-                    .identity = top.data.identity,
-                }) and ok;
-            } else |err| {
-                e.lost(err);
-                ok = false;
-            }
-            e.stack.pop();
-        }
+            },
+            .leave => |read_error| {
+                if (read_error) |err| {
+                    e.problem(.read_failed, err);
+                    ok = false;
+                }
+                const top = e.stack.top();
+                if (e.stack.parentDir()) |parent| {
+                    ok = e.change(.{
+                        .parent = parent,
+                        .name = top.name,
+                        .level = e.stack.depth() - 1,
+                        .follow = top.data.follow,
+                        .identity = top.data.identity,
+                    }) and ok;
+                } else |err| {
+                    e.lost(err);
+                    ok = false;
+                }
+                e.stack.pop();
+            },
+        };
         return ok;
     }
 
-    /// A directory the walk had to open again is gone.
+    /// A directory is gone, or something else is found in its place.
     fn lost(e: *Engine, err: anyerror) void {
         if (err == error.DirectoryChanged) e.problem(.file_changed, null) else e.problem(.cannot_read_directory, err);
     }
@@ -204,25 +195,15 @@ const Engine = struct {
             if (e.stack.contains(st)) return e.change(target);
         }
 
-        const follow_open = switch (e.opts.traversal) {
-            .physical => false,
-            .command_line => level == 0,
-            .logical => true,
-        };
+        const follow_open = e.opts.traversal.follows(level == 0);
         const dir = e.stack.open(parent, name, follow_open) catch |err| {
             e.problem(.cannot_read_directory, err);
             return false;
         };
-        const opened = fsown.statHandle(dir.handle) catch |err| {
-            dir.close(e.io);
-            e.problem(.cannot_read_directory, err);
+        _ = e.stack.verify(dir, st) catch |err| {
+            e.lost(err);
             return false;
         };
-        if (!opened.sameFile(st)) {
-            dir.close(e.io);
-            e.problem(.file_changed, null);
-            return false;
-        }
         try e.stack.push(dir, name, follow_open, st, e.path.items.len, .{ .follow = target.follow, .identity = target.identity });
         return true;
     }
@@ -307,13 +288,6 @@ const Engine = struct {
     }
 };
 
-/// Strip surplus trailing slashes the way fts does ("dir//" is shown "dir/").
-fn displayPath(path: []const u8) []const u8 {
-    var end = path.len;
-    while (end > 2 and path[end - 1] == '/' and path[end - 2] == '/') end -= 1;
-    return path[0..end];
-}
-
 /// Change the context of each of `paths`. True when every file was processed
 /// without a problem; the only error is out-of-memory.
 pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) Allocator.Error!bool {
@@ -323,7 +297,7 @@ pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) All
     var ok = true;
     for (paths) |p| {
         e.path.clearRetainingCapacity();
-        try e.path.appendSlice(gpa, displayPath(p));
+        try e.path.appendSlice(gpa, treewalk.displayPath(p));
         ok = (try e.walk(p)) and ok;
     }
     return ok;

@@ -36,14 +36,7 @@ pub const Verbosity = enum {
 };
 
 /// Which symbolic links to follow while walking (`-P`, `-H`, `-L`).
-pub const Traversal = enum {
-    /// `-P`: never follow a symbolic link to a directory.
-    physical,
-    /// `-H`: follow links named on the command line only.
-    command_line,
-    /// `-L`: follow every link to a directory.
-    logical,
-};
+pub const Traversal = treewalk.Traversal;
 
 pub const ChangeStatus = enum {
     succeeded,
@@ -162,11 +155,7 @@ const Engine = struct {
 
     /// Stat the way the traversal mode says an entry at `level` is examined.
     fn examine(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) fsown.Error!fsown.Stat {
-        const follow = switch (e.opts.traversal) {
-            .physical => false,
-            .command_line => level == 0,
-            .logical => true,
-        };
+        const follow = e.opts.traversal.follows(level == 0);
         return fsown.statAt(parent, name, follow) catch |err| {
             // A dangling link is still an entry (fts: FTS_SLNONE).
             if (follow and err == error.FileNotFound) return fsown.statAt(parent, name, false) catch err;
@@ -188,45 +177,41 @@ const Engine = struct {
     /// directory's contents before the directory.
     fn walk(e: *Engine, path: []const u8) Allocator.Error!bool {
         var ok = try e.visit(e.stack.base, path, 0);
-        while (e.stack.depth() > 0) {
-            const top = e.stack.top();
-            e.path.shrinkRetainingCapacity(top.path_len);
-            const dir = e.stack.topDir() catch |err| {
+        while (e.stack.depth() > 0) switch (try e.stack.step(&e.path)) {
+            .entry => |at| {
+                // the fast path starts below the operand's own entries
+                const level = e.stack.depth();
+                const listed = level == 1 or e.stack.top().data == .unstatted;
+                ok = (if (listed) try e.visitListed(at.dir, at.entry, level) else try e.visit(at.dir, at.entry.name, level)) and ok;
+            },
+            .lost => |err| {
                 e.lost(err);
                 ok = false;
                 e.stack.pop();
-                continue;
-            };
-            if (top.nextEntry()) |entry| {
-                // fts appends "/name", avoiding a doubled slash after "dir/".
-                if (e.path.items.len == 0 or e.path.items[e.path.items.len - 1] != '/') try e.path.append(e.gpa, '/');
-                try e.path.appendSlice(e.gpa, entry.name);
-                // the fast path starts below the operand's own entries
-                const level = e.stack.depth();
-                const listed = level == 1 or top.data == .unstatted;
-                ok = (if (listed) try e.visitListed(dir, entry, level) else try e.visit(dir, entry.name, level)) and ok;
-                continue;
-            }
-            if (top.read_error) |err| {
-                e.problem(.read_failed, err);
-                ok = false;
-            }
-            // Post-order: the directory itself.
-            if (e.stack.parentDir()) |parent| {
-                ok = (switch (top.data) {
-                    .unstatted => e.chownUnstatted(parent, top.name),
-                    .examined => |st| e.changeOwner(parent, top.name, st, true),
-                }) and ok;
-            } else |err| {
-                e.lost(err);
-                ok = false;
-            }
-            e.stack.pop();
-        }
+            },
+            .leave => |read_error| {
+                if (read_error) |err| {
+                    e.problem(.read_failed, err);
+                    ok = false;
+                }
+                // Post-order: the directory itself.
+                const top = e.stack.top();
+                if (e.stack.parentDir()) |parent| {
+                    ok = (switch (top.data) {
+                        .unstatted => e.chownUnstatted(parent, top.name),
+                        .examined => |st| e.changeOwner(parent, top.name, st, true),
+                    }) and ok;
+                } else |err| {
+                    e.lost(err);
+                    ok = false;
+                }
+                e.stack.pop();
+            },
+        };
         return ok;
     }
 
-    /// A directory the walk had to open again is gone.
+    /// A directory is gone, or something else is found in its place.
     fn lost(e: *Engine, err: anyerror) void {
         if (err == error.DirectoryChanged) e.problem(.directory_changed, null) else e.problem(.cannot_read_directory, err);
     }
@@ -274,26 +259,16 @@ const Engine = struct {
             if (e.stack.contains(st)) return e.changeOwner(parent, name, st, true);
         }
 
-        const follow_open = switch (e.opts.traversal) {
-            .physical => false,
-            .command_line => level == 0,
-            .logical => true,
-        };
+        const follow_open = e.opts.traversal.follows(level == 0);
         const dir = e.stack.open(parent, name, follow_open) catch |err| {
             e.problem(.cannot_read_directory, err);
             e.describeUnexamined();
             return false;
         };
-        const opened = fsown.statHandle(dir.handle) catch |err| {
-            dir.close(e.io);
-            e.problem(.cannot_read_directory, err);
+        _ = e.stack.verify(dir, st) catch |err| {
+            e.lost(err);
             return false;
         };
-        if (!opened.sameFile(st)) {
-            dir.close(e.io);
-            e.problem(.directory_changed, null);
-            return false;
-        }
         try e.stack.push(dir, name, follow_open, st, e.path.items.len, .{ .examined = st });
         return true;
     }
@@ -446,14 +421,6 @@ const Engine = struct {
     }
 };
 
-/// Strip surplus trailing slashes the way fts does: "dir//" is shown as
-/// "dir/". A lone "/" or "//" is left alone.
-fn displayPath(path: []const u8) []const u8 {
-    var end = path.len;
-    while (end > 2 and path[end - 1] == '/' and path[end - 2] == '/') end -= 1;
-    return path[0..end];
-}
-
 /// Change ownership of each of `paths`. Returns true when every file was
 /// processed without error. Problems and (with `-c`/`-v`) changes are reported
 /// through `opts.reporter`; the only error is out-of-memory.
@@ -464,7 +431,7 @@ pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) All
     var ok = true;
     for (paths) |p| {
         e.path.clearRetainingCapacity();
-        try e.path.appendSlice(gpa, displayPath(p));
+        try e.path.appendSlice(gpa, treewalk.displayPath(p));
         ok = (try e.walk(p)) and ok;
     }
     return ok;
@@ -634,11 +601,4 @@ test "a symlink back to an ancestor is a leaf, not a loop (-L)" {
     }, &.{"d"});
     try testing.expect(ok);
     try col.expect(&.{ "no_change_requested d/self", "no_change_requested d" });
-}
-
-test "displayPath trims surplus trailing slashes" {
-    try testing.expectEqualStrings("d/", displayPath("d//"));
-    try testing.expectEqualStrings("d/", displayPath("d/"));
-    try testing.expectEqualStrings("//", displayPath("//"));
-    try testing.expectEqualStrings("d", displayPath("d"));
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! The directory stack under the recursive walks of chmod, chown/chgrp and
-//! chcon.
+//! What the recursive walks of chmod, chown/chgrp and chcon share: the
+//! directory stack, the step from one entry to the next, which links to follow,
+//! the path shown to the user, and the check that what was opened is what was
+//! examined.
 //!
 //! A walk must survive any depth of tree, which any user can create. So the
 //! stack lives on the heap (no recursion), and only a bounded number of the
@@ -23,6 +25,46 @@ const fsown = @import("fsown.zig");
 pub const default_max_open = 32;
 
 pub const Entry = struct { name: []const u8, kind: Io.File.Kind };
+
+/// Which symbolic links to follow while walking (`-P`, `-H`, `-L`).
+pub const Traversal = enum {
+    /// `-P`: never follow a symbolic link to a directory.
+    physical,
+    /// `-H`: follow links named on the command line only.
+    command_line,
+    /// `-L`: follow every link to a directory.
+    logical,
+
+    /// Whether a link is followed; `operand` says it was named by the caller
+    /// and not found in a directory.
+    pub fn follows(t: Traversal, operand: bool) bool {
+        return switch (t) {
+            .physical => false,
+            .command_line => operand,
+            .logical => true,
+        };
+    }
+};
+
+/// An operand as it is shown: surplus trailing slashes are stripped the way
+/// fts does it ("dir//" is shown "dir/"). A lone "/" or "//" is left alone.
+pub fn displayPath(path: []const u8) []const u8 {
+    var end = path.len;
+    while (end > 2 and path[end - 1] == '/' and path[end - 2] == '/') end -= 1;
+    return path[0..end];
+}
+
+/// What a walk does next, in the innermost directory.
+pub const Step = union(enum) {
+    /// The directory could not be opened again (`error.DirectoryChanged` when
+    /// something else is found in its place). Report it and `pop`.
+    lost: anyerror,
+    /// Visit this entry of `dir`.
+    entry: struct { dir: Io.Dir, entry: Entry },
+    /// All entries are done. Holds the error if reading them was cut short.
+    /// Do what is due on leaving, then `pop`.
+    leave: ?anyerror,
+};
 
 /// `Data` is whatever the walk wants to keep for each directory.
 pub fn Stack(comptime Data: type) type {
@@ -155,6 +197,28 @@ pub fn Stack(comptime Data: type) type {
             return s.frames.items[i].dir orelse s.reopen(i);
         }
 
+        /// Take the walk's next step. `path` is its display path, which is set
+        /// to name the entry returned, or else the innermost directory.
+        pub fn step(s: *Self, path: *std.ArrayList(u8)) Allocator.Error!Step {
+            const frame = s.top();
+            path.shrinkRetainingCapacity(frame.path_len);
+            const dir = s.topDir() catch |err| return .{ .lost = err };
+            const entry = frame.nextEntry() orelse return .{ .leave = frame.read_error };
+            // fts appends "/name", avoiding a doubled slash after "dir/".
+            if (path.items.len == 0 or path.items[path.items.len - 1] != '/') try path.append(s.gpa, '/');
+            try path.appendSlice(s.gpa, entry.name);
+            return .{ .entry = .{ .dir = dir, .entry = entry } };
+        }
+
+        /// Require the just opened `dir` to be the file `examined`, and return
+        /// its status. `dir` is closed when this fails.
+        pub fn verify(s: *Self, dir: Io.Dir, examined: ?fsown.Stat) !fsown.Stat {
+            errdefer dir.close(s.io);
+            const opened = try fsown.statHandle(dir.handle);
+            if (examined) |before| if (!opened.sameFile(before)) return error.DirectoryChanged;
+            return opened;
+        }
+
         /// The handle that the innermost directory's `name` is relative to.
         pub fn parentDir(s: *Self) anyerror!Io.Dir {
             if (s.frames.items.len == 1) return s.base;
@@ -209,9 +273,7 @@ pub fn Stack(comptime Data: type) type {
         /// Open `name` and require it to be the directory of frame `k`.
         fn openSame(s: *Self, parent: Io.Dir, name: []const u8, follow: bool, k: usize, keep: ?usize) anyerror!Io.Dir {
             const dir = try s.openKeeping(parent, name, follow, keep);
-            errdefer dir.close(s.io);
-            const now = try fsown.statHandle(dir.handle);
-            if (!now.sameFile(s.frames.items[k].identity.?)) return error.DirectoryChanged;
+            _ = try s.verify(dir, s.frames.items[k].identity.?);
             return dir;
         }
 
@@ -263,6 +325,13 @@ pub fn Stack(comptime Data: type) type {
 // -- tests ---------------------------------------------------------------------
 
 const testing = std.testing;
+
+test "displayPath trims surplus trailing slashes" {
+    try testing.expectEqualStrings("d/", displayPath("d//"));
+    try testing.expectEqualStrings("d/", displayPath("d/"));
+    try testing.expectEqualStrings("//", displayPath("//"));
+    try testing.expectEqualStrings("d", displayPath("d"));
+}
 
 /// Push `path`'s directories one at a time, as a walk would.
 fn descend(s: *Stack(void), names: []const []const u8, follow: bool) !void {

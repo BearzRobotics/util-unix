@@ -34,15 +34,8 @@ pub const Verbosity = enum {
     verbose,
 };
 
-/// Which symbolic links to follow while recursing (`-P`, `-H`, `-L`).
-pub const Traversal = enum {
-    /// `-P`: never follow a symbolic link to a directory.
-    physical,
-    /// `-H`: follow links named on the command line only.
-    command_line,
-    /// `-L`: follow every link to a directory.
-    logical,
-};
+/// Which symbolic links to follow while walking (`-P`, `-H`, `-L`).
+pub const Traversal = treewalk.Traversal;
 
 /// What to change the mode to.
 pub const Change = union(enum) {
@@ -171,6 +164,11 @@ const Engine = struct {
         e.emit(.{ .problem = .{ .kind = kind, .path = e.path.items, .cause = cause } });
     }
 
+    /// A directory is gone, or something else is found in its place.
+    fn lost(e: *Engine, err: anyerror) void {
+        if (err == error.DirectoryChanged) e.problem(.directory_changed, null) else e.problem(.cannot_read_directory, err);
+    }
+
     /// With -v the failed attempt is also named on standard output.
     fn couldNotAccess(e: *Engine) void {
         if (e.opts.verbosity == .verbose) e.emit(.{ .could_not_access = e.path.items });
@@ -180,38 +178,27 @@ const Engine = struct {
         if (e.opts.no_dereference) return false;
         // -H, -L and -P say how to recurse; without that they mean nothing
         if (!e.opts.recurse) return true;
-        return switch (e.opts.traversal) {
-            .physical => false,
-            .command_line => is_arg,
-            .logical => true,
-        };
+        return e.opts.traversal.follows(is_arg);
     }
 
     /// Change the operand `path` and, with `recurse`, everything under it.
     fn walk(e: *Engine, path: []const u8) Allocator.Error!bool {
         var ok = try e.visit(e.stack.base, path, true);
-        while (e.stack.depth() > 0) {
-            const top = e.stack.top();
-            e.path.shrinkRetainingCapacity(top.path_len);
-            const dir = e.stack.topDir() catch |err| {
-                if (err == error.DirectoryChanged) e.problem(.directory_changed, null) else e.problem(.cannot_read_directory, err);
+        while (e.stack.depth() > 0) switch (try e.stack.step(&e.path)) {
+            .entry => |at| ok = (try e.visit(at.dir, at.entry.name, false)) and ok,
+            .lost => |err| {
+                e.lost(err);
                 ok = false;
                 e.stack.pop();
-                continue;
-            };
-            if (top.nextEntry()) |entry| {
-                // fts appends "/name", avoiding a doubled slash after "dir/".
-                if (e.path.items.len == 0 or e.path.items[e.path.items.len - 1] != '/') try e.path.append(e.gpa, '/');
-                try e.path.appendSlice(e.gpa, entry.name);
-                ok = (try e.visit(dir, entry.name, false)) and ok;
-                continue;
-            }
-            if (top.read_error) |err| {
-                e.problem(.read_failed, err);
-                ok = false;
-            }
-            e.stack.pop();
-        }
+            },
+            .leave => |read_error| {
+                if (read_error) |err| {
+                    e.problem(.read_failed, err);
+                    ok = false;
+                }
+                e.stack.pop();
+            },
+        };
         return ok;
     }
 
@@ -273,18 +260,10 @@ const Engine = struct {
                 e.problem(.cannot_read_directory, err);
                 return false;
             };
-            if (examined) |before| {
-                const opened = fsown.statHandle(dir.handle) catch |err| {
-                    dir.close(e.io);
-                    e.problem(.cannot_read_directory, err);
-                    return false;
-                };
-                if (!opened.sameFile(before)) {
-                    dir.close(e.io);
-                    e.problem(.directory_changed, null);
-                    return false;
-                }
-            }
+            if (examined) |before| _ = e.stack.verify(dir, before) catch |err| {
+                e.lost(err);
+                return false;
+            };
             try e.stack.push(dir, name, through_link, examined, e.path.items.len, {});
         }
         return ok;
