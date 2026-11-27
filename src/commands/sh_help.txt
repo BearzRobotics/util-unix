@@ -16,6 +16,8 @@ Invocation:
   -i             interactive shell: prompts (PS1, PS2), line editing, history, job
                  control; the default when standard input and error are terminals
   -l             login shell: run /etc/profile and ~/.profile first
+  -p             keep the effective user and group ids when they differ from the
+                 real ones (they are given up otherwise)
   FILE [ARG]...  run the script FILE; ARG become $1, $2, ...
 
 Shell options (as with `set`; -x turns an option on, +x turns it off):

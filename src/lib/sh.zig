@@ -35,6 +35,9 @@ pub const readline = @import("sh/readline.zig");
 /// True when the process's real and effective ids differ: its user's startup
 /// files are then not to be run.
 pub const idsDiffer = @import("../sys.zig").idsDiffer;
+/// Give up those other ids, as the `sh` program does at start unless `-p`. A
+/// host that embeds the shell decides this for its own process.
+pub const dropPrivileges = @import("../sys.zig").dropPrivileges;
 
 pub const Shell = shell.Shell;
 pub const Env = shell.Env;

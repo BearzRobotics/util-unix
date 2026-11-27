@@ -328,6 +328,19 @@ pub fn idsDiffer() bool {
     return linux.getuid() != linux.geteuid() or linux.getgid() != linux.getegid();
 }
 
+/// Make the real user and group ids the only ones, for good: the saved ids go
+/// too. Does nothing when they do not differ. On an error the process may
+/// still hold the other ids, so the caller must not go on.
+pub fn dropPrivileges() Error!void {
+    if (comptime !is_linux) return;
+    if (!idsDiffer()) return;
+    const uid = linux.getuid();
+    const gid = linux.getgid();
+    // the group first: changing it may need the user id being given up
+    _ = try check(linux.setresgid(gid, gid, gid));
+    _ = try check(linux.setresuid(uid, uid, uid));
+}
+
 pub fn getppid() i32 {
     return if (comptime is_linux) @intCast(linux.getppid()) else 0;
 }

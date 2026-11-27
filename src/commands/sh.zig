@@ -116,6 +116,7 @@ pub fn main(ctx: cli.Context) u8 {
     }
     var pending_opts: std.ArrayList(struct { name: []const u8, on: bool }) = .empty;
     defer pending_opts.deinit(gpa);
+    var privileged = false;
     var i: usize = 0;
     const args = ctx.args;
     while (i < args.len) {
@@ -184,6 +185,8 @@ pub fn main(ctx: cli.Context) u8 {
         while (j < a.len) : (j += 1) {
             switch (a[j]) {
                 'l' => login = on,
+                // keep differing real and effective ids (dash, bash)
+                'p' => privileged = on,
                 // `+c` is read like `-c` (dash and FreeBSD sh agree; POSIX does not define it)
                 'c' => {
                     command = "";
@@ -265,6 +268,12 @@ pub fn main(ctx: cli.Context) u8 {
         }
         i += 1;
     }
+    // As dash and bash: run as the real user and group, unless -p. Before any
+    // file the caller chose is opened or run.
+    if (!privileged) sh.dropPrivileges() catch {
+        cli.warn(ctx, "cannot give up the privileges of another user or group: {s}", .{sys.strerror(sys.errno())});
+        return 2;
+    };
     if (list_diag or explain_arg != null) return listOrExplain(ctx, list_diag, explain_arg, style_opt == .json);
     // an unknown option name is reported before a script is opened (dash, FreeBSD sh)
     for (pending_opts.items) |o| {

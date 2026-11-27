@@ -798,11 +798,13 @@ def paste_render_cases():
 EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases}
 
 def setid_cases():
-    """SHX-18, SHI-20: with differing ids, what the caller names is not used.
-    Needs root to make such a process; scripts/ci-musl.sh runs this as root."""
+    """SHX-18, SHI-20: with differing ids, sh gives up the effective ones, or
+    with -p keeps them and uses nothing the caller names. Needs root to make
+    such a process; scripts/ci-musl.sh runs this as root."""
     if os.getuid() != 0:
         return
-    def startup(ids):
+    ids_command = b"grep -E '^(Uid|Gid):' /proc/$$/status | tr -s '\\t ' '  '\necho new\nexit\n"
+    def startup(ids, *options):
         d = tempfile.mkdtemp(dir=TMP)
         os.chmod(TMP, 0o755); os.chmod(d, 0o755)
         for name, mark in (("rc", "ran-$((1))-env"), (".profile", "ran-$((1))-profile")):
@@ -811,14 +813,19 @@ def setid_cases():
         hist = os.path.join(d, "hist")
         with open(hist, "w") as f:
             f.write("echo old\n")
-        r = subprocess.run([SH, "-l", "-i"], input=b"echo new\nexit\n", capture_output=True, timeout=10, preexec_fn=ids,
+        r = subprocess.run([SH, *options, "-l", "-i"], input=ids_command, capture_output=True, timeout=10, preexec_fn=ids,
                            env={"PATH": os.environ["PATH"], "HOME": d, "ENV": os.path.join(d, "rc"), "HISTFILE": hist})
         return r.stdout.decode(), open(hist).read()
     out, hist = startup(None)
     ok("startup files are used with matching ids", "ran-1-env" in out and "ran-1-profile" in out and "echo new" in hist, repr((out, hist)))
-    for what, ids in (("user", lambda: os.setresuid(65534, 0, 0)), ("group", lambda: os.setresgid(65534, 0, 0))):
+    cases = (("user", lambda: os.setresuid(65534, 0, 0), "Uid: 65534 65534 65534 65534", "Uid: 65534 0 0 0"),
+             ("group", lambda: os.setresgid(65534, 0, 0), "Gid: 65534 65534 65534 65534", "Gid: 65534 0 0 0"))
+    for what, ids, dropped, kept in cases:
         out, hist = startup(ids)
-        ok("ENV, .profile and HISTFILE are ignored when the %s ids differ" % what, "new" in out and "ran-1" not in out and hist == "echo old\n", repr((out, hist)))
+        ok("differing %s ids are given up, saved id too" % what, dropped in out and "new" in out, repr(out))
+        out, hist = startup(ids, "-p")
+        ok("-p keeps differing %s ids, and ENV, .profile and HISTFILE are ignored" % what,
+           kept in out and "new" in out and "ran-1" not in out and hist == "echo old\n", repr((out, hist)))
 
 def main():
     open(os.path.join(TMP, "ed.sh"), "w").write("#!/bin/sh\necho 'echo edited' > \"$1\"\n")
