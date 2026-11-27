@@ -101,7 +101,8 @@ pub fn main(ctx: cli.Context) u8 {
     var command: ?[]const u8 = null;
     var from_stdin = false;
     var check_mode = false;
-    var login = false;
+    // login(1) and su start a login shell by putting "-" before its name
+    var login = std.mem.startsWith(u8, ctx.invoked, "-");
     var from_explicit_s = false;
     var style_opt: ?diag.Style = null;
     var color_mode: enum { auto, always, never } = .auto;

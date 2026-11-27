@@ -541,6 +541,14 @@ def input_and_history_cases():
     got = history_after(500, {"HISTFILE": "@H@"}, "HISTSIZE=1000\n")
     ok("HISTSIZE set in ENV applies when history is loaded", "echo old0" in got and len(got) >= 502, "%d lines" % len(got))
 
+    # INFO-16: started as "-sh", as login(1) does, it is a login shell
+    d = tempfile.mkdtemp(dir=TMP)
+    with open(os.path.join(d, ".profile"), "w") as f:
+        f.write("echo from-$((1))-profile\n")
+    for argv0, want in (("-sh", True), ("sh", False)):
+        r = subprocess.run([argv0], executable=SH, input=b"echo hi\n", capture_output=True, timeout=10, env={"PATH": os.environ["PATH"], "HOME": d})
+        ok("started as '%s' it %s ~/.profile" % (argv0, "reads" if want else "does not read"), (b"from-1-profile" in r.stdout) == want and b"hi" in r.stdout, repr((r.returncode, r.stdout, r.stderr)))
+
     # SHI-18: saving the history
     d = tempfile.mkdtemp(dir=TMP)
     real, link = os.path.join(d, "real"), os.path.join(d, "link")

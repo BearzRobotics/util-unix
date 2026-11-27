@@ -51,7 +51,10 @@ pub fn main(ctx: cli.Context) u8 {
 
     var status: u8 = 0;
     if (users.items.len == 0) {
-        const me = uu.proc.identity();
+        const me = uu.proc.identity() catch {
+            cli.warn(ctx, "cannot get the ids of the process: not supported on this system", .{});
+            return 1;
+        };
         const sup = uu.proc.supplementaryGroups(ctx.gpa) catch {
             cli.warn(ctx, "cannot get the supplementary groups of the process", .{});
             return 1;

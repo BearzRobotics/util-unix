@@ -37,8 +37,11 @@ pub fn main(init: std.process.Init) !u8 {
     };
 
     const invoked = baseName(args[0]);
-    if (commands.find(enabled, invoked)) |run| {
-        ctx.name = invoked;
+    ctx.invoked = invoked;
+    // "-sh" is how a login shell is started
+    const named = if (std.mem.eql(u8, invoked, "-sh")) invoked[1..] else invoked;
+    if (commands.find(enabled, named)) |run| {
+        ctx.name = named;
         return run(ctx);
     }
 

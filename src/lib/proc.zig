@@ -8,9 +8,9 @@
 //! state, with one exception: umask(2) has no query form, so `umask` reads
 //! /proc, and only where that fails sets the mask to 0 and restores it.
 //!
-//! On systems other than Linux these functions return neutral values (root
-//! credentials, mask 022, "unknown" names): the library builds but does not
-//! claim to work there (SPEC §6.2).
+//! On systems other than Linux the library builds but does not claim to work
+//! (SPEC §6.2): the ids and system names are `error.Unsupported`, and the mask
+//! is given as 022.
 //!
 //! References: getuid(2), getgroups(2), umask(2), uname(2), Linux man-pages.
 
@@ -22,8 +22,10 @@ const is_linux = builtin.os.tag == .linux;
 
 pub const Identity = struct { uid: u32, euid: u32, gid: u32, egid: u32 };
 
-pub fn identity() Identity {
-    if (comptime !is_linux) return .{ .uid = 0, .euid = 0, .gid = 0, .egid = 0 };
+/// `error.Unsupported` where the ids cannot be asked for: any made-up answer
+/// could be taken for a real one, and 0 would be root.
+pub fn identity() error{Unsupported}!Identity {
+    if (comptime !is_linux) return error.Unsupported;
     return .{
         .uid = std.os.linux.getuid(),
         .euid = std.os.linux.geteuid(),
@@ -36,8 +38,8 @@ pub fn identity() Identity {
 /// caller frees the result with `gpa`. getgroups(2) is asked for the count
 /// first, so any number of groups up to the kernel limit (65536) works; if the
 /// set grows between the two calls the query is repeated.
-pub fn supplementaryGroups(gpa: std.mem.Allocator) error{ OutOfMemory, Unexpected }![]u32 {
-    if (comptime !is_linux) return gpa.alloc(u32, 0);
+pub fn supplementaryGroups(gpa: std.mem.Allocator) error{ OutOfMemory, Unexpected, Unsupported }![]u32 {
+    if (comptime !is_linux) return error.Unsupported;
     while (true) {
         const count = std.os.linux.getgroups(0, null);
         if (std.os.linux.errno(count) != .SUCCESS) return error.Unexpected;
@@ -139,17 +141,18 @@ pub const Uname = struct {
     }
 };
 
-/// `error.Unexpected` when the system call fails (a sandbox may forbid it).
-pub fn uname() error{Unexpected}!Uname {
-    if (comptime !is_linux) return .{ .raw = {} };
+/// `error.Unexpected` when the system call fails (a sandbox may forbid it),
+/// `error.Unsupported` where there is no way to ask.
+pub fn uname() error{ Unexpected, Unsupported }!Uname {
+    if (comptime !is_linux) return error.Unsupported;
     var u: Uname = .{ .raw = undefined };
     if (std.os.linux.errno(std.os.linux.uname(&u.raw)) != .SUCCESS) return error.Unexpected;
     return u;
 }
 
 test "identity, groups, umask and uname answer without failing" {
-    const id = identity();
-    _ = id;
+    if (!is_linux) return error.SkipZigTest;
+    _ = try identity();
     const groups = try supplementaryGroups(std.testing.allocator);
     defer std.testing.allocator.free(groups);
     try std.testing.expect(umask() <= 0o777);

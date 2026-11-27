@@ -168,7 +168,8 @@ fn setName(ctx: cli.Context, name: []const u8) u8 {
 fn setNameFrom(ctx: cli.Context, name: []const u8, from_file: bool) u8 {
     if (!hn.valid(name)) {
         // for a file, hostname 3.25 tells an ordinary user only the permission
-        if (from_file and uu.proc.identity().euid != 0) cli.warn(ctx, "Permission denied", .{}) else cli.warn(ctx, "the specified hostname is invalid", .{});
+        const root = if (uu.proc.identity()) |me| me.euid == 0 else |_| false;
+        if (from_file and !root) cli.warn(ctx, "Permission denied", .{}) else cli.warn(ctx, "the specified hostname is invalid", .{});
         return 1;
     }
     hn.set(name) catch |e| {
