@@ -117,6 +117,7 @@ pub fn isComplete(sh: *Shell, text: []const u8) bool {
 // --- terminal binding ---------------------------------------------------------------------
 
 const TermCtx = struct {
+    sh: ?*Shell = null,
     saved: ?sys.Termios = null,
     in_fd: i32 = 0,
     out_fd: i32 = 2,
@@ -136,13 +137,42 @@ fn tRead(ctx: ?*anyopaque, buf: []u8, timeout_ms: i32) readline.ReadResult {
     const n = sys.read(t.in_fd, buf) catch {
         if (sys.errno() == sys.E_INTR) {
             _ = sys.takePending(sys.SIGWINCH);
-            _ = sys.takePending(2);
-            return .interrupted;
+            const sh = t.sh orelse return .interrupted;
+            const writes = trapWaiting(sh);
+            // a trap's command gets the terminal as commands do
+            if (writes) tRaw(ctx, false);
+            const got = signalAtPrompt(sh);
+            if (writes) tRaw(ctx, true);
+            return switch (got) {
+                .none => if (writes) .wrote else .interrupted,
+                .abandon => .abort,
+                .exit => .eof,
+            };
         }
+        // a command left the terminal non-blocking (dash turns that off too)
+        if (sys.errno() == sys.E_AGAIN and sys.setBlocking(t.in_fd)) return .interrupted;
         return .eof;
     };
     if (n == 0) return .eof;
     return .{ .bytes = n };
+}
+
+fn trapWaiting(sh: *Shell) bool {
+    var sig: u8 = 1;
+    while (sig < sys.nsig) : (sig += 1) {
+        if (sys.peekPending(sig)) if (sh.traps[sig]) |t| if (t.len > 0) return true;
+    }
+    return false;
+}
+
+/// A signal arrived while input was awaited: its trap runs now, not after the
+/// next command. SIGINT abandons what is being typed, trapped or not.
+fn signalAtPrompt(sh: *Shell) enum { none, abandon, exit } {
+    const interrupted = sys.peekPending(2);
+    exec.checkTraps(sh);
+    if (sh.flow == .exit_shell and sh.explicit_exit) return .exit;
+    sh.flow = .none;
+    return if (interrupted) .abandon else .none;
 }
 
 fn tWrite(ctx: ?*anyopaque, bytes: []const u8) void {
@@ -199,6 +229,15 @@ fn varNum(sh: *Shell, name: []const u8) ?usize {
     return numparse.parseInt(usize, v, 10) catch null;
 }
 
+/// Take the erase, kill and end-of-file characters the terminal has now.
+fn readControlChars(ed: *readline.Editor) void {
+    const t = sys.tcgetattr(0) catch return;
+    const c = sys.termiosChars(t);
+    if (c.erase != 0) ed.erase_char = c.erase;
+    if (c.kill != 0) ed.kill_char = c.kill;
+    if (c.eof != 0) ed.eof_char = c.eof;
+}
+
 /// Enter interactive mode: job control, signals, history. Call after
 /// `Shell.init`, before the first command.
 pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
@@ -227,12 +266,8 @@ pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
     ed.complete_fn = completion.complete;
     ed.cb_ctx = sh;
     ed.alias_fn = aliasLetter;
-    if (s.use_editor) if (sys.tcgetattr(0)) |t| {
-        const c = sys.termiosChars(t);
-        if (c.erase != 0) ed.erase_char = c.erase;
-        if (c.kill != 0) ed.kill_char = c.kill;
-        if (c.eof != 0) ed.eof_char = c.eof;
-    } else |_| {};
+    if (s.use_editor) readControlChars(&ed);
+    s.term.sh = sh;
     s.editor = ed;
     if (sys.geteuid() == 0 and sh.getVar("PS1") != null and std.mem.eql(u8, sh.getVar("PS1").?, "$ ")) sh.setVarRaw("PS1", "# ") catch {};
 }
@@ -255,28 +290,32 @@ pub fn runEnvFile(sh: *Shell) void {
     if (sh.flow == .interrupt or (sh.flow == .exit_shell and !sh.explicit_exit)) sh.flow = .none;
 }
 
-fn readPlainLine(sh: *Shell, a: Allocator, prompt: []const u8) ?[]const u8 {
+fn readPlainLine(sh: *Shell, a: Allocator, prompt: []const u8) Read {
     sh.errRaw(prompt);
     var line: std.ArrayList(u8) = .empty;
     var b: [1]u8 = undefined;
     while (true) {
         const n = sys.read(0, &b) catch {
             if (sys.errno() == sys.E_INTR) {
-                if (sys.takePending(2)) {
-                    sh.errRaw("\n");
-                    return "\n";
+                switch (signalAtPrompt(sh)) {
+                    .none => continue,
+                    .abandon => {
+                        sh.errRaw("\n");
+                        return .interrupted;
+                    },
+                    .exit => return .eof,
                 }
-                continue;
             }
-            return null;
+            if (sys.errno() == sys.E_AGAIN and sys.setBlocking(0)) continue;
+            return .eof;
         };
         if (n == 0) {
-            if (line.items.len == 0) return null;
-            line.append(a, '\n') catch return null;
-            return line.items;
+            if (line.items.len == 0) return .eof;
+            line.append(a, '\n') catch return .eof;
+            return .{ .text = line.items };
         }
-        line.append(a, b[0]) catch return null;
-        if (b[0] == '\n') return line.items;
+        line.append(a, b[0]) catch return .eof;
+        if (b[0] == '\n') return .{ .text = line.items };
     }
 }
 
@@ -286,6 +325,7 @@ fn readOne(s: *Session, a: Allocator, prompt: []const u8) Read {
     const sh = s.sh;
     if (s.use_editor and (sh.flags.vi or sh.flags.emacs)) {
         s.editor.mode = if (sh.flags.vi) .vi else .emacs;
+        readControlChars(&s.editor);
         s.editor.history_first = s.hist.first;
         const r = s.editor.readLine(prompt, s.hist.lines()) catch return .eof;
         return switch (r) {
@@ -295,8 +335,7 @@ fn readOne(s: *Session, a: Allocator, prompt: []const u8) Read {
             .external_edit => |t| .{ .edit = a.dupe(u8, t) catch return .eof },
         };
     }
-    const l = readPlainLine(sh, a, prompt) orelse return .eof;
-    return .{ .text = l };
+    return readPlainLine(sh, a, prompt);
 }
 
 /// Edit `text` with $VISUAL/$EDITOR/vi (vi-mode `v`) and return what the user
@@ -333,8 +372,8 @@ pub fn loop(s: *Session) u8 {
         defer arena.deinit();
         const a = arena.allocator();
         sh.cmd_seq += 1;
-        _ = sys.takePending(2);
-        exec.checkTraps(sh);
+        // what arrived between commands; a SIGINT has nothing here to abandon
+        if (signalAtPrompt(sh) == .exit) return finish(s);
         jobs.notify(sh);
         s.hist.setMax(varNum(sh, "HISTSIZE") orelse history.default_size);
         var text: std.ArrayList(u8) = .empty;
@@ -342,7 +381,10 @@ pub fn loop(s: *Session) u8 {
         while (true) {
             const ps = if (first) (sh.getVar("PS1") orelse "$ ") else (sh.getVar("PS2") orelse "> ");
             const prompt = expandPrompt(sh, a, ps) catch ps;
-            switch (readOne(s, a, prompt)) {
+            const input = readOne(s, a, prompt);
+            // a trap that ran while the line was typed may have said `exit`
+            if (sh.flow == .exit_shell and sh.explicit_exit) return finish(s);
+            switch (input) {
                 .text => |l| {
                     // only input starts the count of ^D again
                     s.ignoreeof_count = 0;

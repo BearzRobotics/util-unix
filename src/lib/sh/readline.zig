@@ -83,6 +83,10 @@ pub const ReadResult = union(enum) {
     /// This many bytes were stored in the buffer.
     bytes: usize,
     eof,
+    /// A signal abandons the line, as ^C does.
+    abort,
+    /// Something else wrote to the terminal: the line is drawn anew below it.
+    wrote,
     timeout,
     /// A signal arrived (for example SIGWINCH); the editor re-reads the size
     /// and redraws.
@@ -145,6 +149,10 @@ const Parser = struct {
     utf: [4]u8 = undefined,
     utf_len: u3 = 0,
     utf_need: u3 = 0,
+    /// Bytes just found not to be UTF-8, to go into the line as they are,
+    /// before the key `push` returned.
+    broken: [4]u8 = undefined,
+    broken_len: u3 = 0,
 
     fn pendingEsc(self: *const Parser) bool {
         return self.state == .esc;
@@ -199,18 +207,26 @@ const Parser = struct {
                     self.state = .utf8;
                     return null;
                 }
-                return .{ .cp = 0xfffd };
+                self.broken[0] = b;
+                self.broken_len = 1;
+                return null;
             },
             .utf8 => {
                 if (b & 0xc0 != 0x80) {
                     self.state = .normal;
+                    @memcpy(self.broken[0..self.utf_len], self.utf[0..self.utf_len]);
+                    self.broken_len = self.utf_len;
                     return self.push(b);
                 }
                 self.utf[self.utf_len] = b;
                 self.utf_len += 1;
                 if (self.utf_len < self.utf_need) return null;
                 self.state = .normal;
-                const cp = std.unicode.utf8Decode(self.utf[0..self.utf_len]) catch 0xfffd;
+                const cp = std.unicode.utf8Decode(self.utf[0..self.utf_len]) catch {
+                    @memcpy(self.broken[0..self.utf_len], self.utf[0..self.utf_len]);
+                    self.broken_len = self.utf_len;
+                    return null;
+                };
                 return .{ .cp = cp };
             },
             .esc => {
@@ -494,7 +510,12 @@ pub const Editor = struct {
     /// the first byte that finishes the line).
     pub fn feed(self: *Editor, bytes: []const u8) Status {
         for (bytes) |b| {
-            if (self.parser.push(b)) |k| {
+            const pushed = self.parser.push(b);
+            if (self.parser.broken_len > 0) {
+                self.insertRaw(self.parser.broken[0..self.parser.broken_len]);
+                self.parser.broken_len = 0;
+            }
+            if (pushed) |k| {
                 self.key(k);
                 if (self.status != .more) return self.status;
             }
@@ -532,6 +553,11 @@ pub const Editor = struct {
                     self.status = .eof;
                 },
                 .timeout => _ = self.feedTimeout(),
+                .abort => self.status = .interrupted,
+                .wrote => {
+                    self.cols = @max(self.term.size(self.term.ctx).cols, 4);
+                    self.redrawFresh();
+                },
                 .interrupted => {
                     self.cols = @max(self.term.size(self.term.ctx).cols, 4);
                     self.redraw();
@@ -653,28 +679,47 @@ pub const Editor = struct {
         }
     }
 
+    /// Write one cell, `width` columns wide, at `p`. A line break goes out just
+    /// where `advance` counts one: before a cell that does not fit, and after
+    /// one that ends at the margin, where the terminal would otherwise stay on
+    /// the same row until something more is written.
+    fn emitCell(self: *Editor, p: *Pos, bytes: []const u8, width: usize) void {
+        if (width > 0 and p.col + width > self.cols) {
+            self.out.appendSlice(self.gpa, "\r\n") catch return;
+            p.row += 1;
+            p.col = 0;
+        }
+        self.out.appendSlice(self.gpa, bytes) catch return;
+        p.col += width;
+        if (width > 0 and p.col >= self.cols) {
+            self.out.appendSlice(self.gpa, "\r\n") catch return;
+            p.row += 1;
+            p.col = 0;
+        }
+    }
+
     fn emitBuffer(self: *Editor) void {
         const s = self.buf.items;
-        var p = self.layoutPrompt(self.displayPrompt());
+        const prompt = self.displayPrompt();
+        var p = self.layoutPrompt(prompt);
+        // a prompt that ends at the margin
+        if (p.col == 0 and p.row > 0 and !std.mem.endsWith(u8, prompt, "\n") and !std.mem.endsWith(u8, prompt, "\r")) {
+            self.out.appendSlice(self.gpa, "\r\n") catch return;
+        }
         var i: usize = 0;
         while (i < s.len) {
             const ch = charAt(s, i);
             const cp = ch.cp;
-            const before = p.row;
             if (cp == '\n') {
                 self.out.appendSlice(self.gpa, "\r\n") catch return;
                 p.row += 1;
                 p.col = 0;
             } else if (controlPicture(cp)) |vis| {
-                self.advance(&p, 'x');
-                self.out.appendSlice(self.gpa, &vis) catch return;
-                self.advance(&p, 'x');
+                self.emitCell(&p, vis[0..1], 1);
+                self.emitCell(&p, vis[1..2], 1);
             } else {
-                // The cell may wrap before it is written (wide character).
-                self.out.appendSlice(self.gpa, if (ch.valid) s[i..][0..ch.len] else "\u{fffd}") catch return;
-                self.advance(&p, cp);
+                self.emitCell(&p, if (ch.valid) s[i..][0..ch.len] else "\u{fffd}", cpWidth(cp));
             }
-            if (p.row > before and cp != '\n') self.out.appendSlice(self.gpa, "\r\n") catch return;
             i += ch.len;
         }
     }
@@ -812,6 +857,18 @@ pub const Editor = struct {
         self.cur = self.buf.items.len;
         self.vi_start.clearRetainingCapacity();
         self.vi_start.appendSlice(self.gpa, self.buf.items) catch {};
+    }
+
+    /// Input that is not UTF-8 (a Latin-1 file name, say) is part of the line
+    /// as it came: dropped or replaced, it would name something else.
+    fn insertRaw(self: *Editor, bytes: []const u8) void {
+        if (self.mode == .vi and !self.vi_insert) {
+            self.alert();
+            return;
+        }
+        self.pushUndo();
+        self.insertBytes(bytes);
+        self.redraw();
     }
 
     fn insertCp(self: *Editor, cp: u21) void {

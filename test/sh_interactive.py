@@ -677,6 +677,68 @@ def session_safety_cases():
     ok("fc: each temporary file has its own unpredictable name", len(names) == 2 and names[0] != names[1] and all(re.match(r"sh-fc\.\d+\.[0-9a-f]{8}$", n) for n in names), repr(names))
     ok("fc: no temporary file is left", os.listdir(tmp) == [], repr(os.listdir(tmp)))
 
+def input_signal_cases():
+    d = tempfile.mkdtemp(prefix="insig", dir=TMP)
+    # SHI-22: bytes that are not UTF-8 reach the command as typed
+    open(os.path.join(os.fsencode(d), b"caf\xe9"), "w").close()
+    with Session([SH, "-i"], cwd=d) as s:
+        s.expect(r"\$ ?$")
+        s.send(b"ls caf\xe9 && echo found-$((1+1))\r"); s.settle(.6)
+        s.send(b"printf %s a\xc3Z\x80 | od -An -tx1\r"); s.settle(.6)
+        t = s.take()
+    ok("input that is not UTF-8 is kept as typed", "found-2" in t and "61 c3 5a 80" in t, repr(t))
+    # SHI-23: a command that leaves the terminal non-blocking does not end the shell
+    py = "python3 -c 'import fcntl,os; fcntl.fcntl(0, fcntl.F_SETFL, fcntl.fcntl(0, fcntl.F_GETFL) | os.O_NONBLOCK)'"
+    has("a non-blocking terminal does not end the shell", [py, ("w", .5), ALIVE], ["al1ve"])
+    has("nor with plain line input", [py, ("w", .5), ALIVE], ["al1ve"], env={"TERM": "dumb"})
+    # SHI-24: ^C abandons an incomplete command without the editor
+    for what, kw in (("TERM=dumb", {"env": {"TERM": "dumb"}}), ("set +o emacs", {})):
+        first = ["set +o emacs"] if what != "TERM=dumb" else []
+        has("^C abandons an open quote: " + what, first + ['echo "abc', "^C", ALIVE], ["al1ve"], ["> echo al"], **kw)
+    # SHI-25: signals at the prompt
+    for sig in ("USR1", "INT"):
+        with Session([SH, "-i"]) as s:
+            s.expect(r"\$ ?$")
+            s.send("trap 'echo GOT-$((1+1))' %s\n" % sig); s.settle(.5); s.take()
+            os.kill(s.pid, getattr(signal, "SIG" + sig)); s.settle(.8)
+            t = s.take()
+        ok("a %s trap runs while the prompt waits" % sig, "GOT-2" in t, repr(t))
+    with Session([SH, "-i"]) as s:
+        s.expect(r"\$ ?$")
+        s.send("trap 'exit 7' USR1\n"); s.settle(.5); s.take()
+        os.kill(s.pid, signal.SIGUSR1)
+        st = exit_status(s)
+    ok("exit in a trap run at the prompt ends the shell", st == 7, repr(st))
+    with Session([SH, "-i"]) as s:
+        s.expect(r"\$ ?$"); s.take()
+        s.send("echo abandoned"); s.settle(.3)
+        os.kill(s.pid, signal.SIGINT); s.settle(.5)
+        s.send(ALIVE + "\n"); s.settle(.5)
+        t = s.take()
+    ok("SIGINT sent to the shell abandons the line", "al1ve" in t and "abandonedecho" not in t, repr(t))
+    # SHI-26: what stty sets stays set; after a job that was killed it does not
+    has("a mode set with stty stays", ["stty -echoctl", "stty -a | tr ' ' '\\n' | grep -x -- -echoctl"], ["\n-echoctl\n"])
+    has("a killed job does not leave its modes", ["sh -c 'stty -echoctl; kill -KILL $$'", "stty -a | tr ' ' '\\n' | grep -cx -- -echoctl"], ["\n0\n"])
+    # SHI-27, SHI-28: redrawing at the right margin
+    with Session([SH, "-i"], cols=20, env={"PS1": "p" * 18 + "> "}) as s:
+        s.expect(r"> ?$"); s.take()
+        s.send("echo keep-$((1+1))\n"); s.settle(.5)
+        for _ in range(4):
+            s.send(C("A")); s.settle(.2)
+        t = s.take()
+    ok("render: a prompt as wide as the terminal erases nothing", "keep-2" in t, repr(t))
+    # the screen here does not wrap on its own, so look at what is sent: the
+    # line break comes where the cell goes to the next row, not after it
+    for what, text, good, bad in (("a wide character", "abcdefg中xy", "\r\n中", "中\r\n"), ("a control picture", "abcdefg" + C("V") + C("A") + "xy", "^\r\nA", "^A\r\n")):
+        with Session([SH, "-i"], cols=10) as s:
+            s.expect(r"\$ ?$"); s.take()
+            s.send(text); s.settle(.3)
+            before = len(s.raw)
+            s.send(C("A")); s.settle(.4)
+            # (the terminal driver puts its own CR before each LF)
+            redraw = s.raw[before:].replace("\r\r\n", "\r\n")
+        ok("render: %s at the margin" % what, good in redraw and bad not in redraw, repr(redraw))
+
 def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
     has("PS1 command substitution", ["PS1='$(echo X)> '", "echo hi"], ["X> echo hi"])
@@ -923,7 +985,7 @@ def paste_render_cases():
         got = s.raw[before:]
         ok("no editing mode: the tty's own line discipline", "plai\x01Z\r\n" in got and "\x1b[?2004h" not in got, repr(got))
 
-EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases, "safety": session_safety_cases}
+EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases, "safety": session_safety_cases, "insignal": input_signal_cases}
 
 def setid_cases():
     """SHX-18, SHI-20: with differing ids, sh gives up the effective ones, or

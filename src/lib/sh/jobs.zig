@@ -592,10 +592,20 @@ pub fn notify(sh: *Shell) void {
     if (out.items.len > 0) sh.errRaw(out.items);
 }
 
-fn handBack(sh: *Shell) void {
+/// Take the terminal back. A job that ran to its end leaves it as it means to
+/// (`stty` is such a job); one that stopped or was killed may have left it in
+/// any state, and the shell's own modes are put back.
+fn handBack(sh: *Shell, j: *const Job) void {
     if (sh.tty_fd < 0) return;
     sys.tcsetpgrp(sh.tty_fd, sh.shell_pgid) catch {};
-    if (sh.tty_modes) |*m| sys.tcsetattr(sh.tty_fd, m) catch {};
+    var finished = j.state() == .done;
+    for (j.procs.items) |p| {
+        const sig = sys.statusSignal(p.status);
+        if (sig != 0 and sig != 13) finished = false;
+    }
+    if (finished) {
+        sh.tty_modes = sys.tcgetattr(sh.tty_fd) catch sh.tty_modes;
+    } else if (sh.tty_modes) |*m| sys.tcsetattr(sh.tty_fd, m) catch {};
 }
 
 /// Finish a job whose processes can no longer be waited for. Their statuses are
@@ -624,7 +634,7 @@ pub fn waitFg(sh: *Shell, j: *Job) u8 {
         }
     }
     j.foreground = false;
-    handBack(sh);
+    handBack(sh, j);
     const st = j.state();
     const code = j.status(sh.flags.pipefail);
     if (st == .stopped) {
