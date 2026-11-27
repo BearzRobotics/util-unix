@@ -78,7 +78,7 @@ pub fn main(ctx: cli.Context) u8 {
                 .role => comps.role = value,
                 .type => comps.type = value,
                 .range => comps.range = value,
-                .help => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                .help => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
                 .version => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -173,6 +173,10 @@ pub fn main(ctx: cli.Context) u8 {
         return 1;
     };
     rep.flush();
+    if (rep.write_error) |e| {
+        cli.writeError(ctx, e);
+        return 1;
+    }
     return if (ok) 0 else 1;
 }
 
@@ -195,11 +199,14 @@ fn contextErrText(e: anyerror) []const u8 {
 /// Formats engine events as GNU's messages.
 const Reporter = struct {
     ctx: cli.Context,
+    write_error: ?anyerror = null,
     out_buf: [512]u8 = undefined,
     out_len: usize = 0,
 
     fn flush(r: *Reporter) void {
-        if (r.out_len > 0) _ = cli.writeStdout(r.ctx.io, r.out_buf[0..r.out_len]);
+        if (r.out_len > 0) Io.File.stdout().writeStreamingAll(r.ctx.io, r.out_buf[0..r.out_len]) catch |e| {
+            r.write_error = e;
+        };
         r.out_len = 0;
     }
 

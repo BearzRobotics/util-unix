@@ -65,7 +65,7 @@ pub fn main(ctx: cli.Context) u8 {
                 2 => comps.user = value,
                 3 => comps.role = value,
                 4 => comps.range = value,
-                5 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 125,
+                5 => return if (cli.writeStdout(ctx, help_text)) 0 else 125,
                 else => return if (cli.printVersion(ctx)) 0 else 125,
             }
             continue;
@@ -110,7 +110,7 @@ pub fn main(ctx: cli.Context) u8 {
         defer ctx.gpa.free(cur);
         var buf: [4200]u8 = undefined;
         const line = std.fmt.bufPrint(&buf, "{s}\n", .{cur}) catch return 125;
-        return if (cli.writeStdout(ctx.io, line)) 0 else 125;
+        return if (cli.writeStdout(ctx, line)) 0 else 125;
     }
 
     var rest: []const [:0]const u8 = operands;

@@ -43,4 +43,5 @@ run_cmp "--file=/dev/null -a"    --file=/dev/null -a
 g="$(gnu --help | sed 's#/usr/bin/stty#stty#g' | sed '/^GNU coreutils online help/,$d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
 o="$(ours --help | sed 's#^\(Usage: \|  or:  \)[^ ]*stty#\1stty#')"
 if [ "$g" = "$o" ]; then PASS=$((PASS + 1)); echo "PASS --help"; else FAIL=$((FAIL + 1)); echo "FAIL --help"; fi
+run_full "--help, full disk" --help
 print_summary

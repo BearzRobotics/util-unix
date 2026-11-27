@@ -62,7 +62,7 @@ fn baseName(path: []const u8) []const u8 {
 
 fn list(ctx: cli.Context) u8 {
     inline for (enabled) |e| {
-        if (!cli.writeStdout(ctx.io, e ++ "\n")) return 1;
+        if (!cli.writeStdout(ctx, e ++ "\n")) return 1;
     }
     return 0;
 }
@@ -71,7 +71,7 @@ fn usage(ctx: cli.Context, explicit: bool) u8 {
     const text = "Usage: util-unix <command> [arguments...]\n" ++
         "   or: <command> [arguments...]  (when invoked through a link named after a command)\n\n" ++
         "Use 'util-unix --list' to list the available commands.\n";
-    if (explicit) return if (cli.writeStdout(ctx.io, text)) 0 else 1;
+    if (explicit) return if (cli.writeStdout(ctx, text)) 0 else 1;
     std.Io.File.stderr().writeStreamingAll(ctx.io, text) catch {};
     return 2;
 }

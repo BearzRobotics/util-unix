@@ -104,4 +104,5 @@ alice    ?nosuch1  Nov  7 12:34
 dan      ?nosuch2  Nov  7 12:35
 stranger ?nosuch3  Nov  7 12:36" -q
 golden "short, nobody matches" "Login    Name                 TTY      Idle   When         Where" nobody
+run_full "full disk"
 print_summary

@@ -78,11 +78,26 @@ pub fn ambiguousLong(ctx: Context, arg: []const u8, names: []const []const u8) v
     warn(ctx, "{s}\nTry '{s} --help' for more information.", .{ w.buffered(), ctx.name });
 }
 
-/// Write `text` to stdout. Returns false on write failure (e.g. closed pipe);
-/// callers decide the exit status.
-pub fn writeStdout(io: Io, text: []const u8) bool {
-    Io.File.stdout().writeStreamingAll(io, text) catch return false;
+/// Say that standard output could not be written, as GNU does.
+pub fn writeError(ctx: Context, cause: anyerror) void {
+    warn(ctx, "write error: {s}", .{errText(cause)});
+}
+
+/// Write `text` to stdout. On failure, report it and return false; callers
+/// decide the exit status.
+pub fn writeStdout(ctx: Context, text: []const u8) bool {
+    Io.File.stdout().writeStreamingAll(ctx.io, text) catch |e| {
+        writeError(ctx, e);
+        return false;
+    };
     return true;
+}
+
+/// For a command that stops on a failure while writing through `w`: report
+/// the write error, if that is what it was, and return `status`.
+pub fn outputFailed(ctx: Context, w: *const Io.File.Writer, status: u8) u8 {
+    if (w.err) |e| writeError(ctx, e);
+    return status;
 }
 
 /// The project's home, where issues are tracked.
@@ -113,7 +128,7 @@ pub fn printVersion(ctx: Context) bool {
             .ReleaseSmall => "ReleaseSmall",
         },
     }) catch unreachable;
-    return writeStdout(ctx.io, text);
+    return writeStdout(ctx, text);
 }
 
 /// Format straight to `file`, however long the result is: messages quote file
@@ -125,6 +140,16 @@ pub fn print(io: Io, file: Io.File, comptime fmt: []const u8, args: anytype) boo
     w.interface.print(fmt, args) catch return false;
     w.interface.flush() catch return false;
     return true;
+}
+
+/// `print` to stdout for a report made along the way: a failure is kept in
+/// `failed`, for the command to report once with `writeError`.
+pub fn report(io: Io, failed: *?anyerror, comptime fmt: []const u8, args: anytype) void {
+    var buf: [4096]u8 = undefined;
+    var w = Io.File.stdout().writerStreaming(io, &buf);
+    w.interface.print(fmt, args) catch {};
+    w.interface.flush() catch {};
+    if (w.err) |e| failed.* = e;
 }
 
 /// Print a diagnostic `<name>: <message>\n` to stderr. Best effort.

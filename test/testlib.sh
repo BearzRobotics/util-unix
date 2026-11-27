@@ -183,6 +183,21 @@ run_cmp() {
         printf "     OURS (rc=%s) out: %s err: %s\n" "$ox" "$(cat -A "$TMPDIR_CMP.oo")" "$(cat -A "$TMPDIR_CMP.oe2")"
     fi
 }
+# Standard output that cannot be written: the message and status must be GNU's.
+run_full() { # description, args...
+    description="$1"
+    shift
+    LC_ALL=C gnu "$@" < /dev/null 2> "$TMPDIR_CMP.ge" > /dev/full; gx=$?
+    ours "$@" < /dev/null 2> "$TMPDIR_CMP.oe" > /dev/full; ox=$?
+    norm_err < "$TMPDIR_CMP.ge" > "$TMPDIR_CMP.ge2"; norm_err < "$TMPDIR_CMP.oe" > "$TMPDIR_CMP.oe2"
+    if cmp -s "$TMPDIR_CMP.ge2" "$TMPDIR_CMP.oe2" && [ "$gx" = "$ox" ]; then
+        PASS=$((PASS + 1)); printf "PASS %s\n" "$description"
+    else
+        FAIL=$((FAIL + 1)); printf "FAIL %s\n" "$description"
+        printf "     GNU  (rc=%s) err: %s\n" "$gx" "$(cat -A "$TMPDIR_CMP.ge2")"
+        printf "     OURS (rc=%s) err: %s\n" "$ox" "$(cat -A "$TMPDIR_CMP.oe2")"
+    fi
+}
 TMPDIR_CMP="$(mktemp -d)/cmp"
 SCRATCH="$(dirname "$TMPDIR_CMP")"
 

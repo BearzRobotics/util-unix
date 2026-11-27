@@ -135,7 +135,7 @@ fn apply(ctx: cli.Context, comptime mode: Mode, p: *Parsed, opt: Opt, value: ?[]
         .preserve_root => p.preserve_root = true,
         .reference => p.reference = value.?,
         .from => p.from = value.?,
-        .help => return .{ .status = if (cli.writeStdout(ctx.io, helpText(mode))) 0 else 1 },
+        .help => return .{ .status = if (cli.writeStdout(ctx, helpText(mode))) 0 else 1 },
         .version => return .{ .status = if (cli.printVersion(ctx)) 0 else 1 },
     }
     return null;
@@ -252,12 +252,17 @@ fn execute(ctx: cli.Context, comptime mode: Mode, p: *Parsed, operands: []const 
     var rep: Reporter = .{ .ctx = ctx };
     opts.reporter = .{ .context = &rep, .on_event = Reporter.onEvent };
     const ok = try own.run(ctx.io, ctx.gpa, opts, rest);
+    if (rep.write_error) |e| {
+        cli.writeError(ctx, e);
+        return 1;
+    }
     return if (ok) 0 else 1;
 }
 
 /// Formats engine events as GNU's messages.
 const Reporter = struct {
     ctx: cli.Context,
+    write_error: ?anyerror = null,
 
     fn onEvent(context: ?*anyopaque, ev: own.Event) void {
         const self: *Reporter = @ptrCast(@alignCast(context.?));
@@ -299,6 +304,7 @@ const Reporter = struct {
         if (c.status == .not_applied) {
             w.print("neither symbolic link {f} nor referent has been changed\n", .{path}) catch return;
             w.flush() catch {};
+            if (out.err) |e| self.write_error = e;
             return;
         }
 
@@ -339,6 +345,7 @@ const Reporter = struct {
             .not_applied => unreachable,
         }
         w.flush() catch {};
+        if (out.err) |e| self.write_error = e;
     }
 };
 

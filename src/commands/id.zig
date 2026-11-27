@@ -59,7 +59,7 @@ pub fn main(ctx: cli.Context) u8 {
                 5 => user = true,
                 6 => zero = true,
                 7 => as_json = true,
-                8 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                8 => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -128,8 +128,8 @@ pub fn main(ctx: cli.Context) u8 {
         defer ctx.gpa.free(sup);
         const ids: uu.identity.Ids = .{ .uid = me.uid, .euid = me.euid, .gid = me.gid, .egid = me.egid, .groups = sup };
         if (as_json) {
-            uu.identity.writeJson(w, &db, ids) catch return 1;
-        } else if (!(uu.identity.write(w, &db, opts, ids) catch return 1)) status = 1;
+            uu.identity.writeJson(w, &db, ids) catch return cli.outputFailed(ctx, &stdout, 1);
+        } else if (!(uu.identity.write(w, &db, opts, ids) catch return cli.outputFailed(ctx, &stdout, 1))) status = 1;
     } else for (users.items) |name| {
         const pw = uu.identity.findUser(&db, name) orelse {
             w.flush() catch {};
@@ -137,13 +137,13 @@ pub fn main(ctx: cli.Context) u8 {
             status = 1;
             continue;
         };
-        const ids = uu.identity.idsOfUser(&db, pw) catch return 1;
+        const ids = uu.identity.idsOfUser(&db, pw) catch return cli.outputFailed(ctx, &stdout, 1);
         defer ctx.gpa.free(ids.groups);
         if (as_json) {
-            uu.identity.writeJson(w, &db, ids) catch return 1;
-        } else if (!(uu.identity.write(w, &db, opts, ids) catch return 1)) status = 1;
+            uu.identity.writeJson(w, &db, ids) catch return cli.outputFailed(ctx, &stdout, 1);
+        } else if (!(uu.identity.write(w, &db, opts, ids) catch return cli.outputFailed(ctx, &stdout, 1))) status = 1;
     }
-    w.flush() catch return 1;
+    w.flush() catch return cli.outputFailed(ctx, &stdout, 1);
     return status;
 }
 

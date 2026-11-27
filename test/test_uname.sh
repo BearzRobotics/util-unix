@@ -36,4 +36,5 @@ run_cmp "--bogus"           --bogus
 run_cmp "--all=x"           --all=x
 run_cmp "--k ambiguous"     --kernel
 run_cmp "--kernel-n"        --kernel-n
+run_full "full disk" -a
 print_summary

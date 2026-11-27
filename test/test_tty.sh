@@ -14,4 +14,7 @@ IN="$(mktemp)"; echo hi > "$IN"
 CMP_STDIN="$IN" run_cmp "tty (stdin file)"
 CMP_STDIN="$IN" run_cmp "tty -s (stdin file)" -s
 rm -f "$IN"
+run_full "not a tty, full disk"
+run_full "--help, full disk" --help
+run_cmp "an option after -- is an operand" -- -s
 print_summary

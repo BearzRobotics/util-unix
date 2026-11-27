@@ -115,5 +115,6 @@ run_tree "very long path with control characters" ':' -v "$(id -un)" "$(printf '
 LONG_TREE='L=$(printf "%0200d" 0); mkdir -p $L/$L/$L/$L/$L/$L && touch $L/$L/$L/$L/$L/$L/f'
 run_tree "long paths: every -v line" "$LONG_TREE" -R -v "$(id -un)" "$(printf '%0200d' 0)"
 
+: > "$TMPDIR_CMP.f"; run_full "-v, full disk" -v "$(id -un)" "$TMPDIR_CMP.f"
 print_summary
 [ "$FAIL" -eq 0 ]

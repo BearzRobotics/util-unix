@@ -72,7 +72,7 @@ pub fn main(ctx: cli.Context) u8 {
                 7 => p.preserve_root = true,
                 8 => ref_file = value,
                 9 => p.recurse = true,
-                10 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                10 => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -161,6 +161,10 @@ pub fn main(ctx: cli.Context) u8 {
         const ok = cm.run(ctx.io, ctx.gpa, f, opts) catch return oom(ctx);
         if (!ok) status = 1;
     }
+    if (rep.write_error) |e| {
+        cli.writeError(ctx, e);
+        status = 1;
+    }
     return status;
 }
 
@@ -173,6 +177,7 @@ fn oom(ctx: cli.Context) u8 {
 /// error, -c/-v reports on standard output.
 const Reporter = struct {
     ctx: cli.Context,
+    write_error: ?anyerror = null,
 
     fn on(context: ?*anyopaque, ev: cm.Event) void {
         const r: *Reporter = @ptrCast(@alignCast(context.?));
@@ -182,12 +187,12 @@ const Reporter = struct {
                 var os: [9]u8 = undefined;
                 var ns: [9]u8 = undefined;
                 if (c.old == c.new)
-                    _ = cli.print(ctx.io, .stdout(), "mode of {f} retained as {o:0>4} ({s})\n", .{ cli.quoteaf(c.path), c.new, uu.mode.modeString(&ns, c.new) })
+                    cli.report(ctx.io, &r.write_error, "mode of {f} retained as {o:0>4} ({s})\n", .{ cli.quoteaf(c.path), c.new, uu.mode.modeString(&ns, c.new) })
                 else
-                    _ = cli.print(ctx.io, .stdout(), "mode of {f} changed from {o:0>4} ({s}) to {o:0>4} ({s})\n", .{ cli.quoteaf(c.path), c.old, uu.mode.modeString(&os, c.old), c.new, uu.mode.modeString(&ns, c.new) });
+                    cli.report(ctx.io, &r.write_error, "mode of {f} changed from {o:0>4} ({s}) to {o:0>4} ({s})\n", .{ cli.quoteaf(c.path), c.old, uu.mode.modeString(&os, c.old), c.new, uu.mode.modeString(&ns, c.new) });
             },
             .could_not_access => |path| {
-                _ = cli.print(ctx.io, .stdout(), "{f} could not be accessed\n", .{cli.quoteaf(path)});
+                cli.report(ctx.io, &r.write_error, "{f} could not be accessed\n", .{cli.quoteaf(path)});
             },
             .problem => |p| {
                 const cause = if (p.cause) |c| cli.errText(c) else "";

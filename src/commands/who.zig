@@ -66,7 +66,7 @@ pub fn main(ctx: cli.Context) u8 {
                 11, 12, 13 => o.include_mesg = true,
                 14 => users(&o),
                 15 => as_json = true,
-                16 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                16 => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -124,13 +124,13 @@ pub fn main(ctx: cli.Context) u8 {
     var buf: [4096]u8 = undefined;
     var w = Io.File.stdout().writerStreaming(ctx.io, &buf);
     if (as_json) {
-        uu.who.writeJson(ctx.io, &w.interface, data, o) catch return 1;
+        uu.who.writeJson(ctx.io, &w.interface, data, o) catch return cli.outputFailed(ctx, &w, 1);
     } else {
         // a terminal would obey control characters in the file
         o.mask_controls = Io.File.stdout().isTty(ctx.io) catch false;
-        uu.who.write(ctx.io, &w.interface, data, &zone, o) catch return 1;
+        uu.who.write(ctx.io, &w.interface, data, &zone, o) catch return cli.outputFailed(ctx, &w, 1);
     }
-    w.interface.flush() catch return 1;
+    w.interface.flush() catch return cli.outputFailed(ctx, &w, 1);
     return 0;
 }
 

@@ -27,7 +27,7 @@ pub fn main(ctx: cli.Context) u8 {
         if (a[1] == '-') {
             const m = cli.matchLong(a[2..], &.{ "help", "version" });
             switch (m) {
-                .found => |k| return if (k == 0) (if (cli.writeStdout(ctx.io, help_text)) 0 else 1) else if (cli.printVersion(ctx)) 0 else 1,
+                .found => |k| return if (k == 0) (if (cli.writeStdout(ctx, help_text)) 0 else 1) else if (cli.printVersion(ctx)) 0 else 1,
                 else => {
                     cli.badLong(ctx, a, &.{ "help", "version" }, m);
                     return 1;
@@ -57,7 +57,7 @@ pub fn main(ctx: cli.Context) u8 {
         };
         defer ctx.gpa.free(sup);
         const ids: uu.identity.Ids = .{ .uid = me.uid, .euid = me.euid, .gid = me.gid, .egid = me.egid, .groups = sup };
-        const ok = uu.identity.write(w, &db, opts, ids) catch return 1;
+        const ok = uu.identity.write(w, &db, opts, ids) catch return cli.outputFailed(ctx, &stdout, 1);
         if (!ok) status = 1;
     } else for (users.items) |name| {
         const pw = db.userByName(name) orelse {
@@ -66,13 +66,13 @@ pub fn main(ctx: cli.Context) u8 {
             status = 1;
             continue;
         };
-        const ids = uu.identity.idsOfUser(&db, pw) catch return 1;
+        const ids = uu.identity.idsOfUser(&db, pw) catch return cli.outputFailed(ctx, &stdout, 1);
         defer ctx.gpa.free(ids.groups);
-        w.print("{s} : ", .{name}) catch return 1;
-        const ok = uu.identity.write(w, &db, opts, ids) catch return 1;
+        w.print("{s} : ", .{name}) catch return cli.outputFailed(ctx, &stdout, 1);
+        const ok = uu.identity.write(w, &db, opts, ids) catch return cli.outputFailed(ctx, &stdout, 1);
         if (!ok) status = 1;
     }
-    w.flush() catch return 1;
+    w.flush() catch return cli.outputFailed(ctx, &stdout, 1);
     return status;
 }
 

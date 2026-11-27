@@ -49,7 +49,7 @@ pub fn main(ctx: cli.Context) u8 {
                 7 => want.hardware_platform = true,
                 8 => want.operating_system = true,
                 9 => as_json = true,
-                10 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                10 => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -75,11 +75,11 @@ pub fn main(ctx: cli.Context) u8 {
     var buf: [1024]u8 = undefined;
     var stdout = Io.File.stdout().writerStreaming(ctx.io, &buf);
     if (as_json) {
-        uu.uname.writeJson(&info, want, &stdout.interface) catch return 1;
+        uu.uname.writeJson(&info, want, &stdout.interface) catch return cli.outputFailed(ctx, &stdout, 1);
     } else {
-        uu.uname.write(&info, want, &stdout.interface) catch return 1;
+        uu.uname.write(&info, want, &stdout.interface) catch return cli.outputFailed(ctx, &stdout, 1);
     }
-    stdout.interface.flush() catch return 1;
+    stdout.interface.flush() catch return cli.outputFailed(ctx, &stdout, 1);
     return 0;
 }
 

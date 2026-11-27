@@ -62,7 +62,7 @@ pub fn main(ctx: cli.Context) u8 {
                         settings.append(ctx.gpa, a) catch return 1;
                     }
                 },
-                3 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                3 => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -153,19 +153,19 @@ pub fn main(ctx: cli.Context) u8 {
     switch (style) {
         .all => {
             const ws: ?st.WinSize = st.getWinSize(fd) catch null;
-            st.writeAll(out, term, ws, screenColumns(ctx)) catch return 1;
-            return finish(out);
+            st.writeAll(out, term, ws, screenColumns(ctx)) catch return cli.outputFailed(ctx, &ow, 1);
+            return finish(ctx, &ow);
         },
         .save => {
-            st.writeSave(out, term) catch return 1;
-            return finish(out);
+            st.writeSave(out, term) catch return cli.outputFailed(ctx, &ow, 1);
+            return finish(ctx, &ow);
         },
         .changed => {},
     }
 
     if (ops.items.len == 0) {
-        st.writeChanged(out, term, screenColumns(ctx)) catch return 1;
-        return finish(out);
+        st.writeChanged(out, term, screenColumns(ctx)) catch return cli.outputFailed(ctx, &ow, 1);
+        return finish(ctx, &ow);
     }
 
     var need_set = false;
@@ -213,14 +213,14 @@ pub fn main(ctx: cli.Context) u8 {
         },
         .size => {
             const ws = st.getWinSize(fd) catch |e| return deviceError(ctx, name, e);
-            out.print("{d} {d}\n", .{ ws.rows, ws.cols }) catch return 1;
+            out.print("{d} {d}\n", .{ ws.rows, ws.cols }) catch return cli.outputFailed(ctx, &ow, 1);
         },
         .speed => {
             const i_speed = st.inputSpeed(term);
             const o_speed = st.outputSpeed(term);
             if (i_speed == o_speed) {
-                out.print("{d}\n", .{o_speed}) catch return 1;
-            } else out.print("{d} {d}\n", .{ i_speed, o_speed }) catch return 1;
+                out.print("{d}\n", .{o_speed}) catch return cli.outputFailed(ctx, &ow, 1);
+            } else out.print("{d} {d}\n", .{ i_speed, o_speed }) catch return cli.outputFailed(ctx, &ow, 1);
         },
     };
 
@@ -239,7 +239,7 @@ pub fn main(ctx: cli.Context) u8 {
             return 1;
         }
     }
-    return finish(out);
+    return finish(ctx, &ow);
 }
 
 /// One validated setting.
@@ -340,8 +340,8 @@ fn parseSettings(ctx: cli.Context, items: []const []const u8, ops: *std.ArrayLis
     return true;
 }
 
-fn finish(out: *Io.Writer) u8 {
-    out.flush() catch return 1;
+fn finish(ctx: cli.Context, w: *Io.File.Writer) u8 {
+    w.interface.flush() catch return cli.outputFailed(ctx, w, 1);
     return 0;
 }
 

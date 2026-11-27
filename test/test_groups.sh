@@ -13,4 +13,5 @@ run_cmp "user, bad, user"  root nosuchuser_xyz nobody
 run_cmp "-x"               -x
 run_cmp "--bogus"          --bogus
 run_cmp "--"               -- root
+run_full "full disk" root
 print_summary

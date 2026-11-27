@@ -44,7 +44,7 @@ pub fn main(ctx: cli.Context) u8 {
             }
             switch (k) {
                 0 => {},
-                1 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+                1 => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -93,16 +93,16 @@ pub fn main(ctx: cli.Context) u8 {
 
     if (o.long) {
         for (users.items) |u| {
-            uu.pinky.writeLong(ctx.io, ctx.gpa, out, &db, u, o) catch return 1;
+            uu.pinky.writeLong(ctx.io, ctx.gpa, out, &db, u, o) catch return cli.outputFailed(ctx, &w, 1);
         }
     } else {
         const data = uu.utmp.load(ctx.io, ctx.gpa, uu.utmp.default_path) catch ctx.gpa.alloc(u8, 0) catch return 1;
         defer ctx.gpa.free(data);
         var zone = uu.localtime.Zone.load(ctx.io, ctx.gpa, cli.getenv(ctx, "TZ"));
         defer zone.deinit();
-        uu.pinky.writeShort(ctx.io, out, data, &zone, &db, users.items, o) catch return 1;
+        uu.pinky.writeShort(ctx.io, out, data, &zone, &db, users.items, o) catch return cli.outputFailed(ctx, &w, 1);
     }
-    out.flush() catch return 1;
+    out.flush() catch return cli.outputFailed(ctx, &w, 1);
     return 0;
 }
 

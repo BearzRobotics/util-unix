@@ -50,4 +50,5 @@ run_cmp "-x"               -x
 run_cmp "--bogus"          --bogus
 run_cmp "--user=x"         --user=x
 run_cmp "-u user missing"  -u nosuchuser_xyz
+run_full "full disk" root
 print_summary

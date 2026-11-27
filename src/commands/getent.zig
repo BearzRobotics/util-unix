@@ -53,8 +53,8 @@ pub fn main(ctx: cli.Context) u8 {
                         service = args[i];
                     }
                 },
-                3 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
-                4 => return if (cli.writeStdout(ctx.io, usage_text)) 0 else 1,
+                3 => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
+                4 => return if (cli.writeStdout(ctx, usage_text)) 0 else 1,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;
@@ -62,7 +62,7 @@ pub fn main(ctx: cli.Context) u8 {
         var j: usize = 1;
         while (j < a.len) : (j += 1) switch (a[j]) {
             'A', 'i' => {},
-            '?' => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
+            '?' => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
             'V' => return if (cli.printVersion(ctx)) 0 else 1,
             's' => {
                 var value: []const u8 = a[j + 1 ..];
@@ -80,7 +80,7 @@ pub fn main(ctx: cli.Context) u8 {
 
     if (operands.items.len == 0) {
         cli.warn(ctx, "wrong number of arguments", .{});
-        _ = cli.writeStdout(ctx.io, try_help ++ "\n");
+        _ = cli.writeStdout(ctx, try_help ++ "\n");
         return 1;
     }
     const db_name = operands.items[0];
@@ -90,7 +90,7 @@ pub fn main(ctx: cli.Context) u8 {
         var msg: [512]u8 = undefined;
         const text = std.fmt.bufPrint(&msg, "Unknown database: {s}\n", .{db_name}) catch return 1;
         Io.File.stderr().writeStreamingAll(ctx.io, text) catch {};
-        _ = cli.writeStdout(ctx.io, try_help ++ "\n");
+        _ = cli.writeStdout(ctx, try_help ++ "\n");
         return 1;
     };
 
@@ -118,7 +118,7 @@ pub fn main(ctx: cli.Context) u8 {
     const keys = operands.items[1..];
     var status: u8 = 0;
     if (keys.len == 0) {
-        const outcome = if (files_ok) query(ctx, db, null, w) else uu.Outcome.not_found;
+        const outcome = if (files_ok) query(ctx, db, null, &stdout) else uu.Outcome.not_found;
         switch (outcome) {
             .found => {},
             .not_found => status = 2,
@@ -131,17 +131,18 @@ pub fn main(ctx: cli.Context) u8 {
             },
         }
     } else for (keys) |key| {
-        const outcome = if (files_ok) query(ctx, db, key, w) else uu.Outcome.not_found;
+        const outcome = if (files_ok) query(ctx, db, key, &stdout) else uu.Outcome.not_found;
         if (outcome == .not_found) status = 2;
     }
-    w.flush() catch return 1;
+    w.flush() catch return cli.outputFailed(ctx, &stdout, 1);
     return status;
 }
 
-fn query(ctx: cli.Context, db: uu.Database, key: ?[]const u8, w: *Io.Writer) uu.Outcome {
+fn query(ctx: cli.Context, db: uu.Database, key: ?[]const u8, stdout: *Io.File.Writer) uu.Outcome {
+    const w = &stdout.interface;
     return uu.query(ctx.io, ctx.gpa, db, key, .{}, w) catch |e| {
         w.flush() catch {};
-        cli.warn(ctx, "{s}", .{cli.errText(e)});
+        if (stdout.err) |cause| cli.writeError(ctx, cause) else cli.warn(ctx, "{s}", .{cli.errText(e)});
         std.process.exit(1);
     };
 }

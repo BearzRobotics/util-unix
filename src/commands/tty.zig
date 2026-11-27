@@ -14,10 +14,14 @@ const long_names = [_][]const u8{ "silent", "quiet", "help", "version" };
 
 pub fn main(ctx: cli.Context) u8 {
     var silent = false;
+    var options = true;
     for (ctx.args) |a_z| {
         const a: []const u8 = a_z;
-        if (std.mem.eql(u8, a, "--")) continue;
-        if (a.len < 2 or a[0] != '-') {
+        if (options and std.mem.eql(u8, a, "--")) {
+            options = false;
+            continue;
+        }
+        if (!options or a.len < 2 or a[0] != '-') {
             cli.warn(ctx, "extra operand {f}\nTry '{s} --help' for more information.", .{ cli.quoteaf(a), ctx.name });
             return 2;
         }
@@ -27,8 +31,8 @@ pub fn main(ctx: cli.Context) u8 {
             switch (m) {
                 .found => |k| switch (k) {
                     0, 1 => silent = true,
-                    2 => return if (cli.writeStdout(ctx.io, help_text)) 0 else 1,
-                    else => return if (cli.printVersion(ctx)) 0 else 1,
+                    2 => return if (cli.writeStdout(ctx, help_text)) 0 else 3,
+                    else => return if (cli.printVersion(ctx)) 0 else 3,
                 },
                 else => {
                     cli.badLong(ctx, a, &long_names, m);
@@ -49,13 +53,13 @@ pub fn main(ctx: cli.Context) u8 {
     var buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const name = uu.name(ctx.io, Io.File.stdin(), &buf);
     if (name == null) {
-        if (!silent) _ = cli.writeStdout(ctx.io, "not a tty\n");
+        if (!silent and !cli.writeStdout(ctx, "not a tty\n")) return 3;
         return 1;
     }
     if (silent) return 0;
     var line: [Io.Dir.max_path_bytes + 1]u8 = undefined;
     const text = std.fmt.bufPrint(&line, "{s}\n", .{name.?}) catch return 3;
-    return if (cli.writeStdout(ctx.io, text)) 0 else 3;
+    return if (cli.writeStdout(ctx, text)) 0 else 3;
 }
 
 const help_text = "Usage: tty [OPTION]...\n" ++

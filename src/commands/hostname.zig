@@ -176,17 +176,17 @@ fn display(ctx: cli.Context, show: Show, node: []const u8, nis: []const u8) u8 {
     var w = Io.File.stdout().writerStreaming(ctx.io, &buf);
     const out = &w.interface;
     switch (show) {
-        .name => out.print("{s}\n", .{node}) catch return 1,
-        .short => out.print("{s}\n", .{hn.short(node)}) catch return 1,
+        .name => out.print("{s}\n", .{node}) catch return cli.outputFailed(ctx, &w, 1),
+        .short => out.print("{s}\n", .{hn.short(node)}) catch return cli.outputFailed(ctx, &w, 1),
         .yp => {
             // Newer hostname(1) refuses to print the placeholder for an unset NIS domain.
             if (nis.len == 0 or std.mem.eql(u8, nis, "(none)")) {
                 // hostname 3.25 prints this on standard output, not standard error.
-                out.print("{s}: Local domain name not set\n", .{ctx.name}) catch return 1;
+                out.print("{s}: Local domain name not set\n", .{ctx.name}) catch return cli.outputFailed(ctx, &w, 1);
                 out.flush() catch {};
                 return 1;
             }
-            out.print("{s}\n", .{nis}) catch return 1;
+            out.print("{s}\n", .{nis}) catch return cli.outputFailed(ctx, &w, 1);
         },
         .all_fqdns, .all_ips => {
             cli.warn(ctx, "{s} is not supported (it needs the network interface list)", .{if (show == .all_ips) "-I" else "-A"});
@@ -208,27 +208,27 @@ fn display(ctx: cli.Context, show: Show, node: []const u8, nis: []const u8) u8 {
             };
             defer m.deinit(ctx.gpa);
             switch (show) {
-                .alias => out.print("{s}\n", .{m.aliases}) catch return 1,
-                .fqdn => out.print("{s}\n", .{m.canonical}) catch return 1,
-                .domain => if (hn.domain(m.canonical)) |d| out.print("{s}\n", .{d}) catch return 1,
+                .alias => out.print("{s}\n", .{m.aliases}) catch return cli.outputFailed(ctx, &w, 1),
+                .fqdn => out.print("{s}\n", .{m.canonical}) catch return cli.outputFailed(ctx, &w, 1),
+                .domain => if (hn.domain(m.canonical)) |d| out.print("{s}\n", .{d}) catch return cli.outputFailed(ctx, &w, 1),
                 else => {
                     for (m.addresses, 0..) |addr, k| {
-                        if (k > 0) out.writeByte(' ') catch return 1;
-                        out.writeAll(addr) catch return 1;
+                        if (k > 0) out.writeByte(' ') catch return cli.outputFailed(ctx, &w, 1);
+                        out.writeAll(addr) catch return cli.outputFailed(ctx, &w, 1);
                     }
-                    out.writeByte('\n') catch return 1;
+                    out.writeByte('\n') catch return cli.outputFailed(ctx, &w, 1);
                 },
             }
         },
     }
-    out.flush() catch return 1;
+    out.flush() catch return cli.outputFailed(ctx, &w, 1);
     return 0;
 }
 
 /// The reference prints its usage text on standard output and exits 255, for
 /// -h and --help as well as for bad options.
 fn usage(ctx: cli.Context, _: bool) u8 {
-    _ = cli.writeStdout(ctx.io, help_text);
+    _ = cli.writeStdout(ctx, help_text);
     return 255;
 }
 
