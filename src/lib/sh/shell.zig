@@ -171,6 +171,8 @@ pub const Shell = struct {
     /// The command being run was entered in the history before it ran (it is
     /// the history's newest entry and `fc` does not see it).
     hist_pending: bool = false,
+    /// Commands run by `fc` that are inside one another.
+    fc_depth: u8 = 0,
     /// Variables saved by `local`, restored when the function returns.
     locals: std.ArrayList(Saved) = .empty,
     /// Arenas of programs that defined functions; kept for the shell's life.

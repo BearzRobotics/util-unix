@@ -324,10 +324,21 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     return runText(sh, a, data.items, false);
 }
 
+/// How many commands run by `fc` may be inside one another.
+const max_depth = 8;
+
 /// Run the commands (echoed to standard error for `-s`, as FreeBSD sh does)  as the shell's input,
 /// entering them in the history.
 fn runText(sh: *Shell, a: Allocator, text: []const u8, echo: bool) u8 {
     const h = sh.history.?;
+    // The command run may itself be an `fc` that runs it again: `fc -s 2`
+    // can be history entry 2.
+    if (sh.fc_depth >= max_depth) {
+        sh.diagCmdK(.history_error, null, "fc", "the command re-runs itself", .{});
+        return 1;
+    }
+    sh.fc_depth += 1;
+    defer sh.fc_depth -= 1;
     // `text` may be a history entry, which adding to the history (here, or by
     // the command being run) can free
     const t = a.dupe(u8, std.mem.trimEnd(u8, text, "\n")) catch |oe| return sh.oom(oe);
