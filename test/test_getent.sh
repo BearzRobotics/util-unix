@@ -112,5 +112,10 @@ run_cmp "-- ends options"                -- passwd root
 run_cmp "--usage"                        --usage
 run_cmp "--no-idn=x takes no argument"   --no-idn=x passwd root
 
+for o in --help=1 --usage=1 --version=1; do
+    if ours "$o" > /dev/null 2>&1; then rc=0; else rc=$?; fi
+    if [ "$rc" = 64 ]; then PASS=$((PASS + 1)); echo "PASS no value for $o"
+    else FAIL=$((FAIL + 1)); echo "FAIL no value for $o (exit $rc)"; fi
+done
 print_summary
 [ "$FAIL" -eq 0 ]

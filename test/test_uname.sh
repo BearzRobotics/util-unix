@@ -37,4 +37,7 @@ run_cmp "--all=x"           --all=x
 run_cmp "--k ambiguous"     --kernel
 run_cmp "--kernel-n"        --kernel-n
 run_full "full disk" -a
+run_cmp "--sysname"  --sysname
+run_cmp "--release"  --release
+run_cmp "--sys --rel" --sys --rel
 print_summary

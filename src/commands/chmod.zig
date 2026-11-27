@@ -20,7 +20,8 @@ const Parsed = struct {
     recurse: bool = false,
     preserve_root: bool = false,
     traversal: cm.Traversal = .command_line,
-    no_deref: bool = false,
+    /// `--dereference` or `-h`, whichever came last; null for neither.
+    dereference: ?bool = null,
 };
 
 pub fn main(ctx: cli.Context) u8 {
@@ -69,8 +70,8 @@ pub fn main(ctx: cli.Context) u8 {
                 0 => p.verbosity = .changes,
                 1, 2 => p.quiet = true,
                 3 => p.verbosity = .verbose,
-                4 => p.no_deref = false,
-                5 => p.no_deref = true,
+                4 => p.dereference = true,
+                5 => p.dereference = false,
                 6 => p.preserve_root = false,
                 7 => p.preserve_root = true,
                 8 => ref_file = value,
@@ -86,7 +87,7 @@ pub fn main(ctx: cli.Context) u8 {
             'c' => p.verbosity = .changes,
             'f' => p.quiet = true,
             'v' => p.verbosity = .verbose,
-            'h' => p.no_deref = true,
+            'h' => p.dereference = false,
             'R' => p.recurse = true,
             'H' => p.traversal = .command_line,
             'L' => p.traversal = .logical,
@@ -101,6 +102,11 @@ pub fn main(ctx: cli.Context) u8 {
                 return 1;
             },
         };
+    }
+    const dereference_links = p.recurse and p.dereference == true;
+    if (dereference_links and p.traversal == .physical) {
+        cli.warn(ctx, "-R --dereference requires either -H or -L", .{});
+        return 1;
     }
     if (ref_file != null and option_mode.items.len > 0) {
         cli.warn(ctx, "cannot combine mode and --reference options\nTry '{s} --help' for more information.", .{ctx.name});
@@ -143,7 +149,8 @@ pub fn main(ctx: cli.Context) u8 {
         .umask = uu.proc.umask(),
         .recurse = p.recurse,
         .traversal = p.traversal,
-        .no_dereference = p.no_deref,
+        .no_dereference = p.dereference == false,
+        .dereference_links = dereference_links,
         .verbosity = p.verbosity,
         .quiet = p.quiet,
         .reporter = .{ .context = &rep, .on_event = Reporter.on },
@@ -212,6 +219,7 @@ const Reporter = struct {
                 const cause = if (p.cause) |c| cli.errText(c) else "";
                 switch (p.kind) {
                     .cannot_access => cli.warn(ctx, "cannot access {f}: {s}", .{ cli.quoteaf(p.path), cause }),
+                    .cannot_dereference => cli.warn(ctx, "cannot dereference {f}: {s}", .{ cli.quoteaf(p.path), cause }),
                     .dangling_symlink => cli.warn(ctx, "cannot operate on dangling symlink {f}", .{cli.quoteaf(p.path)}),
                     .changing_permissions => cli.warn(ctx, "changing permissions of {f}: {s}", .{ cli.quoteaf(p.path), cause }),
                     .cannot_read_directory => cli.warn(ctx, "cannot read directory {f}: {s}", .{ cli.quoteaf(p.path), cause }),

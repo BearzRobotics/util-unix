@@ -56,6 +56,8 @@ pub const ProblemKind = enum {
     /// A symbolic link that points nowhere ("cannot operate on dangling
     /// symlink").
     dangling_symlink,
+    /// With `dereference_links`, a link met on the way that names nothing.
+    cannot_dereference,
     /// The change itself failed ("changing permissions of").
     changing_permissions,
     cannot_read_directory,
@@ -110,6 +112,9 @@ pub const Options = struct {
     /// their own mode cannot be changed).
     no_dereference: bool = false,
     verbosity: Verbosity = .off,
+    /// `--dereference` given with `recurse`: also change what the links met on
+    /// the way name. Which directories are walked is `traversal`'s business.
+    dereference_links: bool = false,
     /// Report (and fail on) bits that the umask kept a symbolic mode from
     /// clearing. GNU does so only for a mode given like an option, as in
     /// `chmod -w f`, where it may surprise.
@@ -187,7 +192,7 @@ const Engine = struct {
     fn follows(e: *Engine, is_arg: bool) bool {
         if (e.opts.no_dereference) return false;
         // -H, -L and -P say how to recurse; without that they mean nothing
-        if (!e.opts.recurse) return true;
+        if (!e.opts.recurse or e.opts.dereference_links) return true;
         return e.opts.traversal.follows(is_arg);
     }
 
@@ -223,7 +228,8 @@ const Engine = struct {
             return false;
         };
         // Symbolic links met while recursing are skipped unless -L.
-        if (lst.kind == .sym_link and !is_arg and e.opts.traversal != .logical) {
+        const passed_by = !is_arg and e.opts.traversal != .logical;
+        if (lst.kind == .sym_link and passed_by and !e.opts.dereference_links) {
             e.skippedLink();
             return true;
         }
@@ -239,7 +245,8 @@ const Engine = struct {
         }
         const st = if (lst.kind == .sym_link)
             parent.statFile(e.io, name, .{}) catch |err| {
-                e.problem(if (err == error.FileNotFound) .dangling_symlink else .cannot_access, err);
+                const dangling: ProblemKind = if (passed_by) .cannot_dereference else .dangling_symlink;
+                e.problem(if (err == error.FileNotFound) dangling else .cannot_access, err);
                 e.couldNotAccess();
                 return false;
             }
@@ -250,7 +257,8 @@ const Engine = struct {
         // a link before we act (another process can do that in a directory it
         // may write to) must not lead the change somewhere else.
         const through_link = (follow or walk_only) and (is_arg or lst.kind == .sym_link);
-        const descend = e.opts.recurse and st.kind == .directory;
+        // a link that is followed only to change what it names is not walked
+        const descend = e.opts.recurse and st.kind == .directory and (lst.kind != .sym_link or e.opts.traversal.follows(is_arg));
         // Which directory was examined, to compare with the one opened below.
         // Linux only; elsewhere the no-follow open is the whole protection.
         const examined: ?fsown.Stat = if (descend) fsown.statAt(parent, name, through_link) catch null else null;

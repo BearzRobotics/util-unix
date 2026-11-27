@@ -17,6 +17,8 @@ const long_names = [_][]const u8{
     "runlevel", "short", "time", "mesg",    "message", "writable", "users",   "json",
     "help",     "version",
 };
+/// Equal for the names that are one option: "mesg", "message", "writable".
+const long_meaning = [long_names.len]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11, 11, 14, 15, 16, 17 };
 
 pub fn main(ctx: cli.Context) u8 {
     var o: uu.who.Options = .{ .now = 0 };
@@ -39,7 +41,7 @@ pub fn main(ctx: cli.Context) u8 {
         }
         if (a[1] == '-') {
             const eq = std.mem.indexOfScalar(u8, a, '=');
-            const m = cli.matchLong(a[2 .. eq orelse a.len], &long_names);
+            const m = cli.matchLongSynonyms(a[2 .. eq orelse a.len], &long_names, &long_meaning);
             const k = switch (m) {
                 .found => |k| k,
                 else => {

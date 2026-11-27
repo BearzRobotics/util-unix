@@ -8,7 +8,7 @@ const Io = std.Io;
 const uu = @import("util_unix");
 const cli = @import("../cli.zig");
 
-const long_names = [_][]const u8{ "all", "kernel-name", "nodename", "kernel-release", "kernel-version", "machine", "processor", "hardware-platform", "operating-system", "json", "help", "version" };
+const long_names = [_][]const u8{ "all", "kernel-name", "nodename", "kernel-release", "kernel-version", "machine", "processor", "hardware-platform", "operating-system", "json", "help", "version", "sysname", "release" };
 
 pub fn main(ctx: cli.Context) u8 {
     var want: uu.uname.Fields = .{};
@@ -50,6 +50,9 @@ pub fn main(ctx: cli.Context) u8 {
                 8 => want.operating_system = true,
                 9 => as_json = true,
                 10 => return if (cli.writeStdout(ctx, help_text)) 0 else 1,
+                // obsolete names GNU still takes and does not list
+                12 => want.kernel_name = true,
+                13 => want.kernel_release = true,
                 else => return if (cli.printVersion(ctx)) 0 else 1,
             }
             continue;

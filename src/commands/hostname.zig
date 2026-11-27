@@ -51,6 +51,11 @@ pub fn main(ctx: cli.Context) u8 {
                     return usage(ctx, true);
                 },
             };
+            // only --file takes a value
+            if (k != 6 and eq != null) {
+                cli.warn(ctx, "option '--{s}' doesn't allow an argument", .{long_names[k]});
+                return usage(ctx, true);
+            }
             switch (k) {
                 0 => show = .alias,
                 1 => show = .all_fqdns,

@@ -42,8 +42,10 @@ pub fn main(ctx: cli.Context) u8 {
                 .ambiguous => return badOption(ctx, "option '{s}' is ambiguous", .{a}),
                 .none => return badOption(ctx, "unrecognized option '{s}'", .{a}),
             };
+            // only --service takes a value
+            if (idx != 2 and eq != null) return badOption(ctx, "option '--{s}' doesn't allow an argument", .{long_names[idx]});
             switch (idx) {
-                0, 1 => if (eq != null) return badOption(ctx, "option '--{s}' doesn't allow an argument", .{long_names[idx]}),
+                0, 1 => {},
                 2 => {
                     if (eq) |e| {
                         service = a[e + 1 ..];

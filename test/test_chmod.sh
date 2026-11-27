@@ -99,6 +99,12 @@ very_deep_case "-R 20000 levels" "-perm 0700" -R go-rwx deep
 run_tree "-R missing"              "$R" -R 700 nofile
 # links left alone are reported with -v; -h does not stop -R going through them
 LINKS='mkdir d e; chmod 700 d e; : > d/f; : > e/g; chmod 600 d/f e/g; ln -s ../e d/sub; ln -s f d/fl; ln -s d l; ln -s nowhere d/dang'
+# --dereference with -R changes what the links met name, without walking them
+DEREF="$LINKS; : > out; chmod 600 out; ln -s ../out d/ol"
+for o in "-R --dereference" "-R --dereference -H" "-R --dereference -L" "-R --dereference -P" "-R -P --dereference" \
+    "--dereference" "-R -h --dereference" "-R --dereference -h" "-h --dereference"; do
+    run_tree "links: $o"               "$DEREF" $o -v go+r l
+done
 for o in "-R -h" "-R -h -H" "-R -h -L" "-R -h -P" "-R" "-R -P" "-R -L" "-h" "-R -P -h"; do
     run_tree "links: $o -v"            "$LINKS" $o -v go+r l
     run_tree "links: $o -c"            "$LINKS" $o -c go+r l

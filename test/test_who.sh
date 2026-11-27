@@ -135,4 +135,6 @@ PY
 )"
 if [ "$seen" = masked ]; then PASS=$((PASS + 1)); echo "PASS control characters on a terminal are masked"
 else FAIL=$((FAIL + 1)); echo "FAIL control characters on a terminal are masked: $seen"; fi
+run_cmp "--mes, a prefix of synonyms"  --mes "$U"
+run_cmp "--w"                          --w "$U"
 print_summary

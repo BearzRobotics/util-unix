@@ -29,7 +29,10 @@ pub fn main(ctx: cli.Context) u8 {
             const eq = std.mem.indexOfScalar(u8, a, '=');
             const m = cli.matchLong(a[2 .. eq orelse a.len], &long_names);
             switch (m) {
-                .found => |k| switch (k) {
+                .found => |k| if (eq != null) {
+                    cli.warn(ctx, "option '--{s}' doesn't allow an argument\nTry '{s} --help' for more information.", .{ long_names[k], ctx.name });
+                    return 2;
+                } else switch (k) {
                     0, 1 => silent = true,
                     2 => return if (cli.writeStdout(ctx, help_text)) 0 else 3,
                     else => return if (cli.printVersion(ctx)) 0 else 3,

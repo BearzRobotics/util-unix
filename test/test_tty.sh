@@ -17,4 +17,7 @@ rm -f "$IN"
 run_full "not a tty, full disk"
 run_full "--help, full disk" --help
 run_cmp "an option after -- is an operand" -- -s
+for o in --silent=x --quiet=x --help=x --version=x; do
+    run_cmp "no value for $o"          "$o"
+done
 print_summary

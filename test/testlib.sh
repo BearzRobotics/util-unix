@@ -261,7 +261,13 @@ trap 'chmod -R u+rwx "$(dirname "$TMPDIR_CMP")" 2>/dev/null; rm -rf "$(dirname "
 run_tree() {
     description="$1"; setup="$2"; shift 2
     base="$(dirname "$TMPDIR_CMP")/tree"; chmod -R u+rwx "$base" 2>/dev/null; rm -rf "$base"; mkdir -p "$base/g" "$base/o"
-    for x in g o; do (cd "$base/$x" && eval "$setup"); done
+    # a setup that does not run must not pass as two programs failing alike
+    for x in g o; do
+        if ! (cd "$base/$x" && eval "$setup"); then
+            FAIL=$((FAIL + 1)); printf "FAIL %s\n     the setup failed\n" "$description"
+            return
+        fi
+    done
     (umask "${TREE_UMASK:-022}"; eval "${TREE_PRE:-:}"; cd "$base/g" && LC_ALL=C gnu "$@" < "${TREE_STDIN:-/dev/null}" > "$base/g.out" 2> "$base/g.err"; echo $? > "$base/g.rc")
     (umask "${TREE_UMASK:-022}"; eval "${TREE_PRE:-:}"; cd "$base/o" && ours "$@" < "${TREE_STDIN:-/dev/null}" > "$base/o.out" 2> "$base/o.err"; echo $? > "$base/o.rc")
     # The tree listing includes a checksum of every regular file: for split

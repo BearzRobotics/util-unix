@@ -54,6 +54,28 @@ pub fn matchLong(name: []const u8, names: []const []const u8) LongMatch {
     return if (found) |i| .{ .found = i } else .none;
 }
 
+/// `matchLong` where several names may mean the same: `meaning[i]` is equal for
+/// those that do. As in glibc, a prefix of such names alone is not ambiguous.
+pub fn matchLongSynonyms(name: []const u8, names: []const []const u8, meaning: []const u8) LongMatch {
+    const plain = matchLong(name, names);
+    if (plain != .ambiguous) return plain;
+    var first: ?usize = null;
+    for (names, 0..) |n, i| {
+        if (!std.mem.startsWith(u8, n, name)) continue;
+        if (first) |f| {
+            if (meaning[f] != meaning[i]) return .ambiguous;
+        } else first = i;
+    }
+    return .{ .found = first.? };
+}
+
+test "a prefix of synonyms is not ambiguous" {
+    const names = [_][]const u8{ "mesg", "message", "most" };
+    try std.testing.expectEqual(LongMatch{ .found = 0 }, matchLongSynonyms("mes", &names, &.{ 0, 0, 2 }));
+    try std.testing.expectEqual(LongMatch{ .found = 1 }, matchLongSynonyms("mess", &names, &.{ 0, 0, 2 }));
+    try std.testing.expectEqual(LongMatch.ambiguous, matchLongSynonyms("m", &names, &.{ 0, 0, 2 }));
+}
+
 /// Print the standard "invalid option" diagnostic for a short option.
 pub fn invalidShort(ctx: Context, c: u8) void {
     warn(ctx, "invalid option -- '{c}'\nTry '{s} --help' for more information.", .{ c, ctx.name });
