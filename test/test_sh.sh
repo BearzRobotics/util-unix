@@ -532,6 +532,8 @@ c "a braced parameter as here-document delimiter" 'cat <<${x}
 a
 ${x}
 echo after'
+c "cd is not led astray by an assignment to PWD" 'mkdir -p cdt/sub other/sub; cd cdt; PWD=$PWD/../other; cd sub; case $(pwd -P) in */cdt/sub) echo right ;; *) echo astray ;; esac'
+c "cd with an empty PWD stays relative to the current directory" 'mkdir -p t/tmp; cd t; PWD=; cd tmp; case $(pwd -P) in */t/tmp) echo right ;; *) echo astray ;; esac'
 c "set -v echoes the input, not what an alias made of it" 'printf "set -v\nalias e=echo\ne a\necho b\necho c\n" > v.sh; . ./v.sh'
 c "an error in a here-document names its own line" 'printf "x=1\ncat <<E\n\$(nosuchcmd)\na\nb\nE\n" > h.sh; sh ./h.sh 2>&1 | sed "s/.*: \([0-9]*\): .*/line \1/"' P
 c "a quoted ) does not end arithmetic" 'x=")"; echo $((1+${x#")"}2)); echo $(( $(echo ")" | wc -c) + 1 )); echo $(( (1+2) * $(echo "((" | wc -c) ))'

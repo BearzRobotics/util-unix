@@ -322,6 +322,18 @@ pub fn update(sh: *Shell) void {
     }
 }
 
+/// The pending signal that is to interrupt a `wait`: SIGINT, or one the user
+/// has a trap for.
+pub fn interrupting(sh: *const Shell) ?u8 {
+    var s: u8 = 1;
+    while (s < sys.nsig) : (s += 1) {
+        if (!sys.peekPending(s)) continue;
+        if (s == 2) return s;
+        if (sh.traps[s]) |t| if (t.len > 0) return s;
+    }
+    return null;
+}
+
 /// Block until some child changes state and record it; false when there is
 /// no child left or the wait was interrupted by a signal (reported through
 /// `interrupted`).
@@ -331,7 +343,9 @@ fn waitOne(sh: *Shell, interrupted: *bool) bool {
     while (true) {
         const r = sys.waitpidFlags(-1, flags) catch {
             if (sys.errno() == sys.E_INTR) {
-                if (sh.flags.interactive or sys.signalsPending()) {
+                // only ^C and a trapped signal end a wait: not, say, the
+                // line editor's own SIGWINCH
+                if (interrupting(sh) != null) {
                     interrupted.* = true;
                     return false;
                 }

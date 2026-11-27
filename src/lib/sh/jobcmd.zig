@@ -120,12 +120,6 @@ pub fn bgCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
     return resumeJob(sh, "bg", args, false);
 }
 
-fn lowestPending() u8 {
-    var s: u8 = 1;
-    while (s < sys.nsig) : (s += 1) if (sys.peekPending(s)) return s;
-    return 0;
-}
-
 pub fn waitCmd(sh: *Shell, _: Allocator, args_in: []const []const u8) u8 {
     jobs.update(sh);
     // `wait --` ends the options (POSIX 12.2 guideline 10; dash and FreeBSD sh)
@@ -197,7 +191,7 @@ fn announce(sh: *Shell, j: *jobs.Job) void {
 }
 
 fn interrupted(sh: *Shell) u8 {
-    const sig = lowestPending();
+    const sig = jobs.interrupting(sh) orelse 0;
     if (sig == 0) {
         // An interactive shell's SIGINT handler sets the flag too; without a
         // trap it still interrupts the wait.

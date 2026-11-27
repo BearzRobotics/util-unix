@@ -549,6 +549,14 @@ def input_and_history_cases():
         r = subprocess.run([argv0], executable=SH, input=b"echo hi\n", capture_output=True, timeout=10, env={"PATH": os.environ["PATH"], "HOME": d})
         ok("started as '%s' it %s ~/.profile" % (argv0, "reads" if want else "does not read"), (b"from-1-profile" in r.stdout) == want and b"hi" in r.stdout, repr((r.returncode, r.stdout, r.stderr)))
 
+    # SHX-08: only ^C and trapped signals end a wait
+    has("a resize does not end wait", ["sleep 2 &", "(sleep .5; kill -WINCH $$; sleep .5) & wait %1; echo st=$?-$((1+1))", ("sleep", 2.5), ALIVE], ["st=0-2", "al1ve"])
+    has("a trapped signal still ends wait", ["trap 'echo got-$((1+1))' USR1", "sleep 3 & p=$!; (sleep .5; kill -USR1 $$; sleep .5) & wait $p; echo st=$?-$((1+1))", ("sleep", 1.5), ALIVE], ["got-2", "st=138-2", "al1ve"])
+
+    # SHX-10: a failed exec leaves the traps in place
+    for how in ("exec", "command exec"):
+        has("a failed '%s' keeps traps" % how, ["trap 'echo got-$((1+1))' USR1", how + " /no/such/program", "kill -USR1 $$", ("sleep", .5), ALIVE], ["got-2", "al1ve"])
+
     # SHI-18: saving the history
     d = tempfile.mkdtemp(dir=TMP)
     real, link = os.path.join(d, "real"), os.path.join(d, "link")

@@ -357,6 +357,14 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     } else sh.diagCmdK(if (e == sys.E_ACCES) .not_executable else .other, name, "exec", "{s}: {s}", .{ name, sys.strerror(e) });
     // the child made for the program must not go on with the script
     if (forked) sys.exit(status);
+    // the shell may well go on ("command exec", an interactive shell): put its
+    // traps back as they were
+    i = 1;
+    while (i < sys.nsig) : (i += 1) {
+        if (sh.traps[i]) |t| if (t.len > 0 and !sh.inherited_ignore[i]) {
+            _ = sys.setSignal(i, .catch_flag);
+        };
+    }
     return die(sh, status);
 }
 
@@ -761,6 +769,19 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 
 // --- cd and pwd -----------------------------------------------------------------------------
 
+fn absolutePwd(sh: *Shell) ?[]const u8 {
+    const p = sh.getVar("PWD") orelse return null;
+    return if (p.len > 0 and p[0] == '/') p else null;
+}
+
+/// `$PWD`, if it is an absolute name of the current directory.
+fn truePwd(sh: *Shell) ?[]const u8 {
+    const p = absolutePwd(sh) orelse return null;
+    const named = sys.stat(p, true) catch return null;
+    const here = sys.stat(".", true) catch return null;
+    return if (named.ino == here.ino and named.dev == here.dev) p else null;
+}
+
 fn physicalCwd(a: Allocator) ?[]const u8 {
     var buf: [4096]u8 = undefined;
     const p = sys.getcwd(&buf) catch return null;
@@ -869,7 +890,8 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             }
         }
     }
-    const old_pwd = sh.getVar("PWD") orelse (physicalCwd(a) orelse "");
+    // $PWD is a variable like any other: a script may have given it any value
+    const old_pwd = truePwd(sh) orelse physicalCwd(a) orelse absolutePwd(sh) orelse "";
     var curpath = target;
     if (!physical) {
         const abs = if (target.len > 0 and target[0] == '/') target else std.fmt.allocPrint(a, "{s}/{s}", .{ old_pwd, target }) catch |oe| return sh.oom(oe);
@@ -899,19 +921,10 @@ fn pwdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "-P")) physical = true else if (std.mem.eql(u8, arg, "-L")) physical = false;
     }
-    var path: []const u8 = "";
-    if (!physical) {
-        if (sh.getVar("PWD")) |p| {
-            if (p.len > 0 and p[0] == '/') {
-                const x = sys.stat(p, true) catch null;
-                const y = sys.stat(".", true) catch null;
-                if (x != null and y != null and x.?.ino == y.?.ino and x.?.dev == y.?.dev) path = p;
-            }
-        }
-    }
+    var path: []const u8 = if (physical) "" else truePwd(sh) orelse "";
     if (path.len == 0) path = physicalCwd(a) orelse blk: {
         // the directory was removed under us: the logical name is all there is (dash, FreeBSD sh)
-        if (!physical and sys.errno() == sys.E_NOENT) if (sh.getVar("PWD")) |p| if (p.len > 0 and p[0] == '/') break :blk p;
+        if (!physical and sys.errno() == sys.E_NOENT) if (absolutePwd(sh)) |p| break :blk p;
         sh.diagCmdK(.other, null, "pwd", "getcwd() failed: {s}", .{sys.strerror(sys.errno())});
         return 1;
     };
