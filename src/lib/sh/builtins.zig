@@ -349,6 +349,10 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     // the program does not inherit what the shell ignores for job control
     const had_ignored = !interactive_main and sh.jc;
     if (had_ignored) sh.restoreJobSignals();
+    if (forked) {
+        sys.clearPendingAll();
+        jobs.releaseSignals(sh);
+    }
     exec.execProgram(sh, a, path, rest, env);
     const e = sys.errno();
     if (had_ignored and !forked) sh.ignoreJobSignals();

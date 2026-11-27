@@ -700,6 +700,12 @@ pub fn clearPendingAny() void {
     any_pending = false;
 }
 
+/// Forget every caught signal: for a new process, which they were not sent to.
+pub fn clearPendingAll() void {
+    pending_flags = @splat(false);
+    any_pending = false;
+}
+
 pub const SIGCHLD: u8 = 17;
 
 pub const signal_names = [_][]const u8{

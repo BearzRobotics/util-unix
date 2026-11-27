@@ -551,6 +551,8 @@ c "pwd takes grouped options and refuses others" 'pwd -LP >/dev/null; echo $?; p
 c "printf precision zero of zero has no digits" 'printf "[%.0d][%.0u][%.0x][%#.0o][%.0d][%5.3d]\n" 0 0 0 0 7 -7'
 c "command -p does not change the PATH of the command" 'PATH=$PWD:$PATH; export PATH; want=$PATH; [ "$(command -p sh -c "echo \$PATH")" = "$want" ] && echo same' e
 c "command says when a file may not be run" 'mkdir -p ne; : > ne/zzcmd; PATH=./ne; command zzcmd 2>/dev/null; echo $?' P
+c "a signal sent to a child just forked reaches it" 'trap "got=1" TERM; i=0; n=0; while [ $i -lt 20 ]; do sleep 1 & p=$!; kill -TERM $p; wait $p; [ $? = 143 ] && n=$((n+1)); i=$((i+1)); done; echo "$n of 20"' P
+c "no command starts with signals held back" 'trap "" USR2; trap "echo no" USR1; s="grep SigBlk /proc/self/status"; $s; ($s); echo | $s; echo "$($s)"; $s & wait; (exec $s); command $s'
 c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
 c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
 c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'

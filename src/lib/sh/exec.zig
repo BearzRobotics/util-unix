@@ -388,7 +388,7 @@ fn childInit(sh: *Shell, bg: bool) void {
     sh.in_subshell = true;
     sh.trap_set = @splat(false);
     jobs.clearAll(sh);
-    sys.clearPendingAny();
+    sys.clearPendingAll();
     if (sh.flags.interactive and !was_subshell) {
         // The interactive shell's own dispositions must not leak into
         // commands (POSIX XCU sh "Signals").
@@ -421,6 +421,7 @@ fn childInit(sh: *Shell, bg: bool) void {
         _ = sys.setSignal(2, .ignore);
         _ = sys.setSignal(3, .ignore);
     }
+    jobs.releaseSignals(sh);
 }
 
 fn childExit(sh: *Shell, st: u8) noreturn {
@@ -1293,7 +1294,7 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
                 if (!applyRedirs(sh, a, s.redirs, null)) break :blk 2;
                 break :blk reportMissing(sh, name, denied);
             }
-            const pid = sys.fork() catch {
+            const pid = jobs.forkInto(sh, null, "", true) catch {
                 sh.diagK(.cannot_fork, null, "Cannot fork", .{});
                 break :blk 2;
             };

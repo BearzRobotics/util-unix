@@ -196,6 +196,8 @@ pub const Shell = struct {
     getopts_sub: usize = 0,
     /// `command -p`: searched instead of PATH while the one command is looked up
     lookup_path: ?[]const u8 = null,
+    /// in a new child, the signal mask to put back (see `jobs.forkInto`)
+    fork_mask: ?sys.SignalMask = null,
     getopts_last_optind: usize = 1,
     exit_status_override: ?u8 = null,
     in_exit_trap: bool = false,

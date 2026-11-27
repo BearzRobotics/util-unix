@@ -324,8 +324,17 @@ pub fn commandText(a: Allocator, j: *const Job) Allocator.Error![]u8 {
 /// process leads it) and, for a foreground job on a terminal, takes the
 /// terminal. Both sides do it so there is no race. Returns the child pid in
 /// the parent and 0 in the child.
+///
+/// The child starts with every signal held back: it still has the parent's
+/// handlers, which would only note a signal sent to it and lose it. It calls
+/// `releaseSignals` once its own dispositions are in place.
 pub fn forkInto(sh: *Shell, job: ?*Job, text: []const u8, foreground: bool) sys.Error!i32 {
-    const pid = try sys.fork();
+    const mask = sys.blockSignals();
+    const pid = sys.fork() catch |e| {
+        sys.restoreMask(mask);
+        return e;
+    };
+    if (pid == 0) sh.fork_mask = mask else sys.restoreMask(mask);
     if (job) |j| {
         if (!(sh.jc and !sh.in_subshell)) {
             if (pid != 0) addPlain(sh, j, pid, text);
@@ -344,6 +353,14 @@ pub fn forkInto(sh: *Shell, job: ?*Job, text: []const u8, foreground: bool) sys.
         j.procs.append(sh.gpa, .{ .pid = pid, .text = copy }) catch sh.gpa.free(copy);
     }
     return pid;
+}
+
+/// In a child of `forkInto`: let through what was held back over the fork.
+pub fn releaseSignals(sh: *Shell) void {
+    if (sh.fork_mask) |mask| {
+        sh.fork_mask = null;
+        sys.restoreMask(mask);
+    }
 }
 
 /// Add an already-forked process to a job (no process group).
