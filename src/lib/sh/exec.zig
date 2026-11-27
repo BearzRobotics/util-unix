@@ -13,6 +13,7 @@
 //! 2.12 "Shell Execution Environment"; exit statuses 126/127 per 2.8.2.
 
 const std = @import("std");
+const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
 const ast = @import("ast.zig");
 const parser = @import("parser.zig");
@@ -897,7 +898,7 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
                     sys.close(n);
                     continue;
                 }
-                const m0 = std.fmt.parseInt(i32, word, 10) catch -1;
+                const m0 = num.parseInt(i32, word, 10) catch -1;
                 // a duplicated descriptor is one digit (POSIX leaves more unspecified; dash and FreeBSD sh refuse)
                 const m = if (m0 > 9 or word.len > 1 and word[0] == '0') -1 else m0;
                 if (m < 0) {

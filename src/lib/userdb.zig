@@ -13,6 +13,7 @@
 //! malformed lines are skipped.
 
 const std = @import("std");
+const num = @import("num.zig");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
@@ -34,23 +35,29 @@ pub const Group = struct {
     members: []const u8,
 };
 
-/// Parse one passwd(5) line. Null for comments, blank and malformed lines.
-pub fn parsePasswd(line: []const u8) ?Passwd {
+/// What glibc skips before a line, a numeric field and a group member.
+const blanks = " \t\r\x0b\x0c";
+
+/// Parse one passwd(5) line. Null for comments, blank and malformed lines. As
+/// for glibc, the fields after the group id may be left out.
+pub fn parsePasswd(text: []const u8) ?Passwd {
+    const line = std.mem.trimStart(u8, text, blanks);
     if (line.len == 0 or line[0] == '#') return null;
     var it = std.mem.splitScalar(u8, line, ':');
     const name = it.next() orelse return null;
     const pw = it.next() orelse return null;
     const uid = parseId(it.next() orelse return null) orelse return null;
     const gid = parseId(it.next() orelse return null) orelse return null;
-    const gecos = it.next() orelse return null;
-    const dir = it.next() orelse return null;
-    const shell = it.next() orelse return null;
+    const gecos = it.next() orelse "";
+    const dir = it.next() orelse "";
+    const shell = it.next() orelse "";
     if (name.len == 0) return null;
     return .{ .name = name, .passwd = pw, .uid = uid, .gid = gid, .gecos = gecos, .dir = dir, .shell = shell };
 }
 
 /// Parse one group(5) line.
-pub fn parseGroup(line: []const u8) ?Group {
+pub fn parseGroup(text: []const u8) ?Group {
+    const line = std.mem.trimStart(u8, text, blanks);
     if (line.len == 0 or line[0] == '#') return null;
     var it = std.mem.splitScalar(u8, line, ':');
     const name = it.next() orelse return null;
@@ -61,9 +68,29 @@ pub fn parseGroup(line: []const u8) ?Group {
     return .{ .name = name, .passwd = pw, .gid = gid, .members = members };
 }
 
-fn parseId(s: []const u8) ?u32 {
-    if (s.len == 0) return null;
-    return std.fmt.parseInt(u32, s, 10) catch null;
+/// The names in a group's member list, as glibc reads it: blanks before a
+/// name and empty entries are dropped.
+pub const MemberIterator = struct {
+    parts: std.mem.SplitIterator(u8, .scalar),
+
+    pub fn next(it: *MemberIterator) ?[]const u8 {
+        while (it.parts.next()) |part| {
+            const name = std.mem.trimStart(u8, part, blanks);
+            if (name.len > 0) return name;
+        }
+        return null;
+    }
+};
+
+pub fn memberIterator(members: []const u8) MemberIterator {
+    return .{ .parts = std.mem.splitScalar(u8, members, ',') };
+}
+
+fn parseId(field: []const u8) ?u32 {
+    const s = std.mem.trimStart(u8, field, blanks);
+    // digits, with '+' allowed: not the "-0" that parseInt would take
+    if (s.len == 0 or (s[0] != '+' and !std.ascii.isDigit(s[0]))) return null;
+    return num.parseInt(u32, s, 10) catch null;
 }
 
 /// In-memory copy of the two files. Entries returned by lookups borrow from
@@ -156,7 +183,7 @@ pub const Db = struct {
         try out.append(db.gpa, primary);
         var it = db.groupIterator();
         while (it.next()) |g| {
-            var members = std.mem.splitScalar(u8, g.members, ',');
+            var members = memberIterator(g.members);
             while (members.next()) |m| {
                 if (std.mem.eql(u8, m, user)) {
                     if (std.mem.indexOfScalar(u32, out.items, g.gid) == null) try out.append(db.gpa, g.gid);
@@ -218,7 +245,25 @@ test "lookups return the first match and skip bad lines" {
 
 test "parsePasswd rejects non-numeric ids and short lines" {
     try std.testing.expect(parsePasswd("a:x:z:1:g:/:/bin/sh") == null);
-    try std.testing.expect(parsePasswd("a:x:1:1:g:/") == null);
+    try std.testing.expect(parsePasswd("a:x:1") == null);
+    try std.testing.expect(parsePasswd("a:x:1:") == null);
+    for ([_][]const u8{ "0_0", "-0", "-1", "", "1 ", "4294967296" }) |id| {
+        var buf: [64]u8 = undefined;
+        try std.testing.expect(parsePasswd(try std.fmt.bufPrint(&buf, "a:x:{s}:1:::", .{id})) == null);
+        try std.testing.expect(parseGroup(try std.fmt.bufPrint(&buf, "a:x:{s}:", .{id})) == null);
+    }
+}
+
+test "lines are read as glibc reads them" {
+    const short = parsePasswd("  short:x: +55:55").?;
+    try std.testing.expectEqualStrings("short", short.name);
+    try std.testing.expectEqual(@as(u32, 55), short.uid);
+    try std.testing.expectEqualStrings("", short.shell);
+    var members = memberIterator(parseGroup("\tg:x:70: a,,b , c").?.members);
+    try std.testing.expectEqualStrings("a", members.next().?);
+    try std.testing.expectEqualStrings("b ", members.next().?);
+    try std.testing.expectEqualStrings("c", members.next().?);
+    try std.testing.expect(members.next() == null);
     try std.testing.expect(parsePasswd(":x:1:1:g:/:/bin/sh") == null);
 }
 

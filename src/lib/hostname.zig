@@ -10,6 +10,7 @@
 //! the file therefore cannot be completed to a fully qualified name here.
 
 const std = @import("std");
+const num = @import("num.zig");
 const builtin = @import("builtin");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
@@ -115,7 +116,7 @@ fn isIpv4(text: []const u8) bool {
     var parts: usize = 0;
     var it = std.mem.splitScalar(u8, text, '.');
     while (it.next()) |p| {
-        _ = std.fmt.parseInt(u8, p, 10) catch return false;
+        _ = num.parseInt(u8, p, 10) catch return false;
         parts += 1;
     }
     return parts == 4;

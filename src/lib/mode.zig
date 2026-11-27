@@ -18,6 +18,7 @@
 //! Pure functions: no I/O, no allocation.
 
 const std = @import("std");
+const num = @import("num.zig");
 
 const all_bits: u16 = 0o7777;
 
@@ -27,7 +28,7 @@ const all_bits: u16 = 0o7777;
 pub fn apply(text: []const u8, old: u16, is_dir: bool, umask: u16) ?u16 {
     if (text.len == 0) return null;
     if (std.ascii.isDigit(text[0])) {
-        const v = std.fmt.parseInt(u16, text, 8) catch return null;
+        const v = num.parseInt(u16, text, 8) catch return null;
         return if (v > all_bits) null else v;
     }
     var mode = old;

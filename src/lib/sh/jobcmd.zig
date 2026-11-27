@@ -4,6 +4,7 @@
 //! Messages follow dash and FreeBSD sh ("No current job", "No such job: %9").
 
 const std = @import("std");
+const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
 const shell = @import("shell.zig");
 const jobs = @import("jobs.zig");
@@ -156,7 +157,7 @@ pub fn waitCmd(sh: *Shell, _: Allocator, args_in: []const []const u8) u8 {
             }
             pid_found = job.?.lastPid();
         } else {
-            const pid = std.fmt.parseInt(i32, arg, 10) catch {
+            const pid = num.parseInt(i32, arg, 10) catch {
                 sh.diagCmdK(.illegal_number, arg, "wait", "Illegal number: {s}", .{arg});
                 return 2;
             };

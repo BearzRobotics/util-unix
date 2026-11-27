@@ -16,6 +16,7 @@
 //! differs; docs/compatibility/getent.md lists the known cases.
 
 const std = @import("std");
+const num = @import("num.zig");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const userdb = @import("userdb.zig");
@@ -116,7 +117,11 @@ pub fn query(io: Io, gpa: Allocator, db: Database, key: ?[]const u8, opts: Optio
             if (key) |k| {
                 if (!keyNames(k, e.gid, e.name)) continue;
             }
-            try w.print("{s}:{s}:{d}:{s}\n", .{ e.name, e.passwd, e.gid, e.members });
+            try w.print("{s}:{s}:{d}:", .{ e.name, e.passwd, e.gid });
+            var members = userdb.memberIterator(e.members);
+            var separator: []const u8 = "";
+            while (members.next()) |m| : (separator = ",") try w.print("{s}{s}", .{ separator, m });
+            try w.writeByte('\n');
             any = true;
             if (key != null) break;
         },
@@ -129,7 +134,7 @@ pub fn query(io: Io, gpa: Allocator, db: Database, key: ?[]const u8, opts: Optio
             // lstchg, min, max, warn, inact, expire, flag: numbers or empty.
             for (0..7) |_| {
                 const field = f.next() orelse "";
-                const n = std.fmt.parseInt(i64, field, 10) catch null;
+                const n = num.parseInt(i64, field, 10) catch null;
                 if (n) |v| try w.print(":{d}", .{v}) else try w.writeAll(":");
             }
             try w.writeByte('\n');
@@ -278,7 +283,7 @@ fn numbered(lines: *std.mem.SplitIterator(u8, .scalar), key: ?[]const u8, w: *Io
         var it = fields(line);
         const name = it.next().?;
         const number_text = it.next() orelse continue;
-        const number = std.fmt.parseInt(i64, number_text, 10) catch continue;
+        const number = num.parseInt(i64, number_text, 10) catch continue;
         if (key) |k| {
             var hit = false;
             if (isNumber(k)) {
@@ -317,7 +322,7 @@ fn parseNetwork(text: []const u8) ?u32 {
     var it = std.mem.splitScalar(u8, text, '.');
     while (it.next()) |p| {
         if (n == 4) return null;
-        parts[n] = std.fmt.parseInt(u8, p, 10) catch return null;
+        parts[n] = num.parseInt(u8, p, 10) catch return null;
         n += 1;
     }
     if (n == 0) return null;
@@ -559,7 +564,7 @@ fn ethers(lines: *std.mem.SplitIterator(u8, .scalar), key: ?[]const u8, w: *Io.W
         var n: usize = 0;
         while (parts.next()) |p| : (n += 1) {
             if (n == 6) break;
-            mac[n] = std.fmt.parseInt(u8, p, 16) catch break;
+            mac[n] = num.parseInt(u8, p, 16) catch break;
         }
         if (n != 6) continue;
         if (key) |k| {
@@ -569,7 +574,7 @@ fn ethers(lines: *std.mem.SplitIterator(u8, .scalar), key: ?[]const u8, w: *Io.W
             var kn: usize = 0;
             while (kp.next()) |p| : (kn += 1) {
                 if (kn == 6) break;
-                m[kn] = std.fmt.parseInt(u8, p, 16) catch break;
+                m[kn] = num.parseInt(u8, p, 16) catch break;
             }
             if (kn == 6) key_mac = m;
             const hit = if (key_mac) |km| std.mem.eql(u8, &km, &mac) else std.mem.eql(u8, host, k);
@@ -626,7 +631,7 @@ fn initgroups(io: Io, gpa: Allocator, opts: Options, dir: Io.Dir, group_text: []
     var gl = std.mem.splitScalar(u8, group_text, '\n');
     while (gl.next()) |line| {
         const g = userdb.parseGroup(line) orelse continue;
-        var members = std.mem.splitScalar(u8, g.members, ',');
+        var members = userdb.memberIterator(g.members);
         const member = while (members.next()) |m| {
             if (std.mem.eql(u8, m, user)) break true;
         } else false;
@@ -721,6 +726,11 @@ test "initgroups lists memberships without the primary group" {
     try expectQuery(.initgroups, "alice", "adm:x:4:alice,bob\nalice:x:1000:\nusers:x:100:alice\n", .found, "alice                 4 100\n");
     try expectQuery(.initgroups, "nosuch", "adm:x:4:alice\n", .found, "nosuch               \n");
     try expectQuery(.initgroups, null, "", .enumeration_unsupported, "");
+}
+
+test "group members are listed as glibc lists them" {
+    try expectQuery(.group, "g", "g:x:70: a,,b , c\n", .found, "g:x:70:a,b ,c\n");
+    try expectQuery(.initgroups, "alice", "g:x:70:bob, alice\n", .found, "alice                 70\n");
 }
 
 test "netgroup and missing files" {

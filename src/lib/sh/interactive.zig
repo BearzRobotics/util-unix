@@ -11,6 +11,7 @@
 //! rest of it. Prompts go to standard error.
 
 const std = @import("std");
+const numparse = @import("../num.zig");
 const sys = @import("../../sys.zig");
 const shell = @import("shell.zig");
 const exec = @import("exec.zig");
@@ -192,7 +193,7 @@ pub const Session = struct {
 
 fn varNum(sh: *Shell, name: []const u8) ?usize {
     const v = sh.getVar(name) orelse return null;
-    return std.fmt.parseInt(usize, v, 10) catch null;
+    return numparse.parseInt(usize, v, 10) catch null;
 }
 
 /// Enter interactive mode: job control, signals, history. Call after

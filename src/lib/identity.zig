@@ -15,6 +15,7 @@
 //! warning in the right place relative to the output.
 
 const std = @import("std");
+const num = @import("num.zig");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const userdb = @import("userdb.zig");
@@ -64,7 +65,7 @@ pub const Ids = struct {
 /// that name (so `id 0` works unless a user is called "0"), as GNU does.
 pub fn findUser(db: *const userdb.Db, text: []const u8) ?userdb.Passwd {
     if (db.userByName(text)) |u| return u;
-    const n = std.fmt.parseInt(u32, text, 10) catch return null;
+    const n = num.parseInt(u32, text, 10) catch return null;
     return db.userById(n);
 }
 

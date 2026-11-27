@@ -8,6 +8,7 @@
 //! messages follow dash 0.5.12 where POSIX leaves them open.
 
 const std = @import("std");
+const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
 const ast = @import("ast.zig");
 const lexer = @import("lexer.zig");
@@ -110,7 +111,7 @@ fn leave(sh: *Shell, st: u8) u8 {
 
 fn parseNum(s: []const u8) ?i64 {
     if (s.len == 0) return null;
-    return std.fmt.parseInt(i64, s, 10) catch null;
+    return num.parseInt(i64, s, 10) catch null;
 }
 
 fn quoteSingle(a: Allocator, s: []const u8) Allocator.Error![]const u8 {
@@ -1039,7 +1040,7 @@ fn printfNumberK(sh: *Shell, s: []const u8, st: *u8, unsigned: bool) i64 {
     if (end > digits_start) {
         sh.diagCmdK(.printf_number, s, "printf", "{s}: not completely converted", .{s});
         st.* = 1;
-        return std.fmt.parseInt(i64, s[num_start..end], 10) catch 0;
+        return num.parseInt(i64, s[num_start..end], 10) catch 0;
     }
     sh.diagCmdK(.printf_number, s, "printf", "{s}: expected numeric value", .{s});
     st.* = 1;
@@ -2028,7 +2029,7 @@ fn umaskCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         _ = sys.umaskSet(~@as(u32, np) & 0o777);
         return 0;
     }
-    const m = std.fmt.parseInt(u32, args[i], 8) catch {
+    const m = num.parseInt(u32, args[i], 8) catch {
         sh.diagCmdK(.illegal_number, args[i], "umask", "Illegal number: {s}", .{args[i]});
         return 2;
     };
@@ -2131,7 +2132,7 @@ fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         return 0;
     }
     const v: u64 = if (std.mem.eql(u8, args[i], "unlimited")) sys.infinity else blk: {
-        const n = std.fmt.parseInt(u64, args[i], 10) catch {
+        const n = num.parseInt(u64, args[i], 10) catch {
             sh.diagCmdK(.illegal_number, args[i], "ulimit", "bad number", .{});
             return 2;
         };

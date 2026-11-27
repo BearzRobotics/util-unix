@@ -12,6 +12,7 @@
 //! `lib/sh.zig` and decision 0009).
 
 pub const fsown = @import("lib/fsown.zig");
+pub const num = @import("lib/num.zig");
 const treewalk = @import("lib/treewalk.zig");
 pub const userdb = @import("lib/userdb.zig");
 pub const userspec = @import("lib/userspec.zig");
@@ -39,6 +40,7 @@ pub const sys = @import("sys.zig");
 test {
     _ = fsown;
     _ = treewalk;
+    _ = num;
     _ = userdb;
     _ = userspec;
     _ = ownership;

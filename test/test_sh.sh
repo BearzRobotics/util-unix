@@ -514,6 +514,12 @@ c "shift n" 'set -- a b c d; shift 2; echo $1 $#' B
 c "shift zero" 'set -- a b; shift 0; echo $#' B
 c "shift too many" 'set -- a; shift 2; echo after' B
 c "shift all" 'set -- a b; shift 2; echo $#' B
+# numbers are digits: no "_" separators
+c "test rejects an underscore in a number" 'test 1_0 -eq 10 2>/dev/null; echo $?'
+c "shift rejects an underscore in a number" '(set -- a b c; shift 0_1) 2>/dev/null; echo $?' e
+c "exit rejects an underscore in a number" '(exit 1_0) 2>/dev/null; echo $?' e
+c "kill rejects an underscore in a pid" 'kill -0 0_0_$$ 2>/dev/null || echo refused' e
+c "umask rejects an underscore in a mode" '(umask 0_22) 2>/dev/null || echo refused' e
 
 # ---- trap ----
 c "trap exit" 'trap "echo bye" EXIT; echo hi' B

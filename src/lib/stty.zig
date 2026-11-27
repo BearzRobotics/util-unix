@@ -21,6 +21,7 @@
 //! never prints; writers are passed in.
 
 const std = @import("std");
+const num = @import("num.zig");
 const builtin = @import("builtin");
 const Io = std.Io;
 const linux = std.os.linux;
@@ -269,7 +270,7 @@ pub fn parseUnsigned(text: []const u8) CharError!u64 {
         digits = text[1..];
     }
     if (digits[0] == '+' or digits[0] == '-') return error.InvalidInteger;
-    return std.fmt.parseInt(u64, digits, base) catch |e| switch (e) {
+    return num.parseInt(u64, digits, base) catch |e| switch (e) {
         error.Overflow => error.OutOfRange,
         else => error.InvalidInteger,
     };
@@ -336,7 +337,7 @@ const speed_table = [_]struct { baud: u32, code: u32 }{
 /// "134.5". Null when it is not a speed the kernel interface knows.
 pub fn speedCode(text: []const u8) ?u32 {
     if (std.mem.eql(u8, text, "134.5")) return 0o4;
-    const n = std.fmt.parseInt(u32, text, 10) catch return null;
+    const n = num.parseInt(u32, text, 10) catch return null;
     for (speed_table) |s| if (s.baud == n) return s.code;
     return null;
 }
@@ -796,10 +797,10 @@ pub fn parseSave(base: Termios, text: []const u8) ?Termios {
     var t = base;
     var it = std.mem.splitScalar(u8, text, ':');
     const flags = [_]*u32{ &t.iflag, &t.oflag, &t.cflag, &t.lflag };
-    for (flags) |f| f.* = std.fmt.parseInt(u32, it.next() orelse return null, 16) catch return null;
+    for (flags) |f| f.* = num.parseInt(u32, it.next() orelse return null, 16) catch return null;
     var i: usize = 0;
     while (i < user_nccs) : (i += 1) {
-        const v = std.fmt.parseInt(u32, it.next() orelse return null, 16) catch return null;
+        const v = num.parseInt(u32, it.next() orelse return null, 16) catch return null;
         if (v > 255) return null;
         if (i < nccs) t.cc[i] = @intCast(v);
     }

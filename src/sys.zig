@@ -9,6 +9,7 @@
 //! See docs/decisions/0003-std-io-exceptions.md.
 
 const std = @import("std");
+const num = @import("lib/num.zig");
 const builtin = @import("builtin");
 
 const has_posix = builtin.os.tag != .windows and builtin.os.tag != .wasi;
@@ -605,7 +606,7 @@ pub const signal_names = [_][]const u8{
 /// number; null when unknown.
 pub fn signalNumber(name: []const u8) ?u8 {
     if (name.len > 0 and std.ascii.isDigit(name[0])) {
-        const n = std.fmt.parseInt(u8, name, 10) catch return null;
+        const n = num.parseInt(u8, name, 10) catch return null;
         return if (n < signal_names.len) n else null;
     }
     var nm = name;

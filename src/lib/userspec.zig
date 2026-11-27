@@ -76,6 +76,9 @@ fn withSeparator(db: *const userdb.Db, spec: []const u8, sep: ?usize) ParseError
     if (u) |user| {
         const entry = if (user[0] == '+') null else db.userByName(user);
         if (entry) |pw| {
+            // the number that tells chown to leave the owner alone
+            if (pw.uid == unchanged_id) return error.InvalidUser;
+            if (g == null and sep != null and pw.gid == unchanged_id) return error.InvalidGroup;
             out.uid = pw.uid;
             out.user_name = user;
             if (g == null and sep != null) {
@@ -92,6 +95,7 @@ fn withSeparator(db: *const userdb.Db, spec: []const u8, sep: ?usize) ParseError
     if (g) |group| {
         const entry = if (group[0] == '+') null else db.groupByName(group);
         if (entry) |gr| {
+            if (gr.gid == unchanged_id) return error.InvalidGroup;
             out.gid = gr.gid;
             out.group_name = group;
         } else {
@@ -101,6 +105,9 @@ fn withSeparator(db: *const userdb.Db, spec: []const u8, sep: ?usize) ParseError
     }
     return out;
 }
+
+/// (uid_t)-1 and (gid_t)-1: `fchownat` takes them as "no change".
+const unchanged_id = std.math.maxInt(u32);
 
 /// strtoul-style decimal id: optional blanks and '+', digits, nothing else;
 /// the value must fit and must not be the "unchanged" sentinel 2^32-1.
@@ -124,6 +131,7 @@ const test_passwd =
     \\alice:x:1000:100:Alice:/home/alice:/bin/sh
     \\1234:x:77:77::/:/bin/false
     \\dot.user:x:2000:2000::/:/bin/sh
+    \\nochange:x:4294967295:4294967295::/:/bin/sh
     \\
 ;
 const test_group =
@@ -191,6 +199,13 @@ test "dot separator: tried only after the whole spec fails as a name" {
     try std.testing.expect(!d.warn_dot);
     try std.testing.expectEqual(@as(?u32, 2000), d.uid);
     try std.testing.expectError(error.InvalidUser, parse(&db, "bob.staff", .user_and_group));
+}
+
+test "a name whose id means no change is not usable" {
+    var db = try tdb();
+    defer db.deinit();
+    try std.testing.expectError(error.InvalidUser, parse(&db, "nochange", .user_only));
+    try std.testing.expectError(error.InvalidUser, parse(&db, "nochange:staff", .user_and_group));
 }
 
 test "user_only treats ':' as part of the name" {

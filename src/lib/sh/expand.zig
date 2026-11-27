@@ -13,6 +13,7 @@
 //! (the unquoted result of an expansion: split and a pattern).
 
 const std = @import("std");
+const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
 const ast = @import("ast.zig");
 const arith = @import("arith.zig");
@@ -255,7 +256,7 @@ fn lookup(x: *X, name: []const u8) Error!PV {
         '!' => return if (sh.bg_pid == 0) .unset else .{ .one = try std.fmt.allocPrint(x.a, "{d}", .{sh.bg_pid}) },
         '-' => return .{ .one = try optionLetters(x.a, sh) },
         '0'...'9' => {
-            const n = std.fmt.parseInt(usize, name, 10) catch return .unset;
+            const n = num.parseInt(usize, name, 10) catch return .unset;
             if (n == 0) return .{ .one = sh.name };
             if (n > sh.params.items.len) return .unset;
             return .{ .one = sh.params.items[n - 1] };

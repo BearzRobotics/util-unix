@@ -17,6 +17,7 @@
 //! first, as dash).
 
 const std = @import("std");
+const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
 const ast = @import("ast.zig");
 const shell = @import("shell.zig");
@@ -193,7 +194,7 @@ pub fn resolve(sh: *Shell, spec: []const u8, err: *SpecError) ?*Job {
             return null;
         };
     }
-    if (std.fmt.parseInt(u32, s, 10)) |n| {
+    if (num.parseInt(u32, s, 10)) |n| {
         return find(sh, n) orelse {
             err.* = .no_such;
             return null;

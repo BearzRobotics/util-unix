@@ -11,6 +11,7 @@
 const std = @import("std");
 const Io = std.Io;
 const uu = @import("util_unix");
+const num = uu.num;
 const st = uu.stty;
 const cli = @import("../cli.zig");
 
@@ -351,7 +352,7 @@ fn screenColumns(ctx: cli.Context) usize {
         if (ws.cols > 0) return ws.cols;
     } else |_| {}
     if (cli.getenv(ctx, "COLUMNS")) |text| {
-        if (std.fmt.parseInt(usize, text, 10)) |n| {
+        if (num.parseInt(usize, text, 10)) |n| {
             if (n > 0) return n;
         } else |_| {}
     }

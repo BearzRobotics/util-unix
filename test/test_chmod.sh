@@ -145,6 +145,9 @@ run_tree "-- then -x"              "$S" -- -x f
 run_tree "mode only"               "$S" 600
 run_tree "no operand"              "$S"
 run_tree "bad mode"                "$S" 999 f
+for m in 7_77 0_0 0_755 u=r_w; do
+    run_tree "bad mode $m"             "$S" "$m" f
+done
 run_tree "bad mode u+q"            "$S" u+q f
 run_tree "empty mode"              "$S" '' f
 run_tree "--bogus"                 "$S" --bogus 600 f

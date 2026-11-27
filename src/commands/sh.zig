@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const uu = @import("util_unix");
+const num = uu.num;
 const sys = uu.sys;
 const cli = @import("../cli.zig");
 const sh = uu.sh;
@@ -74,7 +75,7 @@ fn listOrExplain(ctx: cli.Context, list: bool, want: ?[]const u8, json: bool) u8
     if (want) |w| {
         var code_text: []const u8 = w;
         if (code_text.len > 2 and (code_text[0] == 'S' or code_text[0] == 's') and (code_text[1] == 'H' or code_text[1] == 'h')) code_text = code_text[2..];
-        const code = std.fmt.parseInt(u16, code_text, 10) catch 0;
+        const code = num.parseInt(u16, code_text, 10) catch 0;
         const e = diag.entryByCode(code) orelse {
             var buf: [200]u8 = undefined;
             const m = std.fmt.bufPrint(&buf, "{s}: no such diagnostic code: {s}\n", .{ ctx.name, w }) catch "";
