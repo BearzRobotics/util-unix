@@ -130,6 +130,13 @@ case("sane after raw", ["raw"], ["sane"], [], ["-a"])
 case("sane after many", ["raw", "iutf8", "hupcl", "clocal", "crtscts", "xcase", "ixany", "echonl", "tostop"], ["sane"], [], ["-a"])
 case("cooked after raw", ["raw"], ["cooked"], [], ["-a"])
 case("-raw after raw", ["raw"], ["-raw"], [], ["-a"])
+# the combinations from a terminal that is not in its default state: what they
+# leave alone only shows there
+other = ["intr", "^X", "eof", "^Y", "eol", "^Z", "min", "5", "time", "7", "iutf8", "ixany", "-brkint", "inlcr", "-echo"]
+for c in combos + ["-" + x for x in ("raw", "cooked", "cbreak", "nl", "evenp", "pass8", "litout", "decctlq", "lcase")] + ["lcase"]:
+    case("custom settings, then " + c, other, [c], [], ["-a"])
+case("custom settings, raw and back", other, ["raw"], ["-raw"], [], ["-a"])
+case("eof undef, then cooked", ["eof", "undef"], ["cooked"], [], ["-a"])
 for c in chars:
     for v in ("^A", "^?", "^-", "undef", "x", "0x41", "0101", "101", "^z", "0x80", "255"):
         case("char %s %s" % (c, v), [c, v], [], ["-a"])

@@ -600,15 +600,13 @@ fn applyCombination(t: *Termios, name: []const u8, reversed: bool) void {
         if (raw) {
             setCc(t, VMIN, 1);
             setCc(t, VTIME, 0);
-            t.iflag &= ~@as(u32, IGNBRK | BRKINT | IGNPAR | PARMRK | INPCK | ISTRIP | INLCR | IGNCR | ICRNL | IXON | IXOFF | IUCLC | IXANY | IMAXBEL);
+            t.iflag = 0; // no input processing at all, iutf8 included
             t.oflag &= ~@as(u32, OPOST);
             t.lflag &= ~@as(u32, ISIG | ICANON | XCASE);
         } else {
             t.iflag |= BRKINT | IGNPAR | ISTRIP | ICRNL | IXON;
             t.oflag |= OPOST;
             t.lflag |= ISIG | ICANON;
-            setCc(t, VEOF, 0x04);
-            setCc(t, VEOL, 0);
         }
     } else if (eql(u8, name, "decctlq")) {
         if (reversed) t.iflag |= IXANY else t.iflag &= ~@as(u32, IXANY);
