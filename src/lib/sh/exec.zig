@@ -639,6 +639,9 @@ fn runStagesImpl(sh: *Shell, cmds: []const *const Node, bg: bool) u8 {
         if (i + 1 < cmds.len) {
             next_pipe = sys.pipe() catch {
                 sh.diagK(.cannot_fork, null, "Pipe call failed", .{});
+                if (prev_read) |r| sys.close(r);
+                // a script does not go on (dash)
+                if (!sh.flags.interactive) sh.flow = .exit_shell;
                 break;
             };
         }
@@ -953,7 +956,11 @@ pub fn applyRedirs(sh: *Shell, a: Allocator, redirs: []const *ast.Redirect, save
 fn saveFd(sh: *Shell, n: i32, save: ?*Redirs) bool {
     const s = save orelse return true;
     s.saved.ensureUnusedCapacity(sh.gpa, 1) catch return false;
-    const copy: i32 = sys.dupAbove(n, 10) catch -1;
+    const copy: i32 = sys.dupAbove(n, 10) catch if (sys.errno() == sys.E_BADF) -1 else {
+        // -1 means "was closed": restoring would then close what is in use
+        sh.diagK(.other, null, "{d}: cannot save the descriptor: {s}", .{ n, sys.strerror(sys.errno()) });
+        return false;
+    };
     s.saved.appendAssumeCapacity(.{ .fd = n, .saved = copy });
     return true;
 }
@@ -1140,6 +1147,21 @@ pub fn resolve(sh: *Shell, a: Allocator, name: []const u8) Resolved {
     return .not_found;
 }
 
+/// True when the PATH search for `name` passed over a file that may not be run.
+pub fn foundButNotExecutable(sh: *Shell, a: Allocator, name: []const u8) bool {
+    return std.mem.indexOfScalar(u8, name, '/') == null and pathFind(sh, a, name, false) != null;
+}
+
+/// Report a command that cannot be run; its exit status.
+fn reportMissing(sh: *Shell, name: []const u8, denied: bool) u8 {
+    if (denied) {
+        sh.diagK(.not_executable, name, "{s}: Permission denied", .{name});
+        return 126;
+    }
+    sh.diagK(.not_found, name, "{s}: not found", .{name});
+    return 127;
+}
+
 pub fn findExecutable(sh: *Shell, a: Allocator, name: []const u8) ?[]const u8 {
     return pathFind(sh, a, name, true);
 }
@@ -1253,6 +1275,8 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
         };
     };
     const r = resolve(sh, a, name);
+    // why it was not found: asked while the same PATH is in effect
+    const denied = r == .not_found and foundButNotExecutable(sh, a, name);
     if (path_saved) |ps| restoreVar(sh, ps);
     // A variable assignment error ends a non-interactive shell for every kind of
     // command (POSIX 2.8.1); builtins check it themselves.
@@ -1267,8 +1291,7 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
             // Redirections still happen (to a forked child in real shells).
             if (replace) {
                 if (!applyRedirs(sh, a, s.redirs, null)) break :blk 2;
-                sh.diagK(.not_found, name, "{s}: not found", .{name});
-                break :blk 127;
+                break :blk reportMissing(sh, name, denied);
             }
             const pid = sys.fork() catch {
                 sh.diagK(.cannot_fork, null, "Cannot fork", .{});
@@ -1277,8 +1300,7 @@ fn execSimple(sh: *Shell, node: *const Node, s_in: ast.Simple, replace: bool) u8
             if (pid == 0) {
                 childInit(sh, false);
                 if (!applyRedirs(sh, a, s.redirs, null)) sys.exit(2);
-                sh.diagK(.not_found, name, "{s}: not found", .{name});
-                sys.exit(127);
+                sys.exit(reportMissing(sh, name, denied));
             }
             break :blk waitFor(sh, pid, true);
         },

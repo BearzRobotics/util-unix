@@ -534,6 +534,16 @@ ${x}
 echo after'
 c "a signal already pending ends wait at once" 'trap "echo trapped" USR1; sleep 3 & p=$!; start=$(date +%s); wait $(kill -USR1 $$; echo $p); echo "wait=$? quick=$(($(date +%s) - start < 2))"; kill $p'
 c "wait still waits for the job when nothing is trapped" '(sleep .3; exit 6) & wait $!; echo $?'
+c "a redirection that cannot be undone is not made" 'ulimit -n 10; { echo a >/dev/null; } 2>/dev/null; echo b' Pe
+# the producer is finite: a shell that cannot make the pipe may run it anyway,
+# with stdout to the capture file (yash does). It is larger than a pipe holds.
+c "a failed pipe does not hang the shell" 'ulimit -n 5; head -c 1000000 /dev/zero | cat | cat >/dev/null; echo reached' e
+c "a command that may not be run is not missing" 'mkdir -p ne; : > ne/zzcmd; chmod -x ne/zzcmd; (PATH=$PWD/ne; zzcmd) 2>&1 | grep -c "Permission denied"; (PATH=$PWD/ne; exec zzcmd) 2>/dev/null; echo $?' P
+c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
+c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
+c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'
+c "getopts into a read-only variable fails" '(readonly o=z; getopts ab o -a; echo "$? $o") 2>/dev/null'
+c "read drops NUL bytes" 'printf "a\000b\n" | { read v; echo "[$v] ${#v}"; }'
 c "a finished background job keeps its status until waited for" '(exit 3) & p=$!; sleep .2; /bin/true; true & /bin/true; wait $p; echo $?'
 c "finished background jobs do not pile up as zombies" 'i=0; while [ $i -lt 40 ]; do true & i=$((i+1)); done; sleep .3; /bin/true; z=0; for f in /proc/[0-9]*/stat; do { read -r line < $f; } 2>/dev/null || continue; case $line in *") Z $$ "*) z=$((z+1)) ;; esac; done; echo $((z <= 1))'
 c "a pipeline keeps its statuses while background jobs end" 'i=0; while [ $i -lt 20 ]; do true & (exit 5) | (sleep .01; exit 7); echo $?; i=$((i+1)); done | sort | uniq -c | tr -s " "'

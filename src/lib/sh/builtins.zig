@@ -268,7 +268,8 @@ fn dot(sh: *Shell, a: Allocator, args_in: []const []const u8) u8 {
         if (info.kind == .dir) return 0;
     } else |_| {}
     const text = exec.readFile(a, path) orelse {
-        sh.diagCmdK(.cannot_open, path, ".", "cannot open {s}: No such file", .{path});
+        const e = sys.errno();
+        sh.diagCmdK(.cannot_open, path, ".", "cannot open {s}: {s}", .{ path, if (e == sys.E_NOENT) "No such file" else sys.strerror(e) });
         return die(sh, 2);
     };
     var old: std.ArrayList([]u8) = .empty;
@@ -304,6 +305,10 @@ fn execCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     const name = rest[0];
     const path = if (std.mem.indexOfScalar(u8, name, '/') != null) name else exec.findExecutable(sh, a, name) orelse {
+        if (exec.foundButNotExecutable(sh, a, name)) {
+            sh.diagCmdK(.not_executable, name, "exec", "{s}: Permission denied", .{name});
+            return die(sh, 126);
+        }
         sh.diagCmdK(.not_found, name, "exec", "{s}: not found", .{name});
         return die(sh, 127);
     };
@@ -458,6 +463,11 @@ fn localCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
             sh.diagCmdK(.bad_variable_name, name, "local", "{s}: bad variable name", .{name});
             return 2;
         }
+        // assigning to a read-only variable is an error, as for dash
+        if (eq != null) if (sh.vars.get(name)) |v| if (v.readonly) {
+            sh.diagCmdK(.readonly_assignment, name, "local", "{s}: is read only", .{name});
+            return die(sh, 2);
+        };
         // `local x` again in the same function keeps the value
         var again = false;
         for (sh.locals.items[sh.locals_base..]) |l| if (std.mem.eql(u8, l.name, name)) {
@@ -1383,6 +1393,8 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         }
 
         const c = ch[0];
+        // as in script text and $(...): what a program gets would stop there
+        if (c == 0) continue;
         if (escaped) {
             escaped = false;
             if (c == '\n') continue;
@@ -1892,6 +1904,11 @@ fn getoptsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     // an invalid variable name is reported, but the option is still parsed
     // (OPTIND and OPTARG are set) and the status is 2 (dash, FreeBSD sh)
     if (!lexer.isName(name)) sh.diagCmdK(.bad_variable_name, name, "getopts", "{s}: bad variable name", .{name});
+    // a loop must not go on with the option it read last time
+    if (sh.vars.get(name)) |v| if (v.readonly) {
+        sh.diagCmdK(.readonly_assignment, name, "getopts", "{s}: is read only", .{name});
+        return 2;
+    };
     const list: []const []const u8 = if (args.len > 3) args[3..] else @as([]const []const u8, @ptrCast(sh.params.items));
     const silent = optstr.len > 0 and optstr[0] == ':';
     const os = if (silent) optstr[1..] else optstr;
