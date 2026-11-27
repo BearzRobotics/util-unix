@@ -71,17 +71,33 @@ pub fn jobsCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 }
 
 fn resumeJob(sh: *Shell, cmd: []const u8, args: []const []const u8, fg: bool) u8 {
-    if (args.len > 2) {
+    if (fg and args.len > 2) {
         sh.diagCmdK(.usage, null, cmd, "too many arguments", .{});
         return 2;
     }
     jobs.update(sh);
-    const spec = if (args.len > 1) args[1] else "%+";
+    // `bg` takes any number of jobs
+    const specs: []const []const u8 = if (args.len > 1) args[1..] else &.{"%+"};
+    var st: u8 = 0;
+    for (specs) |spec| {
+        const one = resumeOne(sh, cmd, spec, fg);
+        if (one != 0) st = one;
+    }
+    return st;
+}
+
+fn resumeOne(sh: *Shell, cmd: []const u8, spec: []const u8, fg: bool) u8 {
     var err: jobs.SpecError = .none;
     const j = jobs.resolve(sh, spec, &err) orelse {
         specError(sh, cmd, spec, err);
         return 1;
     };
+    // Without job control the terminal cannot be given to it, and a stop would
+    // go unnoticed: the shell would wait for ever (dash fails too).
+    if (!sh.jc or !j.grouped) {
+        sh.diagCmdK(.usage, null, cmd, "job {d} not created under job control", .{j.id});
+        return 2;
+    }
     if (!fg and j.state() == .running) {
         sh.diagCmdK(.usage, null, cmd, "job {d} already in background", .{j.id});
         return 0;

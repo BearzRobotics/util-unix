@@ -776,6 +776,23 @@ def last_editor_cases():
     # SHI-37: the line typed before a search comes back
     has("the typed line survives search and history movement", ["echo one", "raw:echo typed" + C("R") + "one" + DOWN + "\n"], ["\ntyped\n"])
 
+def job_safety_cases():
+    d = tempfile.mkdtemp(prefix="jobs", dir=TMP)
+    # JOB-06: what a subshell leaves in the background cannot take typed input
+    has("a background command in a subshell does not read the terminal", ["(cat >stolen & sleep 0.3)", ("w", .6), "echo FIRST-$((1+1))", "echo size-$(wc -c <stolen)"], ["FIRST-2", "size-0"], cwd=d)
+    has("nor can the terminal's ^C reach it", ["(sleep 5 & echo ignored-$((0x$(awk '/SigIgn/{print $2}' /proc/$!/status) & 6)); ls -l /proc/$!/fd/0; kill $!)"], ["ignored-6", "-> /dev/null"])
+    # JOB-07: fg and bg without job control fail instead of hanging
+    for cmd in ("fg", "bg"):
+        has("%s after set +m fails and returns" % cmd, ["cat &", ("w", .3), "set +m", cmd, "echo st-$?", "kill -9 $!"], ["not created under job control", "st-2"])
+    # JOB-08: a trap on TTOU does not cost the shell its terminal
+    has("a trap on TTOU keeps the shell", ["trap 'echo got-ttou' TTOU", "sleep 0.2", ALIVE, "echo more-$((2+2))"], ["al1ve", "more-4"])
+    # JOB-09: `exit` on the very first line warns about a stopped job
+    has("exit on the first line warns of stopped jobs", ["sleep 20; exit", "^Z", ALIVE, "kill -9 %1"], ["ou have stopped jobs", "al1ve"])
+    # JOB-10
+    has("bg takes several jobs", ["sleep 61", "^Z", "sleep 62", "^Z", "bg %1 %2", "jobs", "kill %1 %2; sleep .5"], ["[1] sleep 61", "[2] sleep 62"], ["too many arguments"])
+    # JOB-12
+    has("a subshell job keeps its parentheses", ["(sleep 63; :)", "^Z", "fg", ("w", .3), "^C"], ["$ fg\n(sleep 63; :)\n"])
+
 def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
     has("PS1 command substitution", ["PS1='$(echo X)> '", "echo hi"], ["X> echo hi"])
@@ -1022,7 +1039,7 @@ def paste_render_cases():
         got = s.raw[before:]
         ok("no editing mode: the tty's own line discipline", "plai\x01Z\r\n" in got and "\x1b[?2004h" not in got, repr(got))
 
-EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases, "safety": session_safety_cases, "insignal": input_signal_cases, "last": last_editor_cases}
+EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases, "safety": session_safety_cases, "insignal": input_signal_cases, "last": last_editor_cases, "jobsafety": job_safety_cases}
 
 def setid_cases():
     """SHX-18, SHI-20: with differing ids, sh gives up the effective ones, or

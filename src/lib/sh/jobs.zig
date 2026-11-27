@@ -200,24 +200,8 @@ pub fn clearAll(sh: *Shell) void {
 }
 
 fn marker(sh: *const Shell, j: *const Job) u8 {
-    var buf: [64]*Job = undefined;
-    var n: usize = 0;
-    for (sh.jobs.items) |x| {
-        if (n < buf.len) {
-            buf[n] = x;
-            n += 1;
-        }
-    }
-    std.mem.sort(*Job, buf[0..n], {}, struct {
-        fn lt(_: void, l: *Job, r: *Job) bool {
-            const ls = l.state() == .stopped;
-            const rs = r.state() == .stopped;
-            if (ls != rs) return ls;
-            return l.stamp > r.stamp;
-        }
-    }.lt);
-    if (n > 0 and buf[0] == j) return '+';
-    if (n > 1 and buf[1] == j) return '-';
+    if (current(sh) == j) return '+';
+    if (previous(sh) == j) return '-';
     return ' ';
 }
 
@@ -352,7 +336,7 @@ pub fn forkInto(sh: *Shell, job: ?*Job, text: []const u8, foreground: bool) sys.
         const pgid = if (j.pgid == 0) (if (pid == 0) sys.getpid() else pid) else j.pgid;
         if (pid == 0) {
             sys.setpgid(0, pgid) catch {};
-            if (foreground and sh.tty_fd >= 0) sys.tcsetpgrp(sh.tty_fd, pgid) catch {};
+            if (foreground and sh.tty_fd >= 0) setForeground(sh.tty_fd, pgid) catch {};
             return 0;
         }
         sys.setpgid(pid, pgid) catch {};
@@ -592,12 +576,29 @@ pub fn notify(sh: *Shell) void {
     if (out.items.len > 0) sh.errRaw(out.items);
 }
 
+/// Make `pgrp` the terminal's foreground group. The shell may be in the
+/// background then, and must not be sent SIGTTOU for it: with a trap on that
+/// signal the call would fail, whatever the shell does with it otherwise.
+fn setForeground(tty: i32, pgrp: i32) sys.Error!void {
+    const mask = sys.blockSignals();
+    defer sys.restoreMask(mask);
+    return sys.tcsetpgrp(tty, pgrp);
+}
+
+fn setModes(tty: i32, modes: *const sys.Termios) void {
+    const mask = sys.blockSignals();
+    defer sys.restoreMask(mask);
+    sys.tcsetattr(tty, modes) catch {};
+}
+
 /// Take the terminal back. A job that ran to its end leaves it as it means to
 /// (`stty` is such a job); one that stopped or was killed may have left it in
 /// any state, and the shell's own modes are put back.
 fn handBack(sh: *Shell, j: *const Job) void {
     if (sh.tty_fd < 0) return;
-    sys.tcsetpgrp(sh.tty_fd, sh.shell_pgid) catch {};
+    setForeground(sh.tty_fd, sh.shell_pgid) catch {
+        sh.diagK(.other, null, "cannot take the terminal back: {s}", .{sys.strerror(sys.errno())});
+    };
     var finished = j.state() == .done;
     for (j.procs.items) |p| {
         const sig = sys.statusSignal(p.status);
@@ -605,7 +606,7 @@ fn handBack(sh: *Shell, j: *const Job) void {
     }
     if (finished) {
         sh.tty_modes = sys.tcgetattr(sh.tty_fd) catch sh.tty_modes;
-    } else if (sh.tty_modes) |*m| sys.tcsetattr(sh.tty_fd, m) catch {};
+    } else if (sh.tty_modes) |*m| setModes(sh.tty_fd, m);
 }
 
 /// Finish a job whose processes can no longer be waited for. Their statuses are
@@ -621,7 +622,7 @@ fn lostChildren(j: *Job) void {
 /// 128+signal and is kept in the table.
 pub fn waitFg(sh: *Shell, j: *Job) u8 {
     j.foreground = true;
-    if (sh.tty_fd >= 0 and j.pgid != 0) sys.tcsetpgrp(sh.tty_fd, j.pgid) catch {};
+    if (sh.tty_fd >= 0 and j.pgid != 0) setForeground(sh.tty_fd, j.pgid) catch {};
     var intr = false;
     while (j.state() == .running) {
         if (!waitOne(sh, &intr, false)) {
@@ -725,7 +726,7 @@ pub fn enable(sh: *Shell, need_tty: bool) bool {
         sh.ignoreJobSignals();
         sys.setpgid(0, 0) catch {};
         sh.shell_pgid = sys.getpgrp();
-        sys.tcsetpgrp(tty, sh.shell_pgid) catch {};
+        setForeground(tty, sh.shell_pgid) catch {};
         sh.tty_modes = sys.tcgetattr(tty) catch null;
     } else {
         sh.shell_pgid = sys.getpgrp();
@@ -766,7 +767,7 @@ pub fn disable(sh: *Shell) void {
         if (sh.orig_pgrp != sh.shell_pgid) {
             if (sys.setpgid(0, sh.orig_pgrp)) |_| {
                 const fg = sys.tcgetpgrp(sh.tty_fd) catch 0;
-                if (fg == sh.shell_pgid) sys.tcsetpgrp(sh.tty_fd, sh.orig_pgrp) catch {};
+                if (fg == sh.shell_pgid) setForeground(sh.tty_fd, sh.orig_pgrp) catch {};
                 sh.shell_pgid = sh.orig_pgrp;
             } else |_| {}
         }

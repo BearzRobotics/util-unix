@@ -449,7 +449,7 @@ pub fn loop(s: *Session) u8 {
                         text.clearRetainingCapacity();
                         break;
                     }
-                    if (sh.jc and jobs.anyStopped(sh) and sh.exit_warned + 1 != sh.cmd_seq) {
+                    if (sh.jc and jobs.anyStopped(sh) and (sh.exit_warned == 0 or sh.exit_warned + 1 != sh.cmd_seq)) {
                         sh.exit_warned = sh.cmd_seq;
                         sh.diagBareK(.stopped_jobs, "", "You have stopped jobs.");
                         text.clearRetainingCapacity();

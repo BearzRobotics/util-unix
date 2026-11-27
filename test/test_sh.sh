@@ -558,6 +558,7 @@ c "no command starts with signals held back" 'trap "" USR2; trap "echo no" USR1;
 c "a long here-document in a script on stdin ends at any read boundary" 'for pad in 8150 8170 8179 8180 8181 8182 8183 8184 8185 8190 16370; do { printf "cat <<DELIM | wc -c\n"; printf "%0${pad}d\n" 0; printf "DELIM\necho after\n"; } > s; sh < s; done | tr -d " " | tr "\n" " "'
 c "a long here-document delimiter joined by a backslash is found" '{ printf "cat <<DELIM | wc -c\n"; printf "%020000d\n" 0; printf "DEL\\\nIM\necho after\n"; } > s; sh < s | tr -d " "'
 c "what follows a long here-document on stdin is left for its reader" '{ printf "cat <<E >/dev/null\n"; printf "%030000d\n" 0; printf "E\nread x; echo \"[\$x]\"\ndata\necho end\n"; } > s; cat s | sh'
+c "the current and previous job are marked among more than 64" 'i=0; while [ $i -lt 66 ]; do sleep 2 & i=$((i+1)); done; jobs %+ >o; cut -c1-6 o; jobs %- >o; cut -c1-6 o; jobs -p >o; kill $(cat o) 2>/dev/null; :' P
 c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
 c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
 c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'

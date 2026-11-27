@@ -433,7 +433,8 @@ fn childInit(sh: *Shell, bg: bool) void {
             }
         }
     }
-    if (bg and !sh.jc) {
+    // (a subshell gives what it starts no group of its own, with `set -m` or not)
+    if (bg and !(sh.jc and !was_subshell)) {
         _ = sys.setSignal(2, .ignore);
         _ = sys.setSignal(3, .ignore);
     }
@@ -462,6 +463,8 @@ const ChildIo = struct {
     devnull_stdin: bool = false,
     bg: bool = false,
     job: ?*jobs.Job = null,
+    /// what `jobs` calls it, when that is not the node run
+    named: ?*const Node = null,
 };
 
 fn useJobs(sh: *Shell) bool {
@@ -473,7 +476,7 @@ fn nodeText(sh: *Shell, node: *const Node) []u8 {
 }
 
 fn forkRun(sh: *Shell, node: *const Node, cio: ChildIo) ?i32 {
-    const text = if (cio.job != null) nodeText(sh, node) else &[_]u8{};
+    const text = if (cio.job != null) nodeText(sh, cio.named orelse node) else &[_]u8{};
     defer if (text.len > 0) sh.gpa.free(text);
     const pid = jobs.forkInto(sh, cio.job, text, !cio.bg) catch {
         sh.diagK(.cannot_fork, null, "Cannot fork", .{});
@@ -563,7 +566,7 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
         .subshell => |body| {
             const b = body orelse return 0;
             const job: ?*jobs.Job = if (useJobs(sh)) jobs.create(sh) else null;
-            const pid = forkRun(sh, b, .{ .job = job }) orelse {
+            const pid = forkRun(sh, b, .{ .job = job, .named = node }) orelse {
                 if (job) |j| jobs.remove(sh, j);
                 return 1;
             };
@@ -602,7 +605,7 @@ fn spawnBackground(sh: *Shell, node: *const Node) u8 {
     }
     const job = jobs.create(sh);
     if (job != null and !useJobs(sh)) job.?.grouped = false;
-    const pid = forkRun(sh, node, .{ .devnull_stdin = !sh.jc, .bg = true, .job = if (useJobs(sh)) job else null }) orelse {
+    const pid = forkRun(sh, node, .{ .devnull_stdin = !useJobs(sh), .bg = true, .job = if (useJobs(sh)) job else null }) orelse {
         if (job) |j| jobs.remove(sh, j);
         return 1;
     };
@@ -678,7 +681,7 @@ fn runStagesImpl(sh: *Shell, cmds: []const *const Node, bg: bool) u8 {
             .close = closes[0..nclose],
             .job = job,
             .bg = bg,
-            .devnull_stdin = bg and !sh.jc and i == 0,
+            .devnull_stdin = bg and !useJobs(sh) and i == 0,
         }) orelse {
             if (prev_read) |r| sys.close(r);
             if (next_pipe) |np| {

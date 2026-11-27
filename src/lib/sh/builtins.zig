@@ -99,7 +99,7 @@ fn die(sh: *Shell, st: u8) u8 {
 
 /// `exit` itself: always leaves the shell.
 fn leave(sh: *Shell, st: u8) u8 {
-    if (sh.flags.interactive and sh.jc and jobs.anyStopped(sh) and sh.exit_warned + 1 != sh.cmd_seq) {
+    if (sh.flags.interactive and sh.jc and jobs.anyStopped(sh) and (sh.exit_warned == 0 or sh.exit_warned + 1 != sh.cmd_seq)) {
         sh.exit_warned = sh.cmd_seq;
         sh.diagBareK(.stopped_jobs, "", "You have stopped jobs.");
         sh.status = 1;
