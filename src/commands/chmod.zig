@@ -28,6 +28,9 @@ pub fn main(ctx: cli.Context) u8 {
     var ref_file: ?[]const u8 = null;
     var operands: std.ArrayList([]const u8) = .empty;
     defer operands.deinit(ctx.gpa);
+    // modes given where options go ("-w", "-x,u+r"), joined by ','
+    var option_mode: std.ArrayList(u8) = .empty;
+    defer option_mode.deinit(ctx.gpa);
     var i: usize = 0;
     var only_operands = false;
     while (i < ctx.args.len) : (i += 1) {
@@ -77,9 +80,8 @@ pub fn main(ctx: cli.Context) u8 {
             }
             continue;
         }
-        // Short options; a letter that can only be part of a mode ("-w",
-        // "-x", "-rwx") ends option parsing and is the MODE operand.
-        var as_mode = false;
+        // Short options. At a character that can only be part of a mode, the
+        // whole word is (part of) the MODE, as in "-w" or "-x,u+r".
         for (a[1..]) |c| switch (c) {
             'c' => p.verbosity = .changes,
             'f' => p.quiet = true,
@@ -89,13 +91,20 @@ pub fn main(ctx: cli.Context) u8 {
             'H' => p.traversal = .command_line,
             'L' => p.traversal = .logical,
             'P' => p.traversal = .physical,
-            'r', 'w', 'x', 'X', 's', 't', 'u', 'g', 'o', 'a' => as_mode = true,
+            'r', 'w', 'x', 'X', 's', 't', 'u', 'g', 'o', 'a', ',', '+', '=', '0'...'7' => {
+                if (option_mode.items.len > 0) option_mode.append(ctx.gpa, ',') catch return oom(ctx);
+                option_mode.appendSlice(ctx.gpa, a) catch return oom(ctx);
+                break;
+            },
             else => {
                 cli.invalidShort(ctx, c);
                 return 1;
             },
         };
-        if (as_mode) operands.append(ctx.gpa, a) catch return oom(ctx);
+    }
+    if (ref_file != null and option_mode.items.len > 0) {
+        cli.warn(ctx, "cannot combine mode and --reference options\nTry '{s} --help' for more information.", .{ctx.name});
+        return 1;
     }
 
     var change: cm.Change = undefined;
@@ -104,7 +113,8 @@ pub fn main(ctx: cli.Context) u8 {
             cli.warn(ctx, "missing operand\nTry '{s} --help' for more information.", .{ctx.name});
             return 1;
         }
-        const text = operands.orderedRemove(0);
+        // with an option mode, every operand is a file
+        const text = if (option_mode.items.len > 0) option_mode.items else operands.orderedRemove(0);
         if (operands.items.len == 0) {
             cli.warn(ctx, "missing operand after {f}\nTry '{s} --help' for more information.", .{ cli.quoteaf(text), ctx.name });
             return 1;
@@ -129,6 +139,7 @@ pub fn main(ctx: cli.Context) u8 {
     var rep: Reporter = .{ .ctx = ctx };
     var opts: cm.Options = .{
         .change = change,
+        .report_umask = option_mode.items.len > 0,
         .umask = uu.proc.umask(),
         .recurse = p.recurse,
         .traversal = p.traversal,

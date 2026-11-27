@@ -108,6 +108,10 @@ pub const Options = struct {
     /// their own mode cannot be changed).
     no_dereference: bool = false,
     verbosity: Verbosity = .off,
+    /// Report (and fail on) bits that the umask kept a symbolic mode from
+    /// clearing. GNU does so only for a mode given like an option, as in
+    /// `chmod -w f`, where it may surprise.
+    report_umask: bool = false,
     /// `-f`: suppress problem reports (the result still reflects failure).
     quiet: bool = false,
     reporter: Reporter,
@@ -280,14 +284,6 @@ const Engine = struct {
             .mode_text => |t| {
                 text = t;
                 new = mode_mod.apply(t, old, is_dir, e.opts.umask) orelse unreachable; // checked by validMode
-                // A directory keeps its set-user-ID and set-group-ID bits
-                // unless the mode says so explicitly: octal modes of fewer
-                // than five digits and symbolic modes that never mention `s`
-                // leave them alone.
-                if (is_dir) {
-                    const octal = std.ascii.isDigit(t[0]);
-                    if ((octal and t.len < 5) or (!octal and std.mem.indexOfScalar(u8, t, 's') == null)) new |= old & 0o6000;
-                }
             },
         }
 
@@ -304,9 +300,8 @@ const Engine = struct {
             .verbose => e.emit(.{ .changed = .{ .path = e.path.items, .old = old, .new = new } }),
         }
 
-        // A symbolic mode applied under a umask: bits the user asked for but
-        // the umask held back.
-        if (text) |t| if (!std.ascii.isDigit(t[0])) {
+        // Bits the mode asked to clear that the umask made it leave.
+        if (text) |t| if (e.opts.report_umask and !std.ascii.isDigit(t[0])) {
             const wanted = mode_mod.apply(t, old, is_dir, 0) orelse unreachable;
             if (new & ~wanted & 0o777 != 0) {
                 if (!e.opts.quiet) e.emit(.{ .umask_kept = .{ .path = e.path.items, .got = new, .wanted = wanted } });
@@ -437,12 +432,16 @@ test "the umask leaves bits a symbolic mode asked to clear, and that is a failur
     try tmp.dir.setFilePermissions(testing.io, "f", .fromMode(0o666), .{});
     var log: Log = .{};
     defer log.deinit();
-    const opts: Options = .{ .change = .{ .mode_text = "-w" }, .umask = 0o022, .reporter = log.reporter(), .base = tmp.dir };
+    var opts: Options = .{ .change = .{ .mode_text = "-w" }, .umask = 0o022, .report_umask = true, .reporter = log.reporter(), .base = tmp.dir };
     // "-w" with no who clears only the bits outside the umask (u+w), so g+w
     // and o+w stay although the user asked for no write bits at all.
     try testing.expect(!try run(testing.io, testing.allocator, "f", opts));
     try testing.expectEqual(@as(u16, 0o466), try modeOf(tmp.dir, "f"));
     try testing.expectEqualStrings("umask f 0466 0444", log.list.items[0]);
+    // not asked for: nothing to say
+    opts.report_umask = false;
+    try testing.expect(try run(testing.io, testing.allocator, "f", opts));
+    try testing.expectEqual(@as(usize, 1), log.list.items.len);
 }
 
 test "--reference style fixed bits and a dangling link argument" {

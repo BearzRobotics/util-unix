@@ -2023,7 +2023,9 @@ fn umaskCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         // symbolic mode (POSIX umask): applied to the permissions the mask
         // allows, i.e. its complement
         const perm: u16 = @intCast(~sys.umaskGet() & 0o777);
-        const np = mode_mod.apply(args[i], perm, false, 0) orelse {
+        // (chmod also takes numbers after an operator; umask does not)
+        const numbers = std.mem.indexOfAny(u8, args[i], "01234567") != null;
+        const np = (if (numbers) null else mode_mod.apply(args[i], perm, false, 0)) orelse {
             sh.diagCmdK(.illegal_number, args[i], "umask", "Illegal mode: {s}", .{args[i]});
             return 2;
         };

@@ -145,6 +145,27 @@ run_tree "-- then -x"              "$S" -- -x f
 run_tree "mode only"               "$S" 600
 run_tree "no operand"              "$S"
 run_tree "bad mode"                "$S" 999 f
+# the set-id bits of a directory go only through a part that names them
+for m in u+s,g=rx g=rx,u+s g=u u=rwx,g+x =755 00755 g-s a=rx -022; do
+    run_tree "setgid directory $m"     'umask 022; mkdir d; chmod 7777 d' "$m" d
+    run_tree "setgid 2775 $m"          'mkdir d; chmod 2775 d' "$m" d
+done
+# modes given where options go are joined; every operand is then a file
+for m in "-r -w" "-w -r" "-r,-w" "-x,u+r" "-w,a+x" "-755" "-022" "=755" "+111" "a=r,+1"; do
+    run_tree "option mode $m"          'umask 022; : > f; chmod 666 f' $m f
+done
+run_tree "option mode after the file"  'umask 022; : > f; chmod 666 f' -r f -w
+run_tree "operand mode after an option mode is a file" 'umask 022; : > f; chmod 666 f' u+x -w f
+run_tree "option mode with --reference" ': > r; : > f; chmod 600 r; chmod 666 f' --reference=r -w f
+run_tree "--reference then an option mode" ': > r; : > f; chmod 600 r; chmod 666 f' -w --reference=r f
+for m in -wR -Rw "-w,+q" u=755 =755x +10000; do
+    run_tree "bad mode $m"             ': > f; chmod 666 f' $m f
+done
+# only a mode given like an option is checked against the umask
+for m in g+w,-w +x,-w; do
+    run_tree "umask silent for operand $m" 'umask 022; : > f; chmod 666 f' "$m" f
+done
+run_tree "umask silent after --"       'umask 022; : > f; chmod 666 f' -- -w f
 for m in 7_77 0_0 0_755 u=r_w; do
     run_tree "bad mode $m"             "$S" "$m" f
 done

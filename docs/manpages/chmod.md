@@ -12,7 +12,7 @@ chmod - change file mode bits
 
 # DESCRIPTION
 
-Changes the permission bits of each FILE to MODE, or to those of RFILE with **--reference**. MODE is octal (one to four digits, at most 07777) or symbolic (`[ugoa]*([-+=]([rwxXst]*|[ugo]))+`, comma-separated). A symbolic mode without a who letter honours the process umask. A directory keeps its set-user-ID and set-group-ID bits unless the mode names them (an octal mode of fewer than five digits, or a symbolic mode without **s**). Symbolic links met while recursing are skipped unless **-L**; the mode of a symbolic link itself is never changed.
+Changes the permission bits of each FILE to MODE, or to those of RFILE with **--reference**. MODE is octal (at most 07777) or symbolic (`[ugoa]*([-+=]([rwxXst]*|[ugo]))+`, comma-separated; as in GNU, a clause without a who letter may also give octal digits after its operator, as in `=755`). A symbolic mode without a who letter honours the process umask. Modes may be given where options go (`-w`, `-x,u+r`, `-755`): such words are joined into one mode, every operand is then a file, and **--reference** cannot be used with them. A directory keeps its set-user-ID and set-group-ID bits through each part of the mode that does not name them (**s** for the classes of its clause; an octal mode of fewer than five digits names only the bits it sets). Symbolic links met while recursing are skipped unless **-L**; the mode of a symbolic link itself is never changed.
 
 # OPTIONS
 
@@ -83,7 +83,7 @@ Copy the mode of one file onto another:
 
 `chmod: changing permissions of 'F': Operation not permitted`: the file is owned by someone else.
 
-`chmod: 'F': new permissions are r--r--r--, not ---------`: the umask kept bits the symbolic mode asked to clear; the exit status is 1.
+`chmod: 'F': new permissions are r--r--r--, not ---------`: the umask kept bits that a mode given like an option (`chmod -w f`) asked to clear; the exit status is 1.
 
 # SECURITY CONSIDERATIONS
 
