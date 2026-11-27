@@ -610,7 +610,9 @@ def signal_cases():
             ok("%s %s" % (signame, what), masked and "al1ve" in screen, "ignored mask ok: %r\n%s" % (masked, screen))
     has("trap on INT runs in the interactive shell", ["trap 'echo caught$((1+1))' INT", "kill -INT $$", ("w", .3), ALIVE], ["caught2", "al1ve"])
     has("sh on PATH is the shell under test", ["test \"$(command -v sh)\" -ef " + SH + " && echo inner-$((1+1))"], ["inner-2"])
-    has("child gets default SIGINT", ["sh -c 'kill -INT $$; echo not-$((1+1))'; echo st=$?"], ["st=130"], ["not-2"])
+    has("child gets default SIGINT", ["sh -c 'kill -INT $$; echo not-$((1+1))'", "echo st=$?"], ["st=130"], ["not-2"])
+    # as dash, FreeBSD sh and bash do: a job that dies of SIGINT counts as ^C
+    has("a child dying of SIGINT abandons the line", ["sh -c 'kill -INT $$'; echo not-$((1+1))", "echo st=$?"], ["st=130"], ["not-2\n"])
     has("^C interrupts wait", ["sleep 20 &", "wait", ("w", .2), "^C", "echo st=$?", "kill %1"], ["st=130"])
     has("^Z stops and the shell continues", ["sleep 30", "^Z", "echo back"], ["Stopped", "back"])
     has("stopped job warning on exit", ["sleep 31", "^Z", "exit", "jobs"], ["You have stopped jobs.", "Stopped"], env={"SH_DIAGNOSTICS": "posix"})
