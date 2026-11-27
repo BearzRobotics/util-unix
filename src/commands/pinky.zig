@@ -98,7 +98,10 @@ pub fn main(ctx: cli.Context) u8 {
     } else {
         const data = uu.utmp.load(ctx.io, ctx.gpa, uu.utmp.default_path) catch ctx.gpa.alloc(u8, 0) catch return 1;
         defer ctx.gpa.free(data);
-        var zone = uu.localtime.Zone.load(ctx.io, ctx.gpa, cli.getenv(ctx, "TZ"));
+        var zone = uu.localtime.Zone.load(ctx.io, ctx.gpa, cli.getenv(ctx, "TZ")) catch |e| utc: {
+            cli.warn(ctx, "cannot load the time zone, times are in UTC: {s}", .{cli.errText(e)});
+            break :utc uu.localtime.Zone{};
+        };
         defer zone.deinit();
         uu.pinky.writeShort(ctx.io, out, data, &zone, &db, users.items, o) catch return cli.outputFailed(ctx, &w, 1);
     }

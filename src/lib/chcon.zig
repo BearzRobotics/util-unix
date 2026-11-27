@@ -105,6 +105,7 @@ const Engine = struct {
     }
 
     fn problem(e: *Engine, kind: ProblemKind, cause: ?anyerror) void {
+        if (cause) |err| if (err == error.Canceled) return e.io.recancel();
         e.emit(.{ .problem = .{ .kind = kind, .path = e.path.items, .cause = cause } });
     }
 
@@ -138,9 +139,12 @@ const Engine = struct {
 
     /// Change the operand `path` and, with `recurse`, everything under it, a
     /// directory's contents before the directory.
-    fn walk(e: *Engine, path: []const u8) Allocator.Error!bool {
+    fn walk(e: *Engine, path: []const u8) (Allocator.Error || Io.Cancelable)!bool {
         var ok = try e.visit(e.stack.base, path, 0);
-        while (e.stack.depth() > 0) switch (try e.stack.step(&e.path)) {
+        while (e.stack.depth() > 0) switch (blk: {
+            try e.io.checkCancel();
+            break :blk try e.stack.step(&e.path);
+        }) {
             .entry => |at| ok = (try e.visit(at.dir, at.entry.name, e.stack.depth())) and ok,
             .lost => |err| {
                 e.lost(err);
@@ -168,6 +172,7 @@ const Engine = struct {
                 e.stack.pop();
             },
         };
+        try e.io.checkCancel();
         return ok;
     }
 
@@ -177,7 +182,7 @@ const Engine = struct {
     }
 
     /// `name` is relative to `parent`; `e.path` is the same entry for display.
-    fn visit(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) Allocator.Error!bool {
+    fn visit(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) (Allocator.Error || Io.Cancelable)!bool {
         const target = e.subject(parent, name, level);
         const st = e.examine(parent, name, level) catch |err| {
             e.problem(.cannot_access, err);
@@ -290,7 +295,7 @@ const Engine = struct {
 
 /// Change the context of each of `paths`. True when every file was processed
 /// without a problem; the only error is out-of-memory.
-pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) Allocator.Error!bool {
+pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) (Allocator.Error || Io.Cancelable)!bool {
     var e: Engine = .{ .io = io, .gpa = gpa, .opts = opts, .stack = .{ .io = io, .gpa = gpa, .base = Io.Dir.cwd() } };
     defer e.path.deinit(gpa);
     defer e.stack.deinit();

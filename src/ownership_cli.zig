@@ -251,7 +251,10 @@ fn execute(ctx: cli.Context, comptime mode: Mode, p: *Parsed, operands: []const 
 
     var rep: Reporter = .{ .ctx = ctx };
     opts.reporter = .{ .context = &rep, .on_event = Reporter.onEvent };
-    const ok = try own.run(ctx.io, ctx.gpa, opts, rest);
+    const ok = own.run(ctx.io, ctx.gpa, opts, rest) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.Canceled => return 1, // nothing here asks the walk to stop
+    };
     if (rep.write_error) |e| {
         cli.writeError(ctx, e);
         return 1;

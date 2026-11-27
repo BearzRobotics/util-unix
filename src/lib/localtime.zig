@@ -47,8 +47,13 @@ pub const Zone = struct {
         z.tz = null;
     }
 
-    /// Load the zone selected by `tz_env`; falls back to UTC.
-    pub fn load(io: Io, gpa: Allocator, tz_env: ?[]const u8) Zone {
+    /// Failures that say nothing about the zone: passed on, because UTC in
+    /// their place would be silently wrong.
+    pub const LoadError = error{ OutOfMemory, Canceled, SystemResources, ProcessFdQuotaExceeded, SystemFdQuotaExceeded, InputOutput };
+
+    /// Load the zone selected by `tz_env`. A zone that is unknown, unreadable
+    /// or not a usable TZif file is UTC.
+    pub fn load(io: Io, gpa: Allocator, tz_env: ?[]const u8) LoadError!Zone {
         var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
         const path: []const u8 = blk: {
             const raw = tz_env orelse break :blk "/etc/localtime";
@@ -61,17 +66,25 @@ pub const Zone = struct {
         };
         // A zone name must stay inside the zoneinfo tree.
         if (std.mem.indexOf(u8, path, "/../") != null) return .{};
-        const data = Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1 << 20)) catch return .{};
+        const data = Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1 << 20)) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.Canceled => return error.Canceled,
+            error.SystemResources => return error.SystemResources,
+            error.ProcessFdQuotaExceeded => return error.ProcessFdQuotaExceeded,
+            error.SystemFdQuotaExceeded => return error.SystemFdQuotaExceeded,
+            error.InputOutput => return error.InputOutput,
+            else => return .{},
+        };
         defer gpa.free(data);
-        return parse(gpa, data);
+        return try parse(gpa, data);
     }
 
     /// The zone in the TZif file `data`, which is changed on the way; UTC when
     /// it is not a usable one.
-    fn parse(gpa: Allocator, data: []u8) Zone {
+    fn parse(gpa: Allocator, data: []u8) error{OutOfMemory}!Zone {
         const usable = prepare(data) orelse return .{};
         var reader: Io.Reader = .fixed(usable);
-        const tz = std.tz.Tz.parse(gpa, &reader) catch return .{};
+        const tz = std.tz.Tz.parse(gpa, &reader) catch |err| return if (err == error.OutOfMemory) error.OutOfMemory else .{};
         return .{ .tz = tz };
     }
 
@@ -206,10 +219,10 @@ test "civil converts known instants" {
 }
 
 test "UTC zone has offset 0 and an unknown name falls back to UTC" {
-    var z = Zone.load(std.testing.io, std.testing.allocator, "UTC");
+    var z = try Zone.load(std.testing.io, std.testing.allocator, "UTC");
     defer z.deinit();
     try std.testing.expectEqual(@as(i32, 0), z.offsetAt(1762518896));
-    var u = Zone.load(std.testing.io, std.testing.allocator, "No/Such_Zone");
+    var u = try Zone.load(std.testing.io, std.testing.allocator, "No/Such_Zone");
     defer u.deinit();
     try std.testing.expectEqual(@as(i32, 0), u.offsetAt(0));
 }
@@ -236,10 +249,10 @@ test "counts larger than the file are refused before parsing" {
         for ([_]u8{ 0, '2' }) |version| {
             // as the first header, and as the second
             var one = testHeader(version, counts) ++ @as([10]u8, @splat(0));
-            var z = Zone.parse(t.failing_allocator, &one);
+            var z = try Zone.parse(t.failing_allocator, &one);
             try t.expect(z.tz == null);
             var two = testHeader('2', @splat(0)) ++ testHeader('2', counts) ++ @as([10]u8, @splat(0));
-            z = Zone.parse(t.failing_allocator, &two);
+            z = try Zone.parse(t.failing_allocator, &two);
             try t.expect(z.tz == null);
         }
     }
@@ -260,14 +273,14 @@ test "leap-second records are not given to the parser" {
     const far: i64 = (1 << 47) - 1;
     const leaps = be.int(i64, far) ++ be.int(i32, 1) ++ be.int(i64, far) ++ be.int(i32, std.math.maxInt(i32));
     var data = testHeader('2', @splat(0)) ++ testHeader('2', .{ 0, 0, 2, 0, 1, 4 }) ++ zone ++ leaps ++ "\n\n".*;
-    var z = Zone.parse(t.allocator, &data);
+    var z = try Zone.parse(t.allocator, &data);
     defer z.deinit();
     try t.expectEqual(@as(i32, 3600), z.offsetAt(0));
 
     // version 1: 32-bit times, no second header
     const old_leaps = be.int(i32, 0) ++ be.int(i32, 1) ++ be.int(i32, 3000000) ++ be.int(i32, std.math.maxInt(i32));
     var old = testHeader(0, .{ 0, 0, 2, 0, 1, 4 }) ++ zone ++ old_leaps;
-    var y = Zone.parse(t.allocator, &old);
+    var y = try Zone.parse(t.allocator, &old);
     defer y.deinit();
     try t.expectEqual(@as(i32, 3600), y.offsetAt(0));
 }
@@ -277,4 +290,10 @@ test "any time has a calendar date" {
     _ = civil(std.math.minInt(i64));
     var z: Zone = .{};
     _ = z.local(std.math.maxInt(i64));
+}
+
+test "running out of memory loading a zone is not UTC" {
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
+    Io.Dir.cwd().access(std.testing.io, "/usr/share/zoneinfo/Asia/Tokyo", .{}) catch return error.SkipZigTest;
+    try std.testing.expectError(error.OutOfMemory, Zone.load(std.testing.io, std.testing.failing_allocator, "Asia/Tokyo"));
 }

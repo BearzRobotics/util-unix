@@ -126,7 +126,7 @@ fn readHomeFile(io: Io, gpa: Allocator, dir: []const u8, name: []const u8) !?[]u
     const path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dir, name });
     defer gpa.free(path);
     return Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(16 << 20)) catch |e| switch (e) {
-        error.OutOfMemory => error.OutOfMemory,
+        error.OutOfMemory, error.Canceled => |err| err,
         else => null, // unreadable or missing: skipped, as GNU does
     };
 }

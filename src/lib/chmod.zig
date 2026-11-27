@@ -149,7 +149,7 @@ pub fn isRoot(io: Io, path: []const u8) bool {
 
 /// Process one operand. Returns true when nothing failed. `gpa` holds the
 /// display path during a walk.
-pub fn run(io: Io, gpa: Allocator, path: []const u8, opts: Options) Allocator.Error!bool {
+pub fn run(io: Io, gpa: Allocator, path: []const u8, opts: Options) (Allocator.Error || Io.Cancelable)!bool {
     var e: Engine = .{ .io = io, .gpa = gpa, .opts = opts, .stack = .{ .io = io, .gpa = gpa, .base = opts.base orelse Io.Dir.cwd() } };
     defer e.path.deinit(gpa);
     defer e.stack.deinit();
@@ -171,6 +171,7 @@ const Engine = struct {
     }
 
     fn problem(e: *Engine, kind: ProblemKind, cause: ?anyerror) void {
+        if (cause) |err| if (err == error.Canceled) return e.io.recancel();
         if (e.opts.quiet) return;
         e.emit(.{ .problem = .{ .kind = kind, .path = e.path.items, .cause = cause } });
     }
@@ -197,9 +198,12 @@ const Engine = struct {
     }
 
     /// Change the operand `path` and, with `recurse`, everything under it.
-    fn walk(e: *Engine, path: []const u8) Allocator.Error!bool {
+    fn walk(e: *Engine, path: []const u8) (Allocator.Error || Io.Cancelable)!bool {
         var ok = try e.visit(e.stack.base, path, true);
-        while (e.stack.depth() > 0) switch (try e.stack.step(&e.path)) {
+        while (e.stack.depth() > 0) switch (blk: {
+            try e.io.checkCancel();
+            break :blk try e.stack.step(&e.path);
+        }) {
             .entry => |at| ok = (try e.visit(at.dir, at.entry.name, false)) and ok,
             .lost => |err| {
                 e.lost(err);
@@ -214,12 +218,13 @@ const Engine = struct {
                 e.stack.pop();
             },
         };
+        try e.io.checkCancel();
         return ok;
     }
 
     /// Change one entry and, with `recurse`, make a directory the next one to
     /// walk. `name` is relative to `parent`.
-    fn visit(e: *Engine, parent: Io.Dir, name: []const u8, is_arg: bool) Allocator.Error!bool {
+    fn visit(e: *Engine, parent: Io.Dir, name: []const u8, is_arg: bool) (Allocator.Error || Io.Cancelable)!bool {
         const follow = e.follows(is_arg);
         // What the entry itself is, before any link is followed.
         const lst = parent.statFile(e.io, name, .{ .follow_symlinks = false }) catch |err| {
@@ -240,7 +245,10 @@ const Engine = struct {
         if (walk_only) {
             e.skippedLink();
             if (!(e.opts.no_dereference and e.opts.recurse and e.opts.traversal.follows(is_arg))) return true;
-            const target = parent.statFile(e.io, name, .{}) catch return true;
+            const target = parent.statFile(e.io, name, .{}) catch |err| {
+                treewalk.keepCancel(e.io, err);
+                return true;
+            };
             if (target.kind != .directory) return true;
         }
         const st = if (lst.kind == .sym_link)
@@ -611,4 +619,33 @@ test "validMode accepts GNU forms and rejects junk" {
     try testing.expect(!validMode("999"));
     try testing.expect(!validMode(""));
     try testing.expect(!validMode("u+q"));
+}
+
+test "cancelling a recursive change stops it" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDir(testing.io, "d", .default_dir);
+    var name: [16]u8 = undefined;
+    for (0..200) |i| try tmp.dir.writeFile(testing.io, .{ .sub_path = try std.fmt.bufPrint(&name, "d/f{d}", .{i}), .data = "" });
+
+    // holds the walk at its first report until it has been asked to stop
+    const Gate = struct {
+        reached: std.atomic.Value(bool) = .init(false),
+        events: usize = 0,
+        fn on(context: ?*anyopaque, _: Event) void {
+            const g: *@This() = @ptrCast(@alignCast(context.?));
+            g.events += 1;
+            if (g.events > 1) return;
+            g.reached.store(true, .release);
+            while (true) testing.io.checkCancel() catch return testing.io.recancel();
+        }
+        fn walk(g: *@This(), base: Io.Dir) (Allocator.Error || Io.Cancelable)!bool {
+            return run(testing.io, testing.allocator, "d", .{ .change = .{ .mode_text = "700" }, .recurse = true, .verbosity = .verbose, .base = base, .reporter = .{ .context = g, .on_event = on } });
+        }
+    };
+    var gate: Gate = .{};
+    var future = testing.io.concurrent(Gate.walk, .{ &gate, tmp.dir }) catch return error.SkipZigTest;
+    while (!gate.reached.load(.acquire)) std.atomic.spinLoopHint();
+    try testing.expectError(error.Canceled, future.cancel(testing.io));
+    try testing.expect(gate.events < 20);
 }

@@ -121,7 +121,10 @@ pub fn main(ctx: cli.Context) u8 {
     };
     defer ctx.gpa.free(data);
 
-    var zone = uu.localtime.Zone.load(ctx.io, ctx.gpa, cli.getenv(ctx, "TZ"));
+    var zone = uu.localtime.Zone.load(ctx.io, ctx.gpa, cli.getenv(ctx, "TZ")) catch |e| utc: {
+        cli.warn(ctx, "cannot load the time zone, times are in UTC: {s}", .{cli.errText(e)});
+        break :utc uu.localtime.Zone{};
+    };
     defer zone.deinit();
     var buf: [4096]u8 = undefined;
     var w = Io.File.stdout().writerStreaming(ctx.io, &buf);

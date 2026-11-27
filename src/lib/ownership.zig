@@ -144,6 +144,7 @@ const Engine = struct {
     }
 
     fn problem(e: *Engine, kind: ProblemKind, cause: ?anyerror) void {
+        if (cause) |err| if (err == error.Canceled) return e.io.recancel();
         if (e.opts.quiet) return;
         e.emit(.{ .problem = .{ .kind = kind, .path = e.path.items, .cause = cause } });
     }
@@ -175,9 +176,12 @@ const Engine = struct {
 
     /// Change the operand `path` and, with `recurse`, everything under it, a
     /// directory's contents before the directory.
-    fn walk(e: *Engine, path: []const u8) Allocator.Error!bool {
+    fn walk(e: *Engine, path: []const u8) (Allocator.Error || Io.Cancelable)!bool {
         var ok = try e.visit(e.stack.base, path, 0);
-        while (e.stack.depth() > 0) switch (try e.stack.step(&e.path)) {
+        while (e.stack.depth() > 0) switch (blk: {
+            try e.io.checkCancel();
+            break :blk try e.stack.step(&e.path);
+        }) {
             .entry => |at| {
                 // the fast path starts below the operand's own entries
                 const level = e.stack.depth();
@@ -208,6 +212,7 @@ const Engine = struct {
                 e.stack.pop();
             },
         };
+        try e.io.checkCancel();
         return ok;
     }
 
@@ -217,7 +222,7 @@ const Engine = struct {
     }
 
     /// One entry of a directory listing.
-    fn visitListed(e: *Engine, parent: Io.Dir, entry: treewalk.Entry, level: usize) Allocator.Error!bool {
+    fn visitListed(e: *Engine, parent: Io.Dir, entry: treewalk.Entry, level: usize) (Allocator.Error || Io.Cancelable)!bool {
         if (!e.canSkipStat() or entry.kind == .unknown) return e.visit(parent, entry.name, level);
         // Fast path for an entry known only by its listed type.
         if (entry.kind != .directory) return e.chownUnstatted(parent, entry.name);
@@ -240,7 +245,7 @@ const Engine = struct {
 
     /// Process one entry. A directory to be walked is made the next one, and is
     /// changed when `walk` leaves it.
-    fn visit(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) Allocator.Error!bool {
+    fn visit(e: *Engine, parent: Io.Dir, name: []const u8, level: usize) (Allocator.Error || Io.Cancelable)!bool {
         const st = e.examine(parent, name, level) catch |err| {
             e.problem(.cannot_access, err);
             e.describeUnexamined();
@@ -424,7 +429,7 @@ const Engine = struct {
 /// Change ownership of each of `paths`. Returns true when every file was
 /// processed without error. Problems and (with `-c`/`-v`) changes are reported
 /// through `opts.reporter`; the only error is out-of-memory.
-pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) Allocator.Error!bool {
+pub fn run(io: Io, gpa: Allocator, opts: Options, paths: []const []const u8) (Allocator.Error || Io.Cancelable)!bool {
     var e: Engine = .{ .io = io, .gpa = gpa, .opts = opts, .stack = .{ .io = io, .gpa = gpa, .base = opts.base orelse Io.Dir.cwd() } };
     defer e.path.deinit(gpa);
     defer e.stack.deinit();

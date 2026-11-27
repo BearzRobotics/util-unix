@@ -54,6 +54,13 @@ pub fn displayPath(path: []const u8) []const u8 {
     return path[0..end];
 }
 
+/// A walk reports a failed call and goes on, but a request to cancel is
+/// delivered only once: if `err` is that, make it be delivered again. The walk
+/// then ends at its next `checkCancel`.
+pub fn keepCancel(io: Io, err: anyerror) void {
+    if (err == error.Canceled) io.recancel();
+}
+
 /// What a walk does next, in the innermost directory.
 pub const Step = union(enum) {
     /// The directory could not be opened again (`error.DirectoryChanged` when
@@ -147,7 +154,7 @@ pub fn Stack(comptime Data: type) type {
 
         /// Make `dir`, already open, the innermost directory and read its names.
         /// The stack closes `dir`, also when this fails.
-        pub fn push(s: *Self, dir: Io.Dir, name: []const u8, follow: bool, identity: ?fsown.Stat, path_len: usize, data: Data) Allocator.Error!void {
+        pub fn push(s: *Self, dir: Io.Dir, name: []const u8, follow: bool, identity: ?fsown.Stat, path_len: usize, data: Data) (Allocator.Error || Io.Cancelable)!void {
             var frame: Frame = .{
                 .dir = dir,
                 .name = name,
@@ -169,6 +176,7 @@ pub fn Stack(comptime Data: type) type {
             var it = dir.iterate();
             while (true) {
                 const entry = (it.next(s.io) catch |err| {
+                    if (err == error.Canceled) return error.Canceled;
                     frame.read_error = err;
                     break;
                 }) orelse break;
@@ -232,7 +240,7 @@ pub fn Stack(comptime Data: type) type {
             // fails, `topDir` tries again by name and reports.
             const n = s.frames.items.len;
             if (n >= 2 and s.frames.items[n - 2].dir == null) {
-                _ = s.reopen(n - 2) catch {};
+                _ = s.reopen(n - 2) catch |err| keepCancel(s.io, err);
             }
             s.discard();
         }
