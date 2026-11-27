@@ -25,6 +25,9 @@ pub const History = struct {
     /// Number of the oldest entry (numbers never repeat).
     first: u64 = 1,
     max: usize = default_size,
+    /// Hash of the path loaded, and the number of the first entry made after.
+    loaded_from: u64 = 0,
+    session_start: u64 = 1,
 
     pub fn init(gpa: Allocator) History {
         return .{ .gpa = gpa };
@@ -76,18 +79,33 @@ pub const History = struct {
         return self.entries.items;
     }
 
-    /// Read a history file (one command per line; `\n` for an embedded
-    /// newline, `\\` for a backslash). A missing file is not an error.
+    /// Read the history file at `path`. A missing file is not an error, and
+    /// anything but a regular file is left alone: opening a FIFO would wait
+    /// for a writer, and a device may never end.
     pub fn load(self: *History, path: []const u8) void {
+        defer {
+            // what is entered from now on is this session's, to be saved
+            self.loaded_from = std.hash.Wyhash.hash(0, path);
+            self.session_start = self.nextNumber();
+        }
+        const info = sys.stat(path, true) catch return;
+        if (info.kind != .file) return;
         const fd = sys.open(path, .{ .cloexec = true }, 0) catch return;
         defer sys.close(fd);
+        self.read(fd) catch return;
+    }
+
+    /// Enter the commands of the open history file `fd` (one per line; `\n`
+    /// for an embedded newline, `\\` for a backslash).
+    fn read(self: *History, fd: i32) (Allocator.Error || sys.Error || error{TooLarge})!void {
         var data: std.ArrayList(u8) = .empty;
         defer data.deinit(self.gpa);
         var chunk: [4096]u8 = undefined;
         while (true) {
-            const n = sys.read(fd, &chunk) catch return;
+            const n = try sys.read(fd, &chunk);
             if (n == 0) break;
-            data.appendSlice(self.gpa, chunk[0..n]) catch return;
+            if (data.items.len + n > max_file_bytes) return error.TooLarge;
+            try data.appendSlice(self.gpa, chunk[0..n]);
         }
         var it = std.mem.splitScalar(u8, data.items, '\n');
         while (it.next()) |raw| {
@@ -98,29 +116,108 @@ pub const History = struct {
             while (i < raw.len) : (i += 1) {
                 if (raw[i] == '\\' and i + 1 < raw.len) {
                     i += 1;
-                    line.append(self.gpa, if (raw[i] == 'n') '\n' else raw[i]) catch return;
-                } else line.append(self.gpa, raw[i]) catch return;
+                    try line.append(self.gpa, if (raw[i] == 'n') '\n' else raw[i]);
+                } else try line.append(self.gpa, raw[i]);
             }
-            self.add(line.items) catch return;
+            try self.add(line.items);
         }
     }
 
-    pub fn save(self: *const History, path: []const u8) void {
+    pub const SaveError = Allocator.Error || sys.Error || error{ NotRegularFile, TooLarge, FileChanging };
+
+    /// Save the history to `path`. The file may be shared: under a lock, it is
+    /// read again and this session's commands are added to what it holds now,
+    /// and the result replaces it in one step, readable by its owner only. A
+    /// symbolic link stays, and the file it names is replaced. Saving to a
+    /// character device such as /dev/null does nothing. When `sys` failed,
+    /// `sys.errno` says why; the old file is then still whole.
+    pub fn save(self: *const History, path: []const u8) SaveError!void {
+        var link_buf: [2][4096]u8 = undefined;
+        const target = try followLinks(path, &link_buf);
+        if (sys.stat(target, true)) |info| {
+            if (info.kind == .char) return;
+            if (info.kind != .file) return error.NotRegularFile;
+        } else |_| if (sys.errno() != sys.E_NOENT) return error.Sys;
+
+        const lock = try lockFile(target);
+        defer sys.close(lock);
+        const info = try sys.fstat(lock);
+
+        var merged = History.init(self.gpa);
+        defer merged.deinit();
+        merged.max = self.max;
+        // into another file than the one loaded goes everything
+        const whole = self.loaded_from != std.hash.Wyhash.hash(0, path);
+        try merged.read(lock);
+        const start: usize = if (whole) 0 else @intCast(@min(self.session_start -| self.first, self.entries.items.len));
+        for (self.entries.items[start..]) |e| try merged.add(e);
+
         var out: std.ArrayList(u8) = .empty;
         defer out.deinit(self.gpa);
-        for (self.entries.items) |e| {
+        for (merged.entries.items) |e| {
             for (e) |c| switch (c) {
-                '\n' => out.appendSlice(self.gpa, "\\n") catch return,
-                '\\' => out.appendSlice(self.gpa, "\\\\") catch return,
-                else => out.append(self.gpa, c) catch return,
+                '\n' => try out.appendSlice(self.gpa, "\\n"),
+                '\\' => try out.appendSlice(self.gpa, "\\\\"),
+                else => try out.append(self.gpa, c),
             };
-            out.append(self.gpa, '\n') catch return;
+            try out.append(self.gpa, '\n');
         }
-        const fd = sys.open(path, .{ .read = false, .write = true, .create = true, .trunc = true, .cloexec = true }, 0o600) catch return;
-        defer sys.close(fd);
-        sys.writeAll(fd, out.items) catch {};
+
+        const temp = try std.fmt.allocPrint(self.gpa, "{s}.{d}.tmp", .{ target, sys.getpid() });
+        defer self.gpa.free(temp);
+        const fd = try sys.open(temp, .{ .read = false, .write = true, .create = true, .excl = true, .cloexec = true }, 0o600);
+        var keep = false;
+        defer if (!keep) sys.unlink(temp) catch {};
+        {
+            defer sys.close(fd);
+            // someone else's file (a shell run through su keeps HOME) stays theirs
+            if (info.uid != sys.geteuid()) try sys.fchown(fd, info.uid, info.gid);
+            try sys.writeAll(fd, out.items);
+            try sys.fsync(fd);
+        }
+        try sys.rename(temp, target);
+        keep = true;
     }
 };
+
+/// The most of a history file that is read.
+const max_file_bytes = 32 << 20;
+
+/// The file `path` stands for once final symbolic links are followed.
+fn followLinks(path: []const u8, bufs: *[2][4096]u8) History.SaveError![]const u8 {
+    var current = path;
+    var hops: usize = 0;
+    while (hops < 16) : (hops += 1) {
+        const info = sys.stat(current, false) catch return current;
+        if (info.kind != .symlink) return current;
+        var text_buf: [4096]u8 = undefined;
+        const text = try sys.readlink(current, &text_buf);
+        // `current` may be in the other buffer: write into this one
+        const next = &bufs[hops % 2];
+        const dir_len = if (text.len > 0 and text[0] == '/') 0 else if (std.mem.lastIndexOfScalar(u8, current, '/')) |at| at + 1 else 0;
+        if (dir_len + text.len > next.len) return error.NotRegularFile;
+        @memcpy(next[0..dir_len], current[0..dir_len]);
+        @memcpy(next[dir_len..][0..text.len], text);
+        current = next[0 .. dir_len + text.len];
+    }
+    return error.NotRegularFile;
+}
+
+/// Open the file at `path`, creating it, and take its lock. The one locked is
+/// the one there now: another shell may have replaced it while this waited.
+fn lockFile(path: []const u8) History.SaveError!i32 {
+    var tries: usize = 0;
+    while (tries < 20) : (tries += 1) {
+        const fd = try sys.open(path, .{ .read = true, .write = true, .create = true, .cloexec = true }, 0o600);
+        errdefer sys.close(fd);
+        try sys.lockExclusive(fd);
+        const held = try sys.fstat(fd);
+        const there = try sys.stat(path, true);
+        if (held.ino == there.ino and held.dev == there.dev) return fd;
+        sys.close(fd);
+    }
+    return error.FileChanging;
+}
 
 // --- fc ----------------------------------------------------------------------
 

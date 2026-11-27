@@ -402,7 +402,15 @@ pub fn loop(s: *Session) u8 {
 
 fn finish(s: *Session) u8 {
     const sh = s.sh;
-    if (sh.getVar("HISTFILE")) |hf| s.hist.save(hf);
+    if (sh.getVar("HISTFILE")) |hf| if (hf.len > 0) s.hist.save(hf) catch |e| {
+        sh.diagK(.history_error, null, "cannot save the history to {s}: {s}", .{ hf, switch (e) {
+            error.Sys => sys.strerror(sys.errno()),
+            error.OutOfMemory => "out of memory",
+            error.NotRegularFile => "not a regular file",
+            error.TooLarge => "the file is too large",
+            error.FileChanging => "the file keeps being replaced",
+        } });
+    };
     jobs.hangupAll(sh);
     return sh.finish();
 }

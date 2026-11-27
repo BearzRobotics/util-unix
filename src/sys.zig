@@ -392,6 +392,53 @@ pub fn kill(pid: i32, sig: u8) Error!void {
     _ = try check(linux.kill(pid, @fromBackingInt(@intCast(sig))));
 }
 
+/// rename(2): `new` is replaced in one step.
+pub fn rename(old: []const u8, new: []const u8) Error!void {
+    if (comptime !is_linux) return nosys();
+    var cp_old: CPath = .{};
+    var cp_new: CPath = .{};
+    const o = try cp_old.init(old);
+    const n = try cp_new.init(new);
+    _ = try check(linux.renameat(linux.AT.FDCWD, o, linux.AT.FDCWD, n));
+}
+
+pub fn unlink(path: []const u8) Error!void {
+    if (comptime !is_linux) return nosys();
+    var cp: CPath = .{};
+    const p = try cp.init(path);
+    _ = try check(linux.unlinkat(linux.AT.FDCWD, p, 0));
+}
+
+/// The text of the symbolic link `path`, written into `buf`.
+pub fn readlink(path: []const u8, buf: []u8) Error![]const u8 {
+    if (comptime !is_linux) return nosys();
+    var cp: CPath = .{};
+    const p = try cp.init(path);
+    const n = try check(linux.readlinkat(linux.AT.FDCWD, p, buf.ptr, buf.len));
+    return buf[0..n];
+}
+
+/// flock(2) LOCK_EX: wait for the file's exclusive lock; closing releases it.
+pub fn lockExclusive(fd: i32) Error!void {
+    if (comptime !is_linux) return nosys();
+    while (true) {
+        const r = linux.flock(fd, 2);
+        if (linux.errno(r) == .INTR and !any_pending) continue;
+        _ = try check(r);
+        return;
+    }
+}
+
+pub fn fsync(fd: i32) Error!void {
+    if (comptime !is_linux) return nosys();
+    _ = try check(linux.fsync(fd));
+}
+
+pub fn fchown(fd: i32, uid: u32, gid: u32) Error!void {
+    if (comptime !is_linux) return nosys();
+    _ = try check(linux.fchown(fd, uid, gid));
+}
+
 pub const FileKind = enum { none, file, dir, symlink, fifo, socket, block, char };
 
 pub const FileInfo = struct {

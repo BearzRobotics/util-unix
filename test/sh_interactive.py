@@ -541,6 +541,28 @@ def input_and_history_cases():
     got = history_after(500, {"HISTFILE": "@H@"}, "HISTSIZE=1000\n")
     ok("HISTSIZE set in ENV applies when history is loaded", "echo old0" in got and len(got) >= 502, "%d lines" % len(got))
 
+    # SHI-18: saving the history
+    d = tempfile.mkdtemp(dir=TMP)
+    real, link = os.path.join(d, "real"), os.path.join(d, "link")
+    with open(real, "w") as f:
+        f.write("echo old\n")
+    os.chmod(real, 0o644)
+    os.symlink("real", link)
+    with Session([SH, "-i"], env={"HISTFILE": link}) as a, Session([SH, "-i"], env={"HISTFILE": link}) as b:
+        for s_, line in ((a, "echo from-A"), (b, "echo from-B")):
+            s_.expect(r"\$ ?$"); s_.send(line + "\n"); s_.settle(.3)
+        a.send("exit\n"); exit_status(a)
+        b.send("exit\n"); exit_status(b)
+    kept = open(real).read().split("\n")
+    ok("two shells keep each other's history", all(x in kept for x in ("echo old", "echo from-A", "echo from-B")) and kept.count("echo old") == 1, repr(kept))
+    ok("a HISTFILE that is a link stays one, and is made private", os.path.islink(link) and os.stat(real).st_mode & 0o777 == 0o600 and sorted(os.listdir(d)) == ["link", "real"], "%o %r" % (os.stat(real).st_mode, os.listdir(d)))
+
+    fifo = os.path.join(d, "fifo")
+    os.mkfifo(fifo)
+    has("a FIFO as HISTFILE does not block the shell", [ALIVE, "exit"], ["al1ve", "not a regular file"], env={"HISTFILE": fifo})
+    has("a history that cannot be saved is reported", [ALIVE, "exit"], ["al1ve", "cannot save the history"], env={"HISTFILE": "/nonexistent-dir/hist"})
+    has("HISTFILE=/dev/null is quiet", [ALIVE, "exit"], ["al1ve"], ["cannot save", "regular"], env={"HISTFILE": "/dev/null"})
+
 def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
     has("PS1 command substitution", ["PS1='$(echo X)> '", "echo hi"], ["X> echo hi"])
