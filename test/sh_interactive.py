@@ -739,6 +739,43 @@ def input_signal_cases():
             redraw = s.raw[before:].replace("\r\r\n", "\r\n")
         ok("render: %s at the margin" % what, good in redraw and bad not in redraw, repr(redraw))
 
+def last_editor_cases():
+    d = tempfile.mkdtemp(prefix="last", dir=TMP)
+    for n in ("fa1", "fa2"):
+        open(os.path.join(d, n), "w").close()
+    # SHI-30: listing completions leaves the cursor where it was
+    has("listing completions keeps the cursor", ["raw:echo fa TAIL" + LEFT * 5 + "\t\t" + "X\n"], ["\nfaX TAIL\n"], cwd=d)
+    # SHI-31: `exit` in the ENV file ends the shell before the first prompt
+    rc = os.path.join(d, "exit.rc")
+    open(rc, "w").write("exit 3\n")
+    with Session([SH, "-i"], env={"ENV": rc}) as s:
+        st = exit_status(s)
+    ok("exit in the ENV file is honoured", st == 3, repr(st))
+    # SHI-32: a `!` in the name of the ENV file is just that
+    bang = os.path.join(d, "a!b")
+    os.makedirs(bang)
+    open(os.path.join(bang, "rc"), "w").write("from_env=yes\n")
+    has("ENV with a ! in its name is read", ["echo got-$from_env"], ["got-yes"], env={"ENV": os.path.join(bang, "rc")})
+    # SHI-33: only a `!` written in the prompt is the history number
+    with Session([SH, "-i"], env={"PS1": "[$v ${w:-!} !!]> "}) as s:
+        s.expect(r"> ?$", 6); s.take()
+        s.send("v='hi!'\n"); s.settle(.4)
+        t = s.take()
+    ok("a ! from an expansion in PS1 stays", "[hi! ! !]>" in t, repr(t))
+    # SHI-34: sh -s on a terminal is interactive
+    with Session([SH, "-s"]) as s:
+        got = s.expect(r"\$ ?$", 4)
+        s.send("case $- in *i*) echo inter-$((1+1));; esac\n"); s.settle(.4)
+        t = s.take()
+    ok("sh -s on a terminal is interactive", got is not None and "inter-2" in t, repr(t))
+    # SHI-35: M-y goes round the whole kill ring
+    kills = "".join("echo %s" % w + C("U") for w in ("AAA", "BBB", "CCC"))
+    has("M-y again goes further back", ["raw:" + kills + "echo " + C("Y") + M("y") + M("y") + "\n"], ["echo AAA"])
+    # SHI-36: ESC gives up vi's r
+    has("vi: r then ESC replaces nothing", ["set -o vi", "raw:echo ab" + ESC + "r", ("w", .3), "raw:" + ESC, ("w", .3), "raw:\n"], ["\nab\n"])
+    # SHI-37: the line typed before a search comes back
+    has("the typed line survives search and history movement", ["echo one", "raw:echo typed" + C("R") + "one" + DOWN + "\n"], ["\ntyped\n"])
+
 def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
     has("PS1 command substitution", ["PS1='$(echo X)> '", "echo hi"], ["X> echo hi"])
@@ -985,7 +1022,7 @@ def paste_render_cases():
         got = s.raw[before:]
         ok("no editing mode: the tty's own line discipline", "plai\x01Z\r\n" in got and "\x1b[?2004h" not in got, repr(got))
 
-EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases, "safety": session_safety_cases, "insignal": input_signal_cases}
+EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases, "safety": session_safety_cases, "insignal": input_signal_cases, "last": last_editor_cases}
 
 def setid_cases():
     """SHX-18, SHI-20: with differing ids, sh gives up the effective ones, or

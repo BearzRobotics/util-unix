@@ -25,6 +25,7 @@
 
 const std = @import("std");
 const completion = @import("completion.zig");
+const widths = @import("width_table.zig");
 const Allocator = std.mem.Allocator;
 const pattern = @import("pattern.zig");
 
@@ -277,19 +278,22 @@ const Parser = struct {
 
 // --- character classes and width ----------------------------------------------------
 
+fn inRanges(ranges: []const [2]u21, cp: u21) bool {
+    var lo: usize = 0;
+    var hi: usize = ranges.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (cp < ranges[mid][0]) hi = mid else if (cp > ranges[mid][1]) lo = mid + 1 else return true;
+    }
+    return false;
+}
+
 pub fn cpWidth(cp: u21) u2 {
     if (cp == 0) return 0;
     if (cp < 32 or (cp >= 0x7f and cp < 0xa0)) return 2; // shown as ^X
     if (cp < 0x300) return 1;
-    // combining marks and zero-width
-    if ((cp >= 0x300 and cp <= 0x36f) or (cp >= 0x483 and cp <= 0x489) or (cp >= 0x591 and cp <= 0x5bd) or
-        (cp >= 0x610 and cp <= 0x61a) or (cp >= 0x64b and cp <= 0x65f) or (cp >= 0x200b and cp <= 0x200f) or
-        (cp >= 0x20d0 and cp <= 0x20ff) or (cp >= 0xfe00 and cp <= 0xfe0f) or (cp >= 0xfe20 and cp <= 0xfe2f) or cp == 0xfeff) return 0;
-    if ((cp >= 0x1100 and cp <= 0x115f) or (cp >= 0x2e80 and cp <= 0x303e) or (cp >= 0x3041 and cp <= 0x33ff) or
-        (cp >= 0x3400 and cp <= 0x4dbf) or (cp >= 0x4e00 and cp <= 0x9fff) or (cp >= 0xa000 and cp <= 0xa4cf) or
-        (cp >= 0xac00 and cp <= 0xd7a3) or (cp >= 0xf900 and cp <= 0xfaff) or (cp >= 0xfe30 and cp <= 0xfe6f) or
-        (cp >= 0xff00 and cp <= 0xff60) or (cp >= 0xffe0 and cp <= 0xffe6) or (cp >= 0x1f300 and cp <= 0x1f64f) or
-        (cp >= 0x1f900 and cp <= 0x1f9ff) or (cp >= 0x20000 and cp <= 0x3fffd)) return 2;
+    if (inRanges(&widths.zero_width, cp)) return 0;
+    if (inRanges(&widths.wide, cp)) return 2;
     return 1;
 }
 
@@ -918,7 +922,7 @@ pub const Editor = struct {
                         self.arg = addDigit(self.arg, k.cp - '0');
                         return;
                     }
-                    self.emacsMeta(k.cp, &keep_kill);
+                    self.emacsMeta(k.cp, &keep_kill, &keep_yank);
                 } else switch (k.cp) {
                     1 => self.cur = 0, // C-a
                     2 => for (0..n) |_| {
@@ -1040,7 +1044,7 @@ pub const Editor = struct {
         if (dirty and self.status == .more) self.redraw();
     }
 
-    fn emacsMeta(self: *Editor, c: u21, keep_kill: *bool) void {
+    fn emacsMeta(self: *Editor, c: u21, keep_kill: *bool, keep_yank: *bool) void {
         const n = self.arg orelse 1;
         if (c >= '0' and c <= '9') {
             self.arg = addDigit(self.arg, c - '0');
@@ -1078,6 +1082,8 @@ pub const Editor = struct {
                 const y = self.kills.items[self.yank_idx];
                 self.insertBytes(y);
                 self.yank_len = y.len;
+                // another M-y goes further round the ring
+                keep_yank.* = true;
             },
             'u', 'l', 'c' => {
                 self.pushUndo();
@@ -1206,6 +1212,11 @@ pub const Editor = struct {
         self.search_saved.clearRetainingCapacity();
         self.search_saved.appendSlice(self.gpa, self.buf.items) catch {};
         self.search_saved_cur = self.cur;
+        // the line being typed, for history movement to come back to
+        if (self.hist_pos == self.history.len) {
+            self.saved_line.clearRetainingCapacity();
+            self.saved_line.appendSlice(self.gpa, self.buf.items) catch {};
+        }
         self.search_match = null;
         self.drawSearch();
     }
@@ -1359,6 +1370,7 @@ pub const Editor = struct {
         const cands = arena.allocator().alloc([]const u8, names.len) catch return;
         for (cands, names) |*c, name| c.* = showable(arena.allocator(), name) catch return;
         // Finish the edit line, list in columns, redraw below.
+        const at = self.cur;
         self.cur = self.buf.items.len;
         self.redraw();
         var o: std.ArrayList(u8) = .empty;
@@ -1378,8 +1390,7 @@ pub const Editor = struct {
             }
         }
         self.term.write(self.term.ctx, o.items);
-        self.rendered = false;
-        self.cur_row = 0;
+        self.cur = at;
         // back to the cursor position needs a redraw from the top of the line
         self.redrawFresh();
     }
@@ -1923,7 +1934,8 @@ pub const Editor = struct {
                 self.vi_pend = .none;
                 const count = self.vi_count orelse 1;
                 self.vi_count = null;
-                self.viReplaceChars(c, count);
+                // ESC, ^C and Enter give the command up
+                if (c != 27 and c != 3 and c != 13 and c != 10) self.viReplaceChars(c, count);
                 return;
             },
             .@"@" => {
@@ -2680,4 +2692,11 @@ test "tab completion through the callback" {
     ed.begin("$ ", &.{});
     _ = ed.feed("echo al\t");
     try std.testing.expectEqualStrings("echo alpha ", ed.text());
+}
+
+test "column widths follow Unicode" {
+    for ([_]u21{ 'a', 0xe9, 0x905, 0xe01, 0x2713 }) |cp| try std.testing.expectEqual(@as(u2, 1), cpWidth(cp));
+    for ([_]u21{ 0x4e2d, 0x1f680, 0x2705, 0x274c, 0x1fa70, 0x1f600, 0xff21 }) |cp| try std.testing.expectEqual(@as(u2, 2), cpWidth(cp));
+    // combining marks (Latin, Devanagari, Thai), joiners and selectors
+    for ([_]u21{ 0x301, 0x94d, 0xe34, 0x200d, 0xfe0f, 0x1160, 0xe0100 }) |cp| try std.testing.expectEqual(@as(u2, 0), cpWidth(cp));
 }

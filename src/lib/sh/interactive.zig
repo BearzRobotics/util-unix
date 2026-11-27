@@ -46,12 +46,14 @@ fn findHeredoc(n: *const ast.Node) ?ast.Word {
     }
 }
 
-/// Expand `text` as parameter expansion, command substitution and arithmetic
-/// (as a here-document body would be), then replace `!` by the history
-/// number and `!!` by a literal `!` (POSIX XCU 2.5.3 PS1).
-pub fn expandPrompt(sh: *Shell, a: Allocator, text: []const u8) Allocator.Error![]const u8 {
-    if (std.mem.indexOfAny(u8, text, "$`\\!") == null) return text;
-    const src = try std.fmt.allocPrint(a, "cat <<__PS_END__\n{s}\n__PS_END__\n", .{text});
+/// Expand `text` as a here-document body is: parameters, command
+/// substitution and arithmetic. Text that cannot be expanded stays as it is.
+fn expandText(sh: *Shell, a: Allocator, text: []const u8) Allocator.Error![]const u8 {
+    if (std.mem.indexOfAny(u8, text, "$`\\") == null) return text;
+    // a delimiter that is no line of the text
+    var delim: []const u8 = "__END__";
+    while (std.mem.indexOf(u8, text, delim) != null) delim = try std.fmt.allocPrint(a, "_{s}_", .{delim});
+    const src = try std.fmt.allocPrint(a, "cat <<{s}\n{s}\n{s}\n", .{ delim, text, delim });
     var d: parser.Diag = .{};
     var p = parser.Parser.init(a, src, &d);
     const node = (p.nextCommand() catch return text) orelse return text;
@@ -59,22 +61,51 @@ pub fn expandPrompt(sh: *Shell, a: Allocator, text: []const u8) Allocator.Error!
     const saved_status = sh.status;
     const expanded = expand.string(sh, a, body) catch return text;
     sh.status = saved_status;
-    const s0 = std.mem.trimEnd(u8, expanded, "\n");
-    var s = s0;
-    if (std.mem.indexOfScalar(u8, s, '!') == null) return s;
-    var out: std.ArrayList(u8) = .empty;
+    return std.mem.trimEnd(u8, expanded, "\n");
+}
+
+/// A prompt (POSIX XCU 2.5.3 PS1): `!` is the history number and `!!` a `!`,
+/// where the prompt itself has them. One that comes out of an expansion (a
+/// directory or branch name, say) or is part of one (`$!`, `${x:-!}`) stays.
+pub fn expandPrompt(sh: *Shell, a: Allocator, text: []const u8) Allocator.Error![]const u8 {
+    if (std.mem.indexOfScalar(u8, text, '!') == null) return expandText(sh, a, text);
     const num: u64 = if (sh.history) |h| h.nextNumber() else 1;
+    var out: std.ArrayList(u8) = .empty;
+    var depth: usize = 0; // inside $( ) or ${ }
+    var backquoted = false;
     var i: usize = 0;
-    while (i < s.len) : (i += 1) {
-        if (s[i] == '!') {
-            if (i + 1 < s.len and s[i + 1] == '!') {
-                try out.append(a, '!');
-                i += 1;
-            } else try out.print(a, "{d}", .{num});
-        } else try out.append(a, s[i]);
+    while (i < text.len) : (i += 1) {
+        const c = text[i];
+        const after: u8 = if (i + 1 < text.len) text[i + 1] else 0;
+        if (c == '\\' and after != 0) {
+            try out.appendSlice(a, text[i .. i + 2]);
+            i += 1;
+            continue;
+        }
+        if (c == '$' and (after == '(' or after == '{' or after == '!' or after == '$')) {
+            if (after == '(' or after == '{') depth += 1;
+            try out.appendSlice(a, text[i .. i + 2]);
+            i += 1;
+            continue;
+        }
+        if (c == '`') backquoted = !backquoted;
+        if (depth > 0 and (c == ')' or c == '}')) depth -= 1;
+        if (depth > 0 and c == '(') depth += 1;
+        if (c != '!' or depth > 0 or backquoted) {
+            try out.append(a, c);
+        } else if (after == '!') {
+            try out.append(a, '!');
+            i += 1;
+        } else try out.print(a, "{d}", .{num});
     }
-    s = out.items;
-    return s;
+    return expandText(sh, a, out.items);
+}
+
+/// ENV names a file: only parameters are expanded in it (POSIX), and a `!`
+/// is part of the name. One with a command substitution is taken as it is.
+fn expandEnvName(sh: *Shell, a: Allocator, text: []const u8) Allocator.Error![]const u8 {
+    if (std.mem.indexOfScalar(u8, text, '`') != null or std.mem.indexOf(u8, text, "$(") != null) return text;
+    return expandText(sh, a, text);
 }
 
 // --- completeness ---------------------------------------------------------------------
@@ -281,7 +312,7 @@ pub fn runEnvFile(sh: *Shell) void {
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     defer arena.deinit();
     const a = arena.allocator();
-    const path = expandPrompt(sh, a, raw) catch return;
+    const path = expandEnvName(sh, a, raw) catch return;
     if (path.len == 0 or path[0] != '/') return;
     const text = exec.readFile(a, path) orelse return;
     const saved = sh.label;

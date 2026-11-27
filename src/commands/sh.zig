@@ -316,7 +316,7 @@ pub fn main(ctx: cli.Context) u8 {
         from_stdin = true;
         name = argv0(&argv0_buf) orelse ctx.name;
         // Interactive: -i, or standard input and error are terminals (POSIX sh, "Interactive").
-        if (!flags.interactive and !check_mode and sys.isatty(0) and sys.isatty(2) and !from_explicit_s) flags.interactive = true;
+        if (!flags.interactive and !check_mode and sys.isatty(0) and sys.isatty(2) and !(from_explicit_s and rest.len > 0)) flags.interactive = true;
     } else {
         name = rest[0];
         label = rest[0];
