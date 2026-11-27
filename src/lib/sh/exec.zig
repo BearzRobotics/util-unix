@@ -171,11 +171,22 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
         const tail = p.origTailLen();
         const complete = eof or (p.pos < p.src.len) or (std.mem.endsWith(u8, p.src, "\n") and !endsInContinuation(p.src));
         if (!eof and (maybe == null or !complete or p.warn_heredoc != null)) {
+            // An open here-document cannot end before its delimiter has been
+            // read: parsing again after every chunk would be quadratic. The
+            // reads themselves are the same, so no more of the input is taken.
+            var delim_store: [128]u8 = undefined;
+            const delim: ?[]const u8 = if (p.warn_heredoc) |w| (std.fmt.bufPrint(&delim_store, "{s}\n", .{w.delim}) catch null) else null;
             arena.deinit();
-            eof = readMore(gpa, &buf, fd, &chunk) catch |re| switch (re) {
-                        error.OutOfMemory => return error.OutOfMemory,
-                        error.ReadFailed => return readFailed(sh),
-                    };
+            while (true) {
+                const had = buf.items.len;
+                eof = readMore(gpa, &buf, fd, &chunk) catch |re| switch (re) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    error.ReadFailed => return readFailed(sh),
+                };
+                const end = delim orelse break;
+                // from a little before: the line may straddle two reads
+                if (eof or mayEndHeredoc(buf.items[had -| end.len..], end)) break;
+            }
             continue;
         }
         if (p.warn_heredoc) |w| {
@@ -211,7 +222,12 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
     return last;
 }
 
-/// Append the next chunk of `fd` to `buf`; true at end of input.
+/// Whether `text` may hold the end of a here-document whose delimiter line is
+/// `delim_line`. A backslash-newline can join a line into the delimiter.
+fn mayEndHeredoc(text: []const u8, delim_line: []const u8) bool {
+    return std.mem.indexOf(u8, text, delim_line) != null or std.mem.indexOf(u8, text, "\\\n") != null;
+}
+
 /// Append more of the script to `buf`; true at its end. A failure is never
 /// taken for the end: what has been read may stop in the middle of a command.
 fn readMore(gpa: Allocator, buf: *std.ArrayList(u8), fd: i32, chunk: *[8192]u8) error{ OutOfMemory, ReadFailed }!bool {
