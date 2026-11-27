@@ -271,12 +271,14 @@ fn help(ctx: cli.Context) u8 {
     return usage(ctx, false);
 }
 
+/// As hostname 3.25 prints it, which the tests compare. Unlike it, the other
+/// program names set nothing here (docs/compatibility/hostname.md).
 const help_text = "Usage: hostname [-b] {hostname|-F file}         set host name (from file)\n" ++
     "       hostname [-a|-A|-d|-f|-i|-I|-s|-y]       display formatted name\n" ++
     "       hostname                                 display host name\n\n" ++
+    "       {yp,nis,}domainname {nisdomain|-F file}  set NIS domain name (from file)\n" ++
     "       {yp,nis,}domainname                      display NIS domain name\n\n" ++
-    "       dnsdomainname                            display dns domain name\n" ++
-    "       (the names above only display: they set nothing)\n\n" ++
+    "       dnsdomainname                            display dns domain name\n\n" ++
     "       hostname -V|--version|-h|--help          print info and exit\n\n" ++
     "Program name:\n" ++
     "       {yp,nis,}domainname=hostname -y\n" ++
@@ -287,7 +289,7 @@ const help_text = "Usage: hostname [-b] {hostname|-F file}         set host name
     "    -b, --boot             set default hostname if none available\n" ++
     "    -d, --domain           DNS domain name\n" ++
     "    -f, --fqdn, --long     long host name (FQDN)\n" ++
-    "    -F, --file             read host name from given file\n" ++
+    "    -F, --file             read host name or NIS domain name from given file\n" ++
     "    -i, --ip-address       addresses for the host name\n" ++
     "    -I, --all-ip-addresses all addresses for the host\n" ++
     "    -s, --short            short host name\n" ++

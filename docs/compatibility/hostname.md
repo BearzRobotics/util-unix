@@ -18,7 +18,7 @@ The refusals are compared too: setting without privilege ("you must be root to c
 
 1. **No DNS, no NSS.** `-f`, `-d`, `-a` and `-i` read `/etc/hosts` only (decision 0004's boundary). A name that is not in the file gives "Name or service not known" and status 1; `hostname` would ask the resolver.
 2. **`-A` and `-I` are not supported** (they list the machine's interface addresses); they fail with a message and status 1.
-3. **Not installed under the other names** (`domainname`, `ypdomainname`, `nisdomainname`, `dnsdomainname`); the multicall binary dispatches by the names in `commands.zig` only. A link by one of these names to the `hostname` program shows the NIS domain (`-y`), or for `dnsdomainname` the DNS domain (`-d`). Unlike hostname 3.25 it sets nothing: setting the NIS domain is not implemented, and the request must not change the host name.
+3. **Not installed under the other names** (`domainname`, `ypdomainname`, `nisdomainname`, `dnsdomainname`); the multicall binary dispatches by the names in `commands.zig` only. A link by one of these names to the `hostname` program shows the NIS domain (`-y`), or for `dnsdomainname` the DNS domain (`-d`). Unlike hostname 3.25 it sets nothing: setting the NIS domain is not implemented, and the request must not change the host name. The help text is the reference's, so it still lists setting a NIS domain.
 4. **Setting the name was not exercised as root** in the differential suite (the suite never changes the host name). The code path is `sethostname(2)`; an unprivileged run shows the kernel's refusal.
 5. **`--version`** prints `hostname (util-unix) VERSION`.
 
