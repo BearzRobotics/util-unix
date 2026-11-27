@@ -24,6 +24,7 @@
 //! UTF-8 (combining marks zero, East Asian wide two columns).
 
 const std = @import("std");
+const completion = @import("completion.zig");
 const Allocator = std.mem.Allocator;
 const pattern = @import("pattern.zig");
 
@@ -1250,6 +1251,8 @@ pub const Editor = struct {
         }
         // do not cut a UTF-8 sequence
         while (n > 0 and n < cands[0].len and (cands[0][n] & 0xc0) == 0x80) n -= 1;
+        // nor an escape, unless there is only the one candidate, which is whole
+        if (cands.len > 1) n = completion.wholePrefix(cands[0][0..n]);
         return cands[0][0..n];
     }
 

@@ -185,7 +185,7 @@ pub fn evalArith(sh: *Shell, text: []const u8) Error!i64 {
     return ev.run() catch return fatal(sh, ev.kind, ev.subject, "{s}", .{ev.message()});
 }
 
-fn homeOf(sh: *Shell, a: Allocator, user: []const u8) ?[]const u8 {
+pub fn homeOf(sh: *Shell, a: Allocator, user: []const u8) ?[]const u8 {
     if (user.len == 0) return sh.getVar("HOME");
     const fd = sys.open("/etc/passwd", .{ .cloexec = true }, 0) catch return null;
     defer sys.close(fd);

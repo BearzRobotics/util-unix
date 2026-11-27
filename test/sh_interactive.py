@@ -797,6 +797,20 @@ def completion_cases():
     h("emacs: M-? lists", ["raw:echo al" + M("?")], ["alpha.txt", "alpine/"])
     os.makedirs(os.path.join(d, "uni"), exist_ok=True)
     open(os.path.join(d, "uni", "\u00fcber"), "w").close()
+    odd = os.path.join(d, "odd")
+    os.makedirs(os.path.join(odd, "Documents"), exist_ok=True)
+    for n in ("my file", "filezzz", "a b", "a$c", "q\nzdata", "data", "da\nta"):
+        open(os.path.join(odd, n), "w").write(n.replace("\n", "NL") + "\n")
+    open(os.path.join(odd, "Documents", "deep"), "w").write("deep\n")
+    o = lambda n, st, want, absent=(), **kw: has("completion: " + n, ["cd odd"] + st, want, absent, cwd=d, env=dict(env, HOME=odd), **kw)
+    o("a leading tilde stays unquoted", ["cat ~/Doc" + T + "de" + T], ["\ndeep\n"], ["\\~"])
+    o("a variable at the start of a path", ["cat $HOME/Doc" + T + "de" + T], ["\ndeep\n"])
+    o("a variable inside double quotes", ["cat \"$HOME/Doc" + T + "de" + T], ["\ndeep\n"])
+    o("inside single quotes", ["cat 'my fil" + T], ["\nmy file\n"])
+    o("inside double quotes", ["cat \"my fil" + T], ["\nmy file\n"])
+    o("a name with a newline", ["cat q" + T], ["qNLzdata"])
+    o("vi: * names both files that differ by a newline", ["set -o vi", "raw:cat da" + ESC + "*\n"], ["\ndata\n", "daNLta"])
+    o("a common prefix keeps no lone backslash", ["printf '[%s]' a" + T + " z; echo"], ["[a][z]"])
     h("unicode file name", ["echo uni/\u00fc" + T + "!"], ["echo uni/\u00fcber !"])
 
 def paste_render_cases():
