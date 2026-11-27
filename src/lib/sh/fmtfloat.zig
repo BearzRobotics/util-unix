@@ -221,7 +221,12 @@ fn hexFloat(a: Allocator, out: *std.ArrayList(u8), bits: u64, spec: Spec) Alloca
     try appendExp(a, out, upper, e, true);
 }
 
+/// The largest precision, and in `printf` field width, that is honoured. The
+/// result is built in memory, so some limit is needed.
+pub const max_precision = 1 << 24;
+
 /// Format `x` according to `spec`. The result text is allocated from `a`.
+/// A precision above `max_precision` is taken as that.
 pub fn format(a: Allocator, x: f64, spec: Spec) Allocator.Error!Result {
     const bits: u64 = @bitCast(x);
     const neg = (bits >> 63) != 0;
@@ -241,7 +246,7 @@ pub fn format(a: Allocator, x: f64, spec: Spec) Allocator.Error!Result {
     const mant: u64 = if (be == 0) frac else (frac | (1 << 52));
     const e2: i32 = (if (be == 0) @as(i32, 1) else @as(i32, @intCast(be))) - 1075;
     const d = try exactDecimal(a, mant, e2);
-    const prec = spec.prec orelse 6;
+    const prec = @min(spec.prec orelse 6, max_precision);
     switch (lc) {
         'f' => try fixed(a, &out, d, prec, spec.alt),
         'e' => _ = try scientific(a, &out, d, prec, spec.alt, upper),

@@ -1153,10 +1153,10 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 ai += 1;
                 if (v < 0) {
                     left = true;
-                    width = @intCast(-v);
+                    width = @abs(v);
                 } else width = @intCast(v);
                 k += 1;
-            } else while (k < fmt.len and std.ascii.isDigit(fmt[k])) : (k += 1) width = width * 10 + (fmt[k] - '0');
+            } else while (k < fmt.len and std.ascii.isDigit(fmt[k])) : (k += 1) width = width *| 10 +| (fmt[k] - '0');
             var prec: ?usize = null;
             if (k < fmt.len and fmt[k] == '.') {
                 k += 1;
@@ -1166,7 +1166,7 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     ai += 1;
                     p = if (v < 0) 0 else @intCast(v);
                     k += 1;
-                } else while (k < fmt.len and std.ascii.isDigit(fmt[k])) : (k += 1) p = p * 10 + (fmt[k] - '0');
+                } else while (k < fmt.len and std.ascii.isDigit(fmt[k])) : (k += 1) p = p *| 10 +| (fmt[k] - '0');
                 prec = p;
             }
             if (k >= fmt.len) {
@@ -1175,6 +1175,13 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 return 1;
             }
             const conv = fmt[k];
+            // for a string the precision only cuts, so any value will do
+            const cuts = conv == 's' or conv == 'b';
+            if (width > fmtfloat.max_precision or (!cuts and (prec orelse 0) > fmtfloat.max_precision)) {
+                sh.diagCmdK(.usage, null, "printf", "field width or precision too large", .{});
+                _ = sh.out(out.items);
+                return 2;
+            }
             const arg: ?[]const u8 = if (ai < rest.len) rest[ai] else null;
             if (arg != null) consumed_any = true;
             var body: std.ArrayList(u8) = .empty;
@@ -1973,7 +1980,13 @@ fn killCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             st = 2;
             continue;
         };
-        sys.kill(@intCast(pid), sig) catch {
+        // a cut-down number could name another process, or -1, all of them
+        const target = std.math.cast(i32, pid) orelse {
+            sh.diagCmdK(.kill_error, null, "kill", "invalid pid {s}", .{p});
+            st = 2;
+            continue;
+        };
+        sys.kill(target, sig) catch {
             sh.diagCmdK(.kill_error, null, "kill", "{s}", .{sys.strerror(sys.errno())});
             st = 1;
         };

@@ -840,6 +840,10 @@ c "printf int" 'printf "%d\n" 42 -7 0' B
 c "printf hex octal" 'printf "%x %X %o\n" 255 255 8' B
 c "printf width" 'printf "[%5s][%-5s][%05d]\n" ab cd 42' B
 c "printf precision" 'printf "%.3s|%.2d\n" abcdef 5' B
+c "printf string precision may be huge" 'printf "%.2147483647s|\n" abc'
+c "printf huge width is an error" 'printf "%99999999999999999999d" 1; echo $?; printf "%2147483648d" 1; echo $?' Pe
+c "printf huge precision is an error" 'printf "%.99999999999999999999d" 1; echo $?; printf "%.3000000000g" 0; echo $?' Pe
+c "kill rejects a pid out of range" 'kill -0 99999999999 2>/dev/null; echo $?; kill -0 -99999999999 2>/dev/null; echo alive' Pe
 c "printf char" 'printf "%c\n" xyz' B
 c "printf percent" 'printf "100%%\n"' B
 c "printf escapes" 'printf "a\tb\n"' B
