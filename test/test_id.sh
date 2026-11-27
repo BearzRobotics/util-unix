@@ -31,6 +31,7 @@ sys.stdout.buffer.write(data)' "$TMPDIR_CMP.idraw" "$@"
         sed 's/\(no such user\): Invalid argument$/\1/' "$TMPDIR_CMP.iderr" >&2
         return $id_rc
     }
+    gnu_full() { "/usr/bin/id" "$@"; }
 fi
 ME="$(/usr/bin/id -un)"
 USERS="$ME root nobody daemon bin sys sync games www-data 0 1 1000 65534 99999 nosuchuser_xyz ''"

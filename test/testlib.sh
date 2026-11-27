@@ -184,12 +184,21 @@ run_cmp() {
     fi
 }
 # Standard output that cannot be written: the message and status must be GNU's.
+# A suite whose gnu() filters the output overrides gnu_full() with the plain
+# program, so that it is GNU's write that fails and not the filter's.
+gnu_full() { gnu "$@"; }
 run_full() { # description, args...
     description="$1"
     shift
-    LC_ALL=C gnu "$@" < /dev/null 2> "$TMPDIR_CMP.ge" > /dev/full; gx=$?
+    LC_ALL=C gnu_full "$@" < /dev/null 2> "$TMPDIR_CMP.ge" > /dev/full; gx=$?
     ours "$@" < /dev/null 2> "$TMPDIR_CMP.oe" > /dev/full; ox=$?
     norm_err < "$TMPDIR_CMP.ge" > "$TMPDIR_CMP.ge2"; norm_err < "$TMPDIR_CMP.oe" > "$TMPDIR_CMP.oe2"
+    # Built on musl, GNU can give no reason for a report made along the way
+    # (chown -v): ours still does.
+    if grep -q ': write error$' "$TMPDIR_CMP.ge2"; then
+        sed 's/\(: write error\): No space left on device$/\1/' "$TMPDIR_CMP.oe2" > "$TMPDIR_CMP.oe3"
+        mv "$TMPDIR_CMP.oe3" "$TMPDIR_CMP.oe2"
+    fi
     if cmp -s "$TMPDIR_CMP.ge2" "$TMPDIR_CMP.oe2" && [ "$gx" = "$ox" ]; then
         PASS=$((PASS + 1)); printf "PASS %s\n" "$description"
     else
