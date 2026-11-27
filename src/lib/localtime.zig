@@ -8,12 +8,11 @@
 //! - unset: /etc/localtime
 //! - "" (empty), "UTC", "UTC0", "GMT": UTC
 //! - ":NAME" or "NAME" with a file /usr/share/zoneinfo/NAME, or an absolute path
+//! - else a POSIX rule such as "EST5EDT,M3.2.0,M11.1.0" (tzrule.zig)
 //!
-//! POSIX rule strings such as "EST5EDT,M3.2.0,M11.1.0" and the footer rule of
-//! the TZif file are not interpreted: an instant after the last stored
-//! transition keeps the last transition's offset, and an unreadable or unknown
-//! zone is UTC. Standard zoneinfo files built "fat" (Debian's) carry
-//! transitions up to 2037, so this matters only for unusual setups.
+//! From the last change a file lists, its footer rule applies, which is all a
+//! file built "slim" says about later times. A zone that is none of these is
+//! UTC.
 //!
 //! The std parser trusts the record counts and leap-second values in the file,
 //! so a damaged or hostile one (TZ may name any file) could make it overflow or
@@ -23,6 +22,7 @@
 //! References: tzfile(5); Zig std.tz for the file parser.
 
 const std = @import("std");
+const tzrule = @import("tzrule.zig");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
@@ -41,6 +41,8 @@ pub const Local = struct {
 
 pub const Zone = struct {
     tz: ?std.tz.Tz = null,
+    /// A zone given as a rule, with no file.
+    rule: ?tzrule.Rule = null,
 
     pub fn deinit(z: *Zone) void {
         if (z.tz) |*t| t.deinit();
@@ -73,10 +75,19 @@ pub const Zone = struct {
             error.ProcessFdQuotaExceeded => return error.ProcessFdQuotaExceeded,
             error.SystemFdQuotaExceeded => return error.SystemFdQuotaExceeded,
             error.InputOutput => return error.InputOutput,
-            else => return .{},
+            // no such file: TZ may be the rule itself
+            else => return fromRule(tz_env),
         };
         defer gpa.free(data);
         return try parse(gpa, data);
+    }
+
+    /// The zone a TZ value describes by itself; UTC when it is no rule.
+    fn fromRule(tz_env: ?[]const u8) Zone {
+        var text = tz_env orelse return .{};
+        // as glibc: a ':' that names no file is passed over
+        if (text.len > 0 and text[0] == ':') text = text[1..];
+        return .{ .rule = tzrule.parse(text) };
     }
 
     /// The zone in the TZif file `data`, which is changed on the way; UTC when
@@ -90,8 +101,12 @@ pub const Zone = struct {
 
     /// UTC offset in effect at `ts` (seconds since the epoch).
     pub fn offsetAt(z: *const Zone, ts: i64) i32 {
-        const tz = z.tz orelse return 0;
+        const tz = z.tz orelse return if (z.rule) |r| r.offsetAt(ts) else 0;
         const trans = tz.transitions;
+        // from the last listed change on, the footer rule says what holds
+        if (trans.len == 0 or ts >= trans[trans.len - 1].ts) {
+            if (tz.footer) |text| if (tzrule.parse(text)) |r| return r.offsetAt(ts);
+        }
         if (trans.len == 0 or ts < trans[0].ts) {
             // Before the first transition: the first standard-time type.
             for (tz.timetypes) |t| if (!t.isDst()) return t.offset;

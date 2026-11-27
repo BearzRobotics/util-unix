@@ -14,6 +14,7 @@
 pub const fsown = @import("lib/fsown.zig");
 pub const num = @import("lib/num.zig");
 const treewalk = @import("lib/treewalk.zig");
+const tzrule = @import("lib/tzrule.zig");
 pub const userdb = @import("lib/userdb.zig");
 pub const userspec = @import("lib/userspec.zig");
 pub const ownership = @import("lib/ownership.zig");
@@ -40,6 +41,7 @@ pub const sys = @import("sys.zig");
 test {
     _ = fsown;
     _ = treewalk;
+    _ = tzrule;
     _ = num;
     _ = userdb;
     _ = userspec;

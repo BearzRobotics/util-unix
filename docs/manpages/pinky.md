@@ -28,6 +28,8 @@ A .plan or .project file is shown only if it is a regular file that the account 
 
 Short: `Login Name TTY Idle When Where`. The terminal column starts with `*` when the terminal does not accept messages and `?` when it cannot be examined. Idle is blank under a minute, `HH:MM` under a day, `Nd` beyond. Long: `Login name:`, `In real life:`, `Directory:`, `Shell:`, `Project:` and `Plan:` followed by the file text, then a blank line. An unknown account shows `???` as its name and nothing else.
 
+Times are local, in the zone **TZ** selects: a zone name or file, or a POSIX rule such as `EST5EDT,M3.2.0,M11.1.0`; without it, /etc/localtime. A rule that names daylight saving time but no dates uses today's United States dates for every year (GNU takes older years' dates from the posixrules file), and a malformed value is UTC (GNU uses what it can read of it).
+
 # EXIT STATUS
 
 | Status | Meaning |

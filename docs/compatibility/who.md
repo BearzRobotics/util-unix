@@ -15,7 +15,7 @@ POSIX has `-a -b -d -H -l -m -p -q -r -s -t -T -u`; `--lookup` and the long opti
 
 ## Supported
 
-Every option of GNU who 9.7 except the name lookup: all record kinds (users, boot, run level, clock change, init processes, login processes, dead processes), `-H` headings, `-T` message status, the idle column (`.`, `HH:MM`, `old`, `?`), `-q` counts, `-m`/`am i`, an explicit FILE, and the time column in both styles. Compared: all option letters and combinations, long options and unique abbreviations, short and truncated files, user names longer than 8 characters, lines with and without `/dev/`, three time zones, and the ISO/classic time styles.
+Every option of GNU who 9.7 except the name lookup: all record kinds (users, boot, run level, clock change, init processes, login processes, dead processes), `-H` headings, `-T` message status, the idle column (`.`, `HH:MM`, `old`, `?`), `-q` counts, `-m`/`am i`, an explicit FILE, and the time column in both styles. Compared: all option letters and combinations, long options and unique abbreviations, short and truncated files, user names longer than 8 characters, lines with and without `/dev/`, time zones by name, as POSIX rules and from slim zone files through 2106, and the ISO/classic time styles.
 
 ## Deliberate deviations and gaps
 

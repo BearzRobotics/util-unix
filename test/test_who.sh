@@ -150,4 +150,23 @@ TZ=UTC run_cmp "times after 2038"    "$D/late.utmp"
 cp "$U" "$D/big.utmp"; (ulimit -S -f unlimited 2>/dev/null; truncate -s 300M "$D/big.utmp")
 if [ "$(wc -c < "$D/big.utmp")" -eq 314572800 ]; then run_cmp "a 300 MiB login file" "$D/big.utmp"
 else skip_test "a 300 MiB login file: cannot make one here"; fi
+# time zones given as POSIX rules, and a zone file built "slim", whose later
+# times only its last line describes. One record every 43 days to 2106.
+python3 - "$D/years.utmp" <<'PY'
+import struct, sys
+open(sys.argv[1], "wb").write(b"".join(struct.pack("<hxxi32s4s32s256shhiIi16s20s", 7, 1, b"null", b"", b"me", b"", 0, 0, 0, t, 0, b"", b"")
+    for t in range(0, 4294000000, 3777777)))
+PY
+for z in JST-9 '<+0330>-3:30' ':JST-9' 'EST5EDT,M3.2.0,M11.1.0' 'CET-1CEST,M3.5.0,M10.5.0/3' 'AEST-10AEDT,M10.1.0,M4.1.0/3' \
+    'IST-1GMT0,M10.5.0,M3.5.0/1' 'XXX3YYY2,J60/2,J300/2' 'XXX3YYY2,60/2,300/2' 'AAA-2BBB,M3.4.4/50,M10.4.4/50' Asia/Tokyo America/New_York Europe/Dublin; do
+    TZ="$z" run_cmp "TZ=$z through 2106" "$D/years.utmp"
+done
+if [ -x /usr/sbin/zic ] && [ -r /usr/share/zoneinfo/tzdata.zi ] && /usr/sbin/zic -b slim -d "$D/slim" /usr/share/zoneinfo/tzdata.zi 2> /dev/null; then
+    for z in America/New_York Australia/Sydney Pacific/Chatham Europe/Dublin; do
+        TZ="$D/slim/$z" run_cmp "slim $z through 2106" "$D/years.utmp"
+    done
+else
+    skip_test "slim zone files need zic and tzdata.zi"
+fi
+
 print_summary

@@ -36,6 +36,8 @@ Lists the login records in FILE (default /var/run/utmp; /var/log/wtmp is common)
 
 Columns: name, optional message status, line, time, optional idle (`.` under a minute, `HH:MM`, `old`, `?`), optional pid, host in parentheses. Time is `Nov  7 13:39` in the C and POSIX locales and `2025-11-07 13:39` otherwise (decided from LC_ALL, LC_TIME, LANG).
 
+Times are local, in the zone **TZ** selects: a zone name or file, or a POSIX rule such as `EST5EDT,M3.2.0,M11.1.0`; without it, /etc/localtime. A rule that names daylight saving time but no dates uses today's United States dates for every year (GNU takes older years' dates from the posixrules file), and a malformed value is UTC (GNU uses what it can read of it).
+
 # EXIT STATUS
 
 | Status | Meaning |
