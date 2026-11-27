@@ -37,6 +37,7 @@ pub fn main(ctx: cli.Context) u8 {
     while (i < ctx.args.len) : (i += 1) {
         const a: []const u8 = ctx.args[i];
         if (only_operands or a.len < 2 or a[0] != '-') {
+            if (cli.posixlyCorrect(ctx)) only_operands = true;
             operands.append(ctx.gpa, a) catch return oom(ctx);
             continue;
         }

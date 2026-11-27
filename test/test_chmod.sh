@@ -216,4 +216,8 @@ for n in 'caf\303\251' 'a b \303\251' '\303\251'"'"'q' '\346\227\245\346\234\254
     if [ "$x" = "$y" ]; then PASS=$((PASS + 1)); echo "PASS UTF-8 locale name: $n"
     else FAIL=$((FAIL + 1)); echo "FAIL UTF-8 locale name: $n"; echo "     GNU : $x"; echo "     OURS: $y"; fi
 done
+# with POSIXLY_CORRECT, what follows the first operand is not an option
+POSIXLY_CORRECT=1; export POSIXLY_CORRECT
+run_tree "POSIXLY_CORRECT: -v after MODE is a file" ': > f; : > ./-v; chmod 666 f ./-v' 600 f -v
+unset POSIXLY_CORRECT
 print_summary

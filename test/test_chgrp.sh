@@ -136,5 +136,8 @@ else
 fi
 
 : > "$TMPDIR_CMP.f"; run_full "-v, full disk" -v "$(id -gn)" "$TMPDIR_CMP.f"
+POSIXLY_CORRECT=1; export POSIXLY_CORRECT
+run_tree "POSIXLY_CORRECT: -v after the first operand is a file" ': > f; : > ./-v' "$(id -gn)" f -v
+unset POSIXLY_CORRECT
 print_summary
 [ "$FAIL" -eq 0 ]

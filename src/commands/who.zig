@@ -31,6 +31,7 @@ pub fn main(ctx: cli.Context) u8 {
     for (ctx.args) |a_z| {
         const a: []const u8 = a_z;
         if (only_operands or a.len < 2 or a[0] != '-') {
+            if (cli.posixlyCorrect(ctx)) only_operands = true;
             if (n_operands < 3) operands[n_operands] = a;
             n_operands += 1;
             continue;

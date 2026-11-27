@@ -116,5 +116,8 @@ LONG_TREE='L=$(printf "%0200d" 0); mkdir -p $L/$L/$L/$L/$L/$L && touch $L/$L/$L/
 run_tree "long paths: every -v line" "$LONG_TREE" -R -v "$(id -un)" "$(printf '%0200d' 0)"
 
 : > "$TMPDIR_CMP.f"; run_full "-v, full disk" -v "$(id -un)" "$TMPDIR_CMP.f"
+POSIXLY_CORRECT=1; export POSIXLY_CORRECT
+run_tree "POSIXLY_CORRECT: -v after the first operand is a file" ': > f; : > ./-v' "$(id -un)" f -v
+unset POSIXLY_CORRECT
 print_summary
 [ "$FAIL" -eq 0 ]

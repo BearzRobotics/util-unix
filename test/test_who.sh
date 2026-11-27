@@ -137,4 +137,7 @@ if [ "$seen" = masked ]; then PASS=$((PASS + 1)); echo "PASS control characters 
 else FAIL=$((FAIL + 1)); echo "FAIL control characters on a terminal are masked: $seen"; fi
 run_cmp "--mes, a prefix of synonyms"  --mes "$U"
 run_cmp "--w"                          --w "$U"
+POSIXLY_CORRECT=1; export POSIXLY_CORRECT
+run_cmp "POSIXLY_CORRECT: no options after an operand" /dev/null -q
+unset POSIXLY_CORRECT
 print_summary

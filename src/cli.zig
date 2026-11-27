@@ -41,6 +41,12 @@ pub fn getenv(ctx: Context, key: []const u8) ?[]const u8 {
     return map.get(key);
 }
 
+/// With POSIXLY_CORRECT set, glibc's getopt stops looking for options at the
+/// first operand; otherwise options may follow operands.
+pub fn posixlyCorrect(ctx: Context) bool {
+    return getenv(ctx, "POSIXLY_CORRECT") != null;
+}
+
 /// Result of matching a "--name" against a command's long options, following
 /// getopt_long: an exact match wins, otherwise a unique prefix is accepted.
 pub const LongMatch = union(enum) { found: usize, none, ambiguous };

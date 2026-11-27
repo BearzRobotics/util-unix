@@ -59,6 +59,7 @@ fn parseArgs(ctx: cli.Context, comptime mode: Mode, p: *Parsed, operands: *std.A
     while (i < args.len) : (i += 1) {
         const a: []const u8 = args[i];
         if (only_operands or a.len < 2 or a[0] != '-') {
+            if (cli.posixlyCorrect(ctx)) only_operands = true;
             try operands.append(ctx.gpa, a);
             continue;
         }

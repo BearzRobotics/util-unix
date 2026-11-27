@@ -14,4 +14,7 @@ run_cmp "-x"               -x
 run_cmp "--bogus"          --bogus
 run_cmp "--"               -- root
 run_full "full disk" root
+POSIXLY_CORRECT=1; export POSIXLY_CORRECT
+run_cmp "POSIXLY_CORRECT: no options after an operand" root --help
+unset POSIXLY_CORRECT
 print_summary

@@ -28,7 +28,7 @@ elif any(a == "--groups" or (a[:1] == "-" and a[:2] != "--" and "G" in a) for a 
         out += b"".join(kept)
     data = out
 sys.stdout.buffer.write(data)' "$TMPDIR_CMP.idraw" "$@"
-        sed 's/\(no such user\): Invalid argument$/\1/' "$TMPDIR_CMP.iderr" >&2
+        sed 's/\(no such user\): [A-Z][a-z ]*$/\1/' "$TMPDIR_CMP.iderr" >&2
         return $id_rc
     }
     gnu_full() { "/usr/bin/id" "$@"; }
@@ -52,4 +52,7 @@ run_cmp "--bogus"          --bogus
 run_cmp "--user=x"         --user=x
 run_cmp "-u user missing"  -u nosuchuser_xyz
 run_full "full disk" root
+POSIXLY_CORRECT=1; export POSIXLY_CORRECT
+run_cmp "POSIXLY_CORRECT: no options after an operand" root -u
+unset POSIXLY_CORRECT
 print_summary

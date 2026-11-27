@@ -17,6 +17,7 @@ pub fn main(ctx: cli.Context) u8 {
     for (ctx.args) |a_z| {
         const a: []const u8 = a_z;
         if (only_operands or a.len < 2 or a[0] != '-') {
+            if (cli.posixlyCorrect(ctx)) only_operands = true;
             users.append(ctx.gpa, a) catch return 1;
             continue;
         }

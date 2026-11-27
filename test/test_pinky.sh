@@ -105,4 +105,7 @@ dan      ?nosuch2  Nov  7 12:35
 stranger ?nosuch3  Nov  7 12:36" -q
 golden "short, nobody matches" "Login    Name                 TTY      Idle   When         Where" nobody
 run_full "full disk"
+POSIXLY_CORRECT=1; export POSIXLY_CORRECT
+run_cmp "POSIXLY_CORRECT: no options after an operand" root -l
+unset POSIXLY_CORRECT
 print_summary
