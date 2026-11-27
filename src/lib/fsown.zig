@@ -134,6 +134,29 @@ pub fn openPath(dir: Io.Dir, name: []const u8, follow: bool) Error!std.posix.fd_
     return @intCast(rc);
 }
 
+/// Open `name` relative to `dir` to change it through the descriptor. The
+/// name may no longer stand for what was examined, so the open must not wait
+/// (a FIFO swapped in would hold it for good) or take a terminal.
+pub fn openForChange(dir: Io.Dir, name: []const u8, access: enum { read, write }) Error!std.posix.fd_t {
+    if (comptime builtin.os.tag != .linux) return error.Unsupported;
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    if (name.len >= buf.len) return error.NameTooLong;
+    @memcpy(buf[0..name.len], name);
+    buf[name.len] = 0;
+    const rc = linux.openat(dir.handle, @ptrCast(&buf), .{ .ACCMODE = if (access == .read) .RDONLY else .WRONLY, .NONBLOCK = true, .NOCTTY = true, .CLOEXEC = true }, 0);
+    const e = linux.errno(rc);
+    if (e != .SUCCESS) return toError(e);
+    return @intCast(rc);
+}
+
+/// fchown(2): change owner and/or group (null leaves it alone) of an open file.
+pub fn chownHandle(handle: std.posix.fd_t, uid: ?u32, gid: ?u32) Error!void {
+    if (comptime builtin.os.tag != .linux) return error.Unsupported;
+    const rc = linux.fchown(handle, uid orelse std.math.maxInt(u32), gid orelse std.math.maxInt(u32));
+    const e = linux.errno(rc);
+    if (e != .SUCCESS) return toError(e);
+}
+
 pub fn closeHandle(handle: std.posix.fd_t) void {
     if (comptime builtin.os.tag != .linux) return;
     _ = linux.close(handle);

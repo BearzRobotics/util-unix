@@ -118,6 +118,11 @@ pub fn main(ctx: cli.Context) u8 {
         }
     }
 
+    if (reference != null and comps.any()) {
+        cli.warn(ctx, "conflicting security context specifiers given\nTry '{s} --help' for more information.", .{ctx.name});
+        return 1;
+    }
+
     if (recurse) {
         if (traversal == .physical) {
             if (dereference == true) {

@@ -197,7 +197,8 @@ pub fn setFileContext(path: []const u8, context: []const u8, follow: bool) Xattr
 /// mounted and the process context is not the pre-policy "kernel" one.
 pub fn enabled(io: Io, gpa: Allocator) bool {
     if (comptime !is_linux) return false;
-    const mounts = readSmall(io, gpa, "/proc/mounts") orelse return false;
+    // a host with many containers has a mount table of any size
+    const mounts = readUpTo(io, gpa, "/proc/mounts", 64 << 20) orelse return false;
     defer gpa.free(mounts);
     var mounted = false;
     var lines = std.mem.splitScalar(u8, mounts, '\n');
@@ -232,11 +233,17 @@ pub fn currentContext(io: Io, gpa: Allocator) ?[]u8 {
 }
 
 fn readSmall(io: Io, gpa: Allocator, path: []const u8) ?[]u8 {
+    return readUpTo(io, gpa, path, 64 * 1024);
+}
+
+/// The contents of `path`; null when it cannot be read or is longer than
+/// `limit`.
+fn readUpTo(io: Io, gpa: Allocator, path: []const u8, limit: usize) ?[]u8 {
     const f = Io.Dir.cwd().openFile(io, path, .{}) catch return null;
     defer f.close(io);
     var buf: [256]u8 = undefined;
     var r = f.readerStreaming(io, &buf);
-    return r.interface.allocRemaining(gpa, .limited(64 * 1024)) catch null;
+    return r.interface.allocRemaining(gpa, .limited(limit)) catch null;
 }
 
 pub const ExecContextError = error{ InvalidArgument, AccessDenied, Unsupported, Unexpected };

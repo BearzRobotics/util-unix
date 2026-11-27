@@ -120,6 +120,21 @@ run_tree "very long path with control characters" ':' -v "$(id -gn)" "$(printf '
 LONG_TREE='L=$(printf "%0200d" 0); mkdir -p $L/$L/$L/$L/$L/$L && touch $L/$L/$L/$L/$L/$L/f'
 run_tree "long paths: every -v line" "$LONG_TREE" -R -v "$(id -gn)" "$(printf '%0200d' 0)"
 
+# --from opens the file to change it: one swapped for a FIFO while the open is
+# on its way (strace holds it up) must not make that wait for a writer
+if command -v strace > /dev/null 2>&1 && strace -o /dev/null true 2> /dev/null; then
+    fifo_dir="$(mktemp -d)"; : > "$fifo_dir/f"
+    ( cd "$fifo_dir" && timeout -s KILL 20 strace -f -o trace -e trace=openat -P f -e inject=openat:delay_enter=2000000 \
+        "$BIN_DIR/chgrp" --from=:"$(id -gn)" "$(id -gn)" f > out 2>&1 ) &
+    fifo_job=$!; tries=0
+    while [ "$tries" -lt 200 ] && ! grep -q openat "$fifo_dir/trace" 2> /dev/null; do tries=$((tries + 1)); sleep 0.05; done
+    rm "$fifo_dir/f"; mkfifo "$fifo_dir/f"
+    if wait "$fifo_job" || [ "$?" -ne 137 ]; then PASS=$((PASS + 1)); echo "PASS --from does not wait on a FIFO swapped in"
+    else FAIL=$((FAIL + 1)); echo "FAIL --from does not wait on a FIFO swapped in"; fi
+else
+    echo "SKIP --from FIFO swap (needs strace)"
+fi
+
 : > "$TMPDIR_CMP.f"; run_full "-v, full disk" -v "$(id -gn)" "$TMPDIR_CMP.f"
 print_summary
 [ "$FAIL" -eq 0 ]

@@ -401,17 +401,17 @@ const Engine = struct {
             return .done;
         }
 
-        var f = parent.openFile(e.io, name, .{ .mode = .read_only }) catch |err| blk: {
+        const f = fsown.openForChange(parent, name, .read) catch |err| blk: {
             if (err != error.AccessDenied) return .{ .failed = err };
-            break :blk parent.openFile(e.io, name, .{ .mode = .write_only }) catch |err2| {
+            break :blk fsown.openForChange(parent, name, .write) catch |err2| {
                 return if (err2 == error.AccessDenied) .ordinary else .{ .failed = err2 };
             };
         };
-        defer f.close(e.io);
-        const now = fsown.statHandle(f.handle) catch |err| return .{ .failed = err };
+        defer fsown.closeHandle(f);
+        const now = fsown.statHandle(f) catch |err| return .{ .failed = err };
         if (!now.sameFile(orig)) return .excluded;
         if (!e.stillMatches(now)) return .done;
-        f.setOwner(e.io, o.uid, o.gid) catch |err| return .{ .failed = err };
+        fsown.chownHandle(f, o.uid, o.gid) catch |err| return .{ .failed = err };
         return .done;
     }
 

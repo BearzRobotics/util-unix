@@ -132,6 +132,9 @@ ctree "bad existing context"         -t x d/f plain
 ctree "--reference"                  --reference=d/f plain
 ctree "--reference -v"               -v --reference=d/f plain
 ctree "--reference missing"          --reference=nofile plain
+for o in -u -r -t -l; do
+    ctree "--reference with $o"      --reference=d/f $o x plain
+done
 ctree "--reference unlabeled"        --reference=plain d/f
 ctree "--reference recursive"        -R --reference=d/f e
 ctree "full context 2 components"    a:b d/f
