@@ -74,6 +74,8 @@ run_tree "-R 700"                  "$R" -R 700 t
 run_tree "-R u+x"                  "$R" -R u+x t
 run_tree "-R go-rwx"               "$R" -R go-rwx t
 run_tree "-R a+X"                  "$R" -R a+X t
+# a directory with no x and an executable file: where the X shows, and the recursion
+run_tree "-R a+X adds x"            "$R; chmod 600 t/c; chmod u+x t/f1; chmod 700 t/a/b" -R a+X t
 run_tree "-R -v"                   "$R" -Rv 600 t
 run_tree "-R -c"                   "$R" -Rc 700 t
 run_tree "-R symlink arg default"  "$R" -R 700 tl

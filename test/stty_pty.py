@@ -119,8 +119,10 @@ case("speed", ["speed"])
 case("size and speed in either order", ["size", "speed"], ["speed", "size"])
 
 for f in flags:
-    case("set " + f, [f], [], ["-a"])
-    case("unset -" + f, ["-" + f], [], ["-a"])
+    # from the opposite state: a new terminal may already be as asked, and then
+    # a setting that did nothing would pass
+    case("set " + f, ["-" + f], [f], [], ["-a"])
+    case("unset -" + f, [f], ["-" + f], [], ["-a"])
 for v in values:
     case("value " + v, [v], [], ["-a"])
 for c in combos:

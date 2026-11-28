@@ -51,7 +51,8 @@ def ok(name, good, detail=""):
             print("     " + detail.replace("\n", "\n     "))
 
 def norm(t):
-    t = re.sub(r"\b\d{3,}\b", "N", t)
+    # process ids differ between shells; a status (printed as st=N) must not
+    t = re.sub(r"(?<!st=)\b\d{3,}\b", "N", t)
     t = re.sub(r"(?m)^(\S*/)?(dash|sh): (\d+: )?", "", t)
     t = re.sub(r"(?<=\S) {2,}", " ", t) if COLLAPSE else t
     return "\n".join(x.rstrip() for x in t.split("\n")).strip("\n")
@@ -125,7 +126,7 @@ def emacs_cases():
     e("C-b C-f", "echo ac" + C("B") + "b" + C("F") + "d", "abcd")
     e("left arrow", "echo ac" + LEFT + "b", "abc")
     e("right arrow", "echo ac" + LEFT + LEFT + RIGHT + "b", "abc")
-    e("home end keys", "echo b" + HOME + END + "c", "bc")
+    e("home end keys", "cho b" + HOME + "e" + END + "c", "bc")
     e("C-d deletes under cursor", "echo abXc" + LEFT * 2 + C("D"), "abc")
     e("delete key", "echo abXc" + LEFT * 2 + DEL, "abc")
     e("backspace", "echo abXc" + LEFT + "\x7f", "abc")
@@ -156,7 +157,7 @@ def emacs_cases():
     e("empty line", "", "")
     e("numeric argument", "echo " + M("3") + "x", "xxx")
     e("C-l redraw keeps line", "echo ab" + C("L") + "c", "abc")
-    e("end of line key at end", "echo a" + END + END + "b", "ab")
+    e("end of line key at end", "echo a" + HOME + END + END + "b", "ab")
     e("C-a C-k clears", "xx" + C("A") + C("K") + "echo ok", "ok")
     e("backspace at start", "\x7f\x7fecho ok", "ok")
     e("M-# comments the line", "echo hi" + M("#"), "", enter="")
@@ -169,11 +170,12 @@ def emacs_cases():
     h("up past the oldest stays", UP * 9, "one")
     h("up down", UP + UP + DOWN, "three")
     h("C-p C-n", C("P") + C("P") + C("N"), "three")
-    h("down at newest alerts", DOWN + "echo x", "x")
+    h("down at the newest line changes nothing", DOWN + "echo x", "x")
     h("edit a recalled line", UP + HOME + RIGHT * 5 + "X", "Xthree")
     h("M-< oldest", M("<"), "one")
     h("M-> back to the edit line", M("<") + M(">") + "echo z", "z")
-    h("page up page down", "\x1b[5~" + "\x1b[6~" + "echo q", "q")
+    h("page up is the oldest line", "\x1b[5~", "one")
+    h("page down comes back from it", "\x1b[5~" + "\x1b[6~" + "echo q", "q")
     h("C-r finds", C("R") + "two", "two")
     h("C-r newest first", C("R") + "echo", "three")
     h("C-r C-r older", C("R") + "echo" + C("R"), "two")
@@ -240,7 +242,7 @@ def vi_cases():
     v("ESC at start of line", ESC + "iecho ok", "ok")
     v("h moves left", "echo abc" + ESC + "hhiX", "Xabc")
     v("l stays on the last char", "echo ab" + ESC + "lllx", "a")
-    v("unknown command alerts", "echo ab" + ESC + "Zx", "a")
+    v("an unknown command changes nothing", "echo ab" + ESC + "Zx", "a")
     v("cw on the last word", "echo ab" + ESC + "05lcwX", "X")
     ed.close()
     h = lambda n, k, w: hist_ed("vi", n, k, w)
@@ -280,7 +282,8 @@ def transcript(argv, steps, cwd=None, env=None, settle=0.35):
     out = ""
     with Session(argv, env=env, cwd=cwd) as s:
         # a shell inside the FreeBSD sandbox can take seconds to start
-        s.expect(r"\$ ?$", 20)
+        if s.expect(r"\$ ?$", 20) is None:
+            return "(no first prompt from %s)" % " ".join(argv)
         s.take()
         for n, st in enumerate(steps):
             before = len(strip(s.buf).split("\n"))
@@ -355,7 +358,7 @@ def job_cases():
     d("exit status of a background job", ["(exit 3) &", "wait $!", "echo $?"])
     d("pipeline as one job", ["sleep 39 | sleep 40 &", "jobs", "jobs -l", "kill %1; sleep .5", "jobs"])
     d("$! after &", ["sleep 41 &", "echo $! | grep -c '^[0-9][0-9]*$'", "kill %1; sleep .5", "jobs"])
-    d("status of a stopped foreground job", ["sleep 42", "^Z", "echo $?", "kill %1; sleep .5", "jobs"])
+    d("status of a stopped foreground job", ["sleep 42", "^Z", "echo st=$?", "kill %1; sleep .5", "jobs"])
     d("exit warns about stopped jobs", ["sleep 43", "^Z", "exit", "jobs", "kill -CONT %1", "kill %1; sleep .5", "jobs"])
     d("wait for all", ["sleep 0.5 &", "wait", "echo done"])
     d("fg by spec", ["sleep 44 &", "sleep 45 &", "fg %1", "^Z", "jobs", "kill %1 %2; sleep .5"])
@@ -815,7 +818,7 @@ def prompt_cases():
     has("here-document body is passed", ["cat <<EOF", "line1", "EOF"], ["> EOF\nline1\n$"])
     has("PS2 after backslash", ["echo a\\", "b"], ["> b", "ab"])
     has("PS2 inside if", ["if true; then", "echo yes", "fi"], ["> echo yes", "\nyes"])
-    has("PS2 inside a function definition", ["f() {", "echo in f", "}", "f"], ["> echo in f", "in f\n"])
+    has("PS2 inside a function definition", ["f() {", "echo in f", "}", "f"], ["> echo in f", "\nin f\n"])
     has("loop over lines", ["for i in 1 2; do", "echo $i", "done"], ["1\n", "2\n"])
     has("syntax error keeps the shell", ["echo )", ALIVE], ["al1ve"])
     has("special builtin error keeps the shell", ["shift 9", ALIVE], ["al1ve"])
@@ -829,7 +832,7 @@ def prompt_cases():
     ok("set -o emacs is the default", re.search(r"(?m)^emacs +on$|^set -o emacs$", out) is not None, out)
     has("PS4 in xtrace", ["PS4='TRACE '", "set -x", "echo hi"], ["TRACE echo hi"])
     has("ignoreeof", ["set -o ignoreeof", "^D", ALIVE], ["Use \"exit\" to leave shell.", "al1ve"])
-    has("prompt for a failed command substitution", ["PS1='$(false)> '", "echo a"], ["> echo a"])
+    has("prompt for a failed command substitution", ["PS1='$(false)> '", "echo a"], ["\n> echo a"])
     has("$0 names the shell", ["echo zero=$0"], ["zero=" + SH])
     # ENV and HISTFILE
     envf = os.path.join(TMP, "envfile")

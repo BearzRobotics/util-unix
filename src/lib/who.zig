@@ -409,6 +409,13 @@ test "json: selects the same records as write and escapes text" {
         "[\n{\"type\":\"user\",\"user\":\"al\\\"ice\",\"line\":\"pts/none\",\"id\":\"\",\"pid\":99,\"host\":\"\",\"time\":200,\"mesg\":\"?\"}\n]\n",
         w.buffered(),
     );
+    // the text form takes the same record: one line, the user's
+    var tbuf: [2048]u8 = undefined;
+    var tw: Io.Writer = .fixed(&tbuf);
+    var zone: localtime.Zone = .{};
+    try write(std.testing.io, &tw, &data, &zone, .{ .users = true, .now = 0 });
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, tw.buffered(), "\n"));
+    try std.testing.expect(std.mem.indexOf(u8, tw.buffered(), "al\"ice") != null);
     var w2: Io.Writer = .fixed(&buf);
     try writeJson(std.testing.io, &w2, &data, .{ .boot = true, .dead = true, .now = 0 });
     try std.testing.expect(std.mem.indexOf(u8, w2.buffered(), "\"type\":\"boot\"") != null);

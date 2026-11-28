@@ -602,6 +602,8 @@ pub fn explain(a: Allocator, e: *const Entry) Allocator.Error![]const u8 {
 test "codes are unique and ordered by group" {
     for (catalog, 0..) |e, i| {
         for (catalog[i + 1 ..]) |f| try std.testing.expect(e.code != f.code);
+        // ascending, so each thousand stays together
+        if (i + 1 < catalog.len) try std.testing.expect(e.code < catalog[i + 1].code);
     }
 }
 

@@ -1835,11 +1835,19 @@ test "syntax errors carry dash-style text" {
 }
 
 test "tilde prefixes" {
-    var p = try testParse("echo ~ ~root/x a=~:~/y\n");
+    var p = try testParse("v=~:~/y echo ~ ~root/x\n");
     defer p.deinit();
-    const w = p.commands[0].kind.simple.words;
-    try std.testing.expect(w[1][0] == .tilde);
-    try std.testing.expectEqualStrings("root", w[2][0].tilde);
+    const s = p.commands[0].kind.simple;
+    try std.testing.expect(s.words[1][0] == .tilde);
+    try std.testing.expectEqualStrings("root", s.words[2][0].tilde);
+    // in an assignment, after the = and after each colon, they are a kind of
+    // their own
+    try std.testing.expectEqualStrings("v", s.assigns[0].name);
+    var tildes: usize = 0;
+    for (s.assigns[0].value) |part| {
+        if (part == .atilde) tildes += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), tildes);
 }
 
 const fuzz_corpus = [_][]const u8{
