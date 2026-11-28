@@ -1414,8 +1414,8 @@ stdin_case() {
     printf '%s' "$input" | (cd "$TEST_TMP" && ulimit -f 2000 && PATH="$TEST_TMP/inner:$PATH" timeout -s KILL 20 "$OURS" "$@") > "$TEST_TMP/si.ours" 2>&1; ro=$?
     shcmp_inner_sh /usr/bin/dash
     printf '%s' "$input" | (cd "$TEST_TMP" && PATH="$TEST_TMP/inner:$PATH" /usr/bin/dash "$@") > "$TEST_TMP/si.dash" 2>&1; rd=$?
-    sed -e 's#^[^: ]*: [0-9]*: #sh: #' "$TEST_TMP/si.ours" > "$TEST_TMP/si.o2"
-    sed -e 's#^[^: ]*: [0-9]*: #sh: #' "$TEST_TMP/si.dash" > "$TEST_TMP/si.d2"
+    sed -e 's#^[^: ]*: \([0-9]*\): #sh: \1: #' "$TEST_TMP/si.ours" > "$TEST_TMP/si.o2"
+    sed -e 's#^[^: ]*: \([0-9]*\): #sh: \1: #' "$TEST_TMP/si.dash" > "$TEST_TMP/si.d2"
     if [ "$ro" = "$rd" ] && cmp -s "$TEST_TMP/si.o2" "$TEST_TMP/si.d2"; then
         PASS=$((PASS + 1)); printf 'PASS stdin: %s\n' "$desc"
     else

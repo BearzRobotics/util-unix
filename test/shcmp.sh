@@ -58,10 +58,10 @@ case " $REF_SHELLS " in
 esac
 [ -x "$OURS" ] || { echo "FATAL: the shell under test, '$OURS', is not an executable" >&2; exit 2; }
 
-# Normalise a diagnostic: program name and "line N" forms.
+# Normalise a diagnostic: program name and "line N" forms. The number stays: it
+# is part of what a diagnostic says.
 shcmp_norm() {
-    sed -e 's#^\(/[^ :]*/\)\{0,1\}\(dash\|sh\|bash\|busybox\|ash\|yash\|mksh\)\(: line\)\{0,1\}: \([0-9]*: \)\{0,1\}#sh: #' \
-        -e 's#^sh: \([0-9]*\): #sh: #'
+    sed -e 's#^\(/[^ :]*/\)\{0,1\}\(dash\|sh\|bash\|busybox\|ash\|yash\|mksh\)\(: line\)\{0,1\}: \([0-9]*: \)\{0,1\}#sh: \4#'
 }
 
 # No file a case writes may grow past 10 MB (512-byte blocks), and it dumps no
@@ -134,7 +134,12 @@ c() {
     fi
     # stderr vs dash
     err_ok=1
-    case "$flags" in *e*) ;; *) [ -n "$dash_sig" ] && [ "$dash_err" != "$ours_err" ] && err_ok=0;; esac
+    case "$flags" in
+    # the wording is not compared, but a failure that dash explains must not
+    # pass in silence
+    *e*) [ -n "$dash_err" ] && [ -z "$ours_err" ] && [ "$(cat "$base.ours.rc")" != 0 ] && err_ok=0 ;;
+    *) [ -n "$dash_sig" ] && [ "$dash_err" != "$ours_err" ] && err_ok=0 ;;
+    esac
     verdict=PASS; kind=AGREE
     if [ "$agree" -ne "$n" ]; then kind=VARIES; fi
     if [ "$kind" = AGREE ] && [ $bsd_same = 0 ] && [ -n "$BSD" ] && case "$flags" in *B*) true;; *) false;; esac; then

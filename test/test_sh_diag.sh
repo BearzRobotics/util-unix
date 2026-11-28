@@ -66,7 +66,8 @@ done
     echo "$c $k"
 done > "$TMP/codes"
 # every plain-text code appears in the JSON catalog with the same kind, and vice versa
-[ "$(wc -l < "$TMP/catalog.json")" = "$(wc -l < "$TMP/codes")" ] && ok "json catalog lists every code" || bad "json catalog differs in size from the plain list"
+# (two empty lists are the same size too)
+{ [ "$(wc -l < "$TMP/codes")" -ge 40 ] && [ "$(wc -l < "$TMP/catalog.json")" = "$(wc -l < "$TMP/codes")" ]; } && ok "json catalog lists every code" || bad "json catalog differs in size from the plain list, or is nearly empty"
 while read -r c k; do
     grep -q "^{\"code\":\"$c\",\"kind\":\"$k\"" "$TMP/catalog.json" && ok "json catalog has $c" || bad "json catalog lacks $c"
     for field in severity exit summary message posix shellcheck help explain bad good; do
@@ -76,7 +77,12 @@ while read -r c k; do
     "$OURS" --explain "$c" --diagnostics=json | grep -q "^{\"code\":\"$c\"" && ok "explain json $c" || bad "explain json $c"
     if grep -q "## $c $k" "$HERE/../docs/sh-diagnostics.md"; then ok "catalog documents $c"; else bad "docs/sh-diagnostics.md lacks $c"; fi
     sc=$(grep "^{\"code\":\"$c\"" "$TMP/catalog.json" | sed 's/.*"shellcheck":\([^,]*\),.*/\1/')
-    case "$sc" in null) ;; \"SC[0-9]*\") grep -q "^ShellCheck: ${sc#\"}" "$TMP/exp" 2>/dev/null || { "$OURS" --explain "$c" | grep -q "^ShellCheck: " && ok "explain names ShellCheck for $c" || bad "explain lacks the ShellCheck id of $c"; };; *) bad "bad shellcheck field of $c: $sc";; esac
+    case "$sc" in
+    null) ;;
+    \"SC[0-9]*\") sc=${sc#\"}; sc=${sc%\"}
+        if "$OURS" --explain "$c" | grep -q "^ShellCheck: $sc\$"; then ok "explain names ShellCheck for $c"; else bad "explain lacks the ShellCheck id $sc of $c"; fi ;;
+    *) bad "bad shellcheck field of $c: $sc" ;;
+    esac
     case "$c" in SH9000|SH4004|SH4006|SH5013|SH5015|SH6001|SH6002) continue;; esac
     # a case alone proves nothing: its frozen output must hold the code
     if grep -q "^$c	" "$D/cases.txt" && grep -q "\"code\":\"$c\"" "$D/$c.json"; then ok "test covers $c"; else bad "no test case producing $c"; fi
@@ -118,7 +124,7 @@ cmp -s "$TMP/cat.md" "$HERE/../docs/sh-diagnostics.md" && ok "docs/sh-diagnostic
 { [ "$rc" = 2 ] && grep -q 'error\[SH6002\]' "$TMP/err"; } && ok "SH6002 sh -c" || bad "SH6002 sh -c"
 "$OURS" --diagnostics=rich /nonexistent/script.sh 2> "$TMP/err"; rc=$?
 { [ "$rc" = 127 ] && grep -q 'error\[SH4004\]: cannot open script' "$TMP/err"; } && ok "SH4004 missing script" || bad "SH4004 missing script"
-(cd "$TMP" && "$OURS" --diagnostics=rich -c 'local x=1' 2> "$TMP/err"); grep -q 'SH' "$TMP/err" && ok "SH5013 local at top level reported" || ok "SH5013 local accepted at top level (documented)"
+(cd "$TMP" && "$OURS" --diagnostics=rich -c 'local x=1' 2> "$TMP/err"); grep -q 'error\[SH5013\]' "$TMP/err" && ok "SH5013 local at top level reported" || bad "SH5013 local at top level reported"
 
 # colour: never without a terminal, even when asked for rich
 "$OURS" --diagnostics=rich -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && bad "no colour off a terminal" || ok "no colour off a terminal"
@@ -128,8 +134,9 @@ cmp -s "$TMP/cat.md" "$HERE/../docs/sh-diagnostics.md" && ok "docs/sh-diagnostic
 # them, NO_COLOR is honoured by auto; off a terminal auto prints none
 "$OURS" --diagnostics=rich --color=always -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && ok "--color=always forces escapes" || bad "--color=always forces escapes"
 "$OURS" --diagnostics=rich --diagnostics-color=always -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && ok "--diagnostics-color=always" || bad "--diagnostics-color=always"
-"$OURS" --diagnostics=rich --color=never -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && bad "--color=never" || ok "--color=never"
-"$OURS" --diagnostics=rich --color=auto -c 'nosuch' 2>&1 | grep -q "$(printf '\033')" && bad "--color=auto off a terminal" || ok "--color=auto off a terminal"
+plain() { printf '%s\n' "$1" | grep -q 'SH4001' && ! printf '%s' "$1" | grep -q "$(printf '\033')"; }
+plain "$("$OURS" --diagnostics=rich --color=never -c 'nosuch' 2>&1)" && ok "--color=never" || bad "--color=never"
+plain "$("$OURS" --diagnostics=rich --color=auto -c 'nosuch' 2>&1)" && ok "--color=auto off a terminal" || bad "--color=auto off a terminal"
 "$OURS" --color=sometimes -c : 2> /dev/null; [ $? = 2 ] && ok "--color rejects a bad value" || bad "--color rejects a bad value"
 if command -v script > /dev/null 2>&1; then
     esc=$(printf '\033')
@@ -157,7 +164,14 @@ for snippet in 'echo before; echo )' 'echo before; nosuch; echo after' 'echo bef
     'echo before; set -e; false; echo after' 'echo before; set -u; echo $nope; echo after' 'echo before; echo ${x!}; echo after' \
     'echo before; echo $((1/0)); echo after' 'echo before; readonly r=1; r=2; echo after' 'echo before; cat < /nonexistent/f; echo after' \
     'echo before; while true; do echo x; fi' 'echo before; echo ${y?need}; echo after'; do
+    # what a script observes is dash's: not merely the same from style to style,
+    # which a shell that did nothing would manage too
     ref=""
+    if [ -x /usr/bin/dash ]; then
+        rm -rf "$TMP/w"; mkdir -p "$TMP/w"
+        (cd "$TMP/w" && /usr/bin/dash -c "$snippet" > "$TMP/o" 2> /dev/null < /dev/null; echo "rc=$?" >> "$TMP/o")
+        ref="$(cat "$TMP/o")"
+    fi
     for style in posix rich json gcc; do
         for term in notty pty; do
             rm -rf "$TMP/w"; mkdir -p "$TMP/w"

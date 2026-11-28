@@ -35,9 +35,11 @@ n=0
 for f in "$TMP"/snip/case*.sh; do
     n=$((n + 1))
     out=$(shellcheck -s dash -S warning -f gcc "$f" 2>&1 | grep -E 'SC[13][0-9][0-9][0-9]')
-    if [ -z "$out" ]; then ok "hygiene $(basename "$f")"; else bad "hygiene $(basename "$f"): $out"; fi
+    # (this is a check of the test cases, not of the shell: it counts once)
+    [ -z "$out" ] || { bad "hygiene $(basename "$f"): $out"; dirty=1; }
 done
-printf 'checked %s POSIX snippets (exempt snippets are not linted)\n' "$n"
+if [ "$n" -lt 700 ]; then bad "hygiene: only $n snippets were extracted from test_sh.sh"
+elif [ "${dirty:-0}" = 0 ]; then ok "hygiene: $n POSIX snippets are clean (exempt ones are not linted)"; fi
 
 # --- 2. syntax oracle ---
 # Policy: ours must agree with `dash -n` (that is a test failure otherwise);
@@ -61,7 +63,7 @@ oracle() {
         NOTES=$((NOTES + 1)); printf 'NOTE shellcheck reports a syntax error in %s; dash and ours accept it\n' "$f"
     fi
 }
-for f in "$TMP"/snip/*.sh "$HERE"/*.sh "$HERE"/../tools/*.sh "$HERE"/../bench/*.sh /stuff/git/util-core/test/*.sh /stuff/git/util-core/tools/*.sh /etc/init.d/*; do
+for f in "$TMP"/snip/*.sh "$HERE"/*.sh "$HERE"/../tools/*.sh "$HERE"/../bench/*.sh "$HERE"/../scripts/*.sh; do
     [ -f "$f" ] || continue
     oracle "$f"
 done
