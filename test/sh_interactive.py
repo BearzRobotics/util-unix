@@ -783,7 +783,7 @@ def job_safety_cases():
     d = tempfile.mkdtemp(prefix="jobs", dir=TMP)
     # JOB-06: what a subshell leaves in the background cannot take typed input
     has("a background command in a subshell does not read the terminal", ["(cat >stolen & sleep 0.3)", ("w", .6), "echo FIRST-$((1+1))", "echo size-$(wc -c <stolen)"], ["FIRST-2", "size-0"], cwd=d)
-    has("nor can the terminal's ^C reach it", ["(sleep 5 & echo ignored-$((0x$(awk '/SigIgn/{print $2}' /proc/$!/status) & 6)); ls -l /proc/$!/fd/0; kill $!)"], ["ignored-6", "-> /dev/null"])
+    has("nor can the terminal's ^C reach it", ["(sleep 5 & sleep .2; echo ignored-$((0x$(awk '/SigIgn/{print $2}' /proc/$!/status) & 6)); ls -l /proc/$!/fd/0; kill $!)"], ["ignored-6", "-> /dev/null"])
     # JOB-07: fg and bg without job control fail instead of hanging
     for cmd in ("fg", "bg"):
         has("%s after set +m fails and returns" % cmd, ["cat &", ("w", .3), "set +m", cmd, "echo st-$?", "kill -9 $!"], ["not created under job control", "st-2"])
