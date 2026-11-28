@@ -75,11 +75,14 @@ echo a > f; echo b > g
 /ut/chown --from=alice carol g 2>/dev/null; t "unknown user fails" 1 $?
 /ut/chown --from=alice root g;         t "--from mismatch leaves it" "1001:0" "$(own g)"
 /ut/chown --reference=f g;             t "--reference"            "$(own f)"  "$(own g)"
-mkdir t; echo 1 > t/x; mkdir t/s; echo 2 > t/s/y; ln -s ../x t/s/l
+# the link points out of the tree, at a file the recursion must not reach
+mkdir t; echo 1 > t/x; mkdir t/s; echo 2 > t/s/y; echo 3 > outside; ln -s ../../outside t/s/l
 /ut/chown -R alice:staff t
 t "chown -R reaches every file" "1000:50 1000:50 1000:50 1000:50" "$(own t) $(own t/x) $(own t/s) $(own t/s/y)"
-t "chown -R -P leaves the link's target" "0:0" "$(stat -c '%u:%g' t/s/l | sed 's/.*/0:0/')"
-/ut/chown -h bob t/s/l;                t "chown -h changes the link itself" "1001:50" "$(stat -c '%u:%g' t/s/l | sed 's/^1001:.*/1001:50/')"
+t "chown -R -P leaves the link's target" "0:0" "$(own outside)"
+t "chown -R -P changes the link itself" "1000:50" "$(stat -c '%u:%g' t/s/l)"
+/ut/chown -h bob t/s/l;                t "chown -h changes the link itself" "1001:50" "$(stat -c '%u:%g' t/s/l)"
+t "chown -h leaves the link's target" "0:0" "$(own outside)"
 ln -s f sl; /ut/chown bob sl;          t "chown through a link changes the target" "1001" "$(own f | cut -d: -f1)"
 /ut/chmod 4755 f; /ut/chown alice f;   t "chown on a setuid file (kernel clears the bit)" "$(chown alice g 2>/dev/null; chmod 4755 g; chown alice g; mode g)" "$(mode f)"
 # same operations with busybox as the oracle, over a small tree

@@ -19,6 +19,8 @@ jobs:
           version: 0.17.1
       - run: zig build
       - run: zig build test
+      # the version, the manual pages and the changelog agree
+      - run: scripts/release.sh --check
 
   suites:
     # The differential, diagnostic and pty suites (see scripts/ci-suites.sh).

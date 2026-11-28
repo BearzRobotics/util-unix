@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Build the versioned source tarball for a release.
 #
+#   scripts/release.sh --check   only the consistency checks (CI runs this)
 #   scripts/release.sh   check consistency, write dist/util-unix-VERSION.tar.gz,
 #                        print its sha256 and the Zig package hash
 #
@@ -20,11 +21,17 @@ version="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon)"
 
 fail=0
 grep -q "^## $version\$" CHANGELOG.md || { echo "CHANGELOG.md has no '## $version' section" >&2; fail=1; }
+# the same sentence in every manual page; README.md and template.md are not pages
 for m in docs/manpages/*.md; do
-    [ "$(basename "$m")" = template.md ] && continue
-    grep -q "Version $version |" "$m" || { echo "$m does not say 'Version $version'" >&2; fail=1; }
+    case $(basename "$m") in README.md|template.md) continue ;; esac
+    grep -q "^This manual describes util-unix $version (see build.zig.zon)\.\$" "$m" || { echo "$m does not describe version $version" >&2; fail=1; }
 done
 [ -f LICENSE ] || { echo "LICENSE is missing" >&2; fail=1; }
+# `--check` stops here: only that the versions and notes agree
+if [ "${1:-}" = --check ]; then
+    [ $fail = 0 ] && echo "release metadata for $version is consistent"
+    exit $fail
+fi
 [ -z "$(git status --porcelain)" ] || { echo "the working tree is not clean; commit first" >&2; fail=1; }
 [ $fail = 0 ] || exit 1
 

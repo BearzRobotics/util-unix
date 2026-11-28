@@ -9,6 +9,16 @@
 [ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" sh "$0" "$@"
 
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# the suites test what is in zig-out: refuse when there is nothing there, and
+# say so when the sources have changed since it was built
+if ! [ -x "$TESTS_DIR/../zig-out/bin/sh" ]; then
+    echo "FAILED: zig-out/bin is empty; build first (zig build -Doptimize=ReleaseSafe)" >&2
+    exit 1
+fi
+if [ -n "$(find "$TESTS_DIR/../src" -name '*.zig' -newer "$TESTS_DIR/../zig-out/bin/sh" 2>/dev/null | head -n 1)" ]; then
+    echo "WARNING: sources are newer than zig-out/bin/sh: the binaries under test may be stale" >&2
+fi
 TOTAL_PASS=0
 TOTAL_FAIL=0
 TOTAL_SKIP=0

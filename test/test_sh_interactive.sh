@@ -17,7 +17,8 @@ if ! command -v python3 > /dev/null 2>&1 || ! python3 -c 'import pty, termios, f
     echo "SKIP: python3 with the pty module is required"
     exit 0
 fi
-[ -x "$OURS" ] || { echo "SKIP: $OURS not built (zig build -Doptimize=ReleaseSafe -Dcommands=sh -Dmode=standalone)"; exit 0; }
+# not a skip: a build that failed or was forgotten must not look like success
+[ -x "$OURS" ] || { echo "FAIL $OURS is not built (zig build -Doptimize=ReleaseSafe)"; exit 1; }
 
 OUT="$(mktemp)"
 trap 'rm -f "$OUT"' EXIT

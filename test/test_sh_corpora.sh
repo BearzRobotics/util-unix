@@ -32,7 +32,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 if command -v bwrap > /dev/null 2>&1 && bwrap --unshare-pid --die-with-parent --dev-bind / / true > /dev/null 2>&1; then
     # Oils cases share /tmp/oil-spec-test and one removes a directory in it: each
     # case, run in parallel with others, gets its own
-    SANDBOX="setsid -w bwrap --unshare-pid --unshare-ipc --die-with-parent --dev-bind / / --proc /proc --tmpfs /tmp/oil-spec-test"
+    # These are thousands of scripts from elsewhere, run by a shell being worked
+    # on: everything is read-only to them but /tmp (and the device nodes, which
+    # test -b needs; their own permissions apply), and there is no network.
+    SANDBOX="setsid -w bwrap --unshare-pid --unshare-ipc --unshare-net --die-with-parent --ro-bind / / --dev-bind /dev /dev --proc /proc --bind /tmp /tmp --tmpfs /tmp/oil-spec-test"
 else
     echo "SKIP corpora: bwrap is needed to contain the signals the cases send (install bubblewrap)"
     exit 0
@@ -44,6 +47,9 @@ JOBS="${JOBS:-8}"
 KNOWN="$HERE/sh_corpora/known-bugs.txt"
 TMP="$(mktemp -d)"
 trap 'chmod -R u+rwx "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
+# (TMPDIR may be elsewhere than /tmp)
+SANDBOX="$SANDBOX --bind $TMP $TMP"
+export SANDBOX
 REPORT="${REPORT:-$TMP/report.txt}"
 : > "$REPORT"
 FAIL=0
@@ -56,6 +62,16 @@ done
 WANT="$*"
 want_corpus() { [ -z "$WANT" ] && return 0; case " $WANT " in *" $1 "*) return 0;; esac; return 1; }
 RAN=0 # corpora actually run
+
+# floor CORPUS PASSED MINIMUM: a corpus that was run must have passed about what
+# it does with the pinned commits (tools/fetch-sh-corpora.sh). A crashed runner
+# or a cut-short result file would otherwise just remove cases, and bugs.
+floor() {
+    case $2 in ''|*[!0-9]*) set -- "$1" 0 "$3" ;; esac
+    [ "$2" -ge "$3" ] && return 0
+    echo "FAIL $1: only $2 cases passed, expected at least $3"
+    FAIL=1
+}
 
 # ---- yash ------------------------------------------------------------------
 corpus_yash() {
@@ -120,6 +136,8 @@ RUN1
         [ -n "$pend" ] && printf '%s\n' "$pend" >> "$REPORT"
     done
     echo "yash: $pass passed, $fail failed ($bug bug, $oth other-shell), $skip skipped/expected-failures"
+    floor yash "$pass" 5700
+    if grep -q '^RUNNER-ERROR' "$REPORT"; then echo "FAIL yash: the runner reported errors"; grep '^RUNNER-ERROR' "$REPORT" | head -5; FAIL=1; fi
 }
 
 # ---- freebsd ---------------------------------------------------------------
@@ -157,6 +175,7 @@ corpus_freebsd() {
         printf '%s\tfreebsd\t%s\texit %s, wanted %s; %s; stderr: %s\n' "$cat" "$rel" "$(cat "$TMP/fb.rc.$$")" "${f##*.}" "$sd" "$(head -c 140 "$TMP/fb.err.$$" | tr '\n\t' '~ ')" >> "$REPORT"
     done < "$TMP/fb.list"
     echo "freebsd: $pass passed, $fail failed ($bug bug, $oth other-shell)"
+    floor freebsd "$pass" 430
 }
 
 # ---- oils ------------------------------------------------------------------
@@ -165,9 +184,14 @@ corpus_oils() {
     if [ ! -d "$d" ]; then echo "SKIP oils: not downloaded (tools/fetch-sh-corpora.sh)"; return; fi
     command -v python3 > /dev/null 2>&1 || { echo "SKIP oils: needs python3"; return; }
     RAN=$((RAN + 1))
-    python3 -I "$HERE/sh_corpora/run_oils.py" "$d" "$OURS" --jobs "$JOBS" --sandbox "$SANDBOX" --out "$TMP/oils.out" > /dev/null 2>&1
+    if ! python3 -I "$HERE/sh_corpora/run_oils.py" "$d" "$OURS" --jobs "$JOBS" --sandbox "$SANDBOX" --out "$TMP/oils.out" > /dev/null 2> "$TMP/oils.err"; then
+        if ! grep -q '^SUMMARY' "$TMP/oils.out" 2>/dev/null; then
+            echo "FAIL oils: the adapter failed"; tail -5 "$TMP/oils.err"; FAIL=1; return
+        fi
+    fi
     grep -v '^SUMMARY' "$TMP/oils.out" | awk -F'\t' '{ c = ($1 == "BASH") ? "OTHER" : $1; printf "%s\toils\t%s\t%s\n", c, $2, $3 }' >> "$REPORT"
     echo "oils: $(grep '^SUMMARY' "$TMP/oils.out" | cut -f2,3 | tr '\t' ' ') (BUG = ours differs from the dash column that dash meets; DASH = ours equals dash)"
+    floor oils "$(sed -n 's/^SUMMARY.*[[:blank:]]PASS=\([0-9]*\).*/\1/p' "$TMP/oils.out")" 1500
 }
 
 want_corpus yash && corpus_yash
@@ -198,5 +222,6 @@ fi
 # run_all_tests.sh counts PASS and FAIL lines: this verdict is the suite's result
 if [ "$FAIL" -ne 0 ]; then echo "FAIL corpus check"
 elif [ "$RAN" -gt 0 ]; then echo "PASS corpus check: no new bugs in $RAN corpora"
+else echo "SKIP corpus check: no corpus is downloaded, nothing was checked"
 fi
 [ "$FAIL" -eq 0 ]

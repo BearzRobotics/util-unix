@@ -48,3 +48,7 @@ Install links so the commands can be used by name:
 # SEE ALSO
 
 The page of each command; `docs/decisions/0002-library-first-architecture.md` for the library layout.
+
+# VERSION
+
+This manual describes util-unix 0.4.0 (see build.zig.zon).

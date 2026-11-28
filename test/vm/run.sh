@@ -45,7 +45,15 @@ accel="-accel tcg -cpu max"
 timeout 5 qemu-system-x86_64 -accel kvm -display none -S -monitor none -nodefaults >/dev/null 2>&1
 [ $? -eq 124 ] && accel="-accel kvm -cpu host"
 echo "kernel: $KERNEL"; echo "busybox: $BUSYBOX"; echo "target: $TARGET"
+log=$BUILD/serial.log
 # shellcheck disable=SC2086
 timeout "$TIMEOUT" qemu-system-x86_64 $accel -m 1024 -smp 2 -nographic -no-reboot \
     -kernel "$KERNEL" -initrd "$BUILD/initramfs.gz" \
-    -append "console=ttyS0 rdinit=/init panic=-1 loglevel=3" < /dev/null
+    -append "console=ttyS0 rdinit=/init panic=-1 loglevel=3" < /dev/null | tee "$log"
+# QEMU's status says nothing about the tests: only a guest that reached the end
+# with no failure counts
+if tr -d '\r' < "$log" | grep -q '^VM-RESULT: pass=[1-9][0-9]* fail=0$'; then
+    exit 0
+fi
+echo "vm tests FAILED (no 'VM-RESULT: ... fail=0' from the guest; see $log)" >&2
+exit 1

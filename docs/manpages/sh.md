@@ -322,3 +322,7 @@ docs/compatibility/sh.md, docs/posix-shell-differences.md, docs/sh-diagnostics.m
 # STANDARDS
 
 POSIX.1-2024 XCU chapter 2 (Shell Command Language) and the utilities sh, cd, command, echo, getopts, hash, kill, printf, pwd, read, test, type, ulimit, umask, unalias, wait.
+
+# VERSION
+
+This manual describes util-unix 0.4.0 (see build.zig.zon).

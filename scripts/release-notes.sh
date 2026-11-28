@@ -9,15 +9,12 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 version=${1:-$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon)}
 version=${version#v}
-awk -v v="$version" '
+notes=$(awk -v v="$version" '
     $0 == "## " v || index($0, "## " v " ") == 1 { on = 1; next }
     on && /^## / { exit }
     on { print }
-' CHANGELOG.md > "${TMPDIR:-/tmp}/rn.$$"
-if ! grep -q '[^[:space:]]' "${TMPDIR:-/tmp}/rn.$$"; then
-    rm -f "${TMPDIR:-/tmp}/rn.$$"
-    echo "CHANGELOG.md has no '## $version' section" >&2
-    exit 1
-fi
-cat "${TMPDIR:-/tmp}/rn.$$"
-rm -f "${TMPDIR:-/tmp}/rn.$$"
+' CHANGELOG.md)
+case $notes in
+    *[![:space:]]*) printf '%s\n' "$notes" ;;
+    *) echo "CHANGELOG.md has no '## $version' section" >&2; exit 1 ;;
+esac

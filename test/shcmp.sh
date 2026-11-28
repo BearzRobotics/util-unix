@@ -50,6 +50,14 @@ shcmp_detect() {
 }
 shcmp_detect
 
+# With nothing to compare with, everything would agree: dash decides where the
+# others differ, and both it and the shell under test must be there.
+case " $REF_SHELLS " in
+    *" dash|"*) ;;
+    *) echo "FATAL: no dash among the reference shells (REF_SHELLS='$REF_SHELLS'; see SHCMP_ONLY)" >&2; exit 2 ;;
+esac
+[ -x "$OURS" ] || { echo "FATAL: the shell under test, '$OURS', is not an executable" >&2; exit 2; }
+
 # Normalise a diagnostic: program name and "line N" forms.
 shcmp_norm() {
     sed -e 's#^\(/[^ :]*/\)\{0,1\}\(dash\|sh\|bash\|busybox\|ash\|yash\|mksh\)\(: line\)\{0,1\}: \([0-9]*: \)\{0,1\}#sh: #' \
@@ -133,7 +141,7 @@ c() {
         kind=VARIES
     fi
     if [ "$kind" = VARIES ]; then
-        if [ $same_as_dash = 1 ] || [ $bsd_same = 1 ] || [ -z "$dash_sig" ] || { [ $posix_same = 1 ] && case "$flags" in *P*) true;; *) false;; esac; }; then VARIES=$((VARIES + 1)); else verdict=FAIL; fi
+        if [ $same_as_dash = 1 ] || [ $bsd_same = 1 ] || { [ $posix_same = 1 ] && case "$flags" in *P*) true;; *) false;; esac; }; then VARIES=$((VARIES + 1)); else verdict=FAIL; fi
     elif [ $err_ok = 0 ]; then
         verdict=FAIL
     fi
