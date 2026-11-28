@@ -438,69 +438,11 @@ pub fn viRunSearch(self: *Editor, pat_in: []const u8, fwd: bool) void {
 
 pub fn viCommandKey(self: *Editor, k: Key) void {
     if (k.kind != .char or k.alt) {
-        switch (k.kind) {
-            .left => self.cur = self.prevBoundary(self.cur),
-            .right => self.cur = self.nextBoundary(self.cur),
-            .up => self.viHistory(-1, 1),
-            .down => self.viHistory(1, 1),
-            .home => self.cur = 0,
-            .end => self.cur = self.lastCharPos(),
-            .delete => {
-                self.viSaveUndo();
-                self.viDelete(self.cur, self.nextBoundary(self.cur), true);
-            },
-            else => {},
-        }
+        viSpecialKey(self, k.kind);
         return;
     }
     const c = k.cp;
-    // pending argument of f/F/t/T/r/@
-    switch (self.vi_pend) {
-        .f, .F, .t, .T => {
-            const kind: u8 = switch (self.vi_pend) {
-                .f => 'f',
-                .F => 'F',
-                .t => 't',
-                else => 'T',
-            };
-            self.vi_pend = .none;
-            const count = self.vi_count orelse 1;
-            self.vi_count = null;
-            if (self.viFind(kind, c, count)) |t| {
-                self.cur = t.pos;
-            } else self.alert();
-            return;
-        },
-        .r => {
-            self.vi_pend = .none;
-            const count = self.vi_count orelse 1;
-            self.vi_count = null;
-            // ESC, ^C and Enter give the command up
-            if (c != 27 and c != 3 and c != 13 and c != 10) self.viReplaceChars(c, count);
-            return;
-        },
-        .@"@" => {
-            self.vi_pend = .none;
-            self.vi_count = null;
-            // an alias that runs itself must not recurse without end
-            if (self.vi_depth < max_vi_depth) if (self.alias_fn) |af| if (c < 128) if (af(self.cb_ctx, @intCast(c))) |txt| {
-                const copy = self.gpa.dupe(u8, txt) catch return;
-                defer self.gpa.free(copy);
-                const saved = self.vi_replaying;
-                self.vi_replaying = true;
-                self.vi_depth += 1;
-                defer self.vi_depth -= 1;
-                for (copy) |b| {
-                    if (self.parser.push(b)) |kk| self.viKey(kk);
-                }
-                self.vi_replaying = saved;
-                return;
-            };
-            self.alert();
-            return;
-        },
-        else => {},
-    }
+    if (viPendingArgument(self, c)) return;
     // counts
     if (c >= '1' and c <= '9' or (c == '0' and self.vi_count != null)) {
         self.vi_count = addDigit(self.vi_count, c - '0');
@@ -510,84 +452,11 @@ pub fn viCommandKey(self: *Editor, k: Key) void {
     const count = self.vi_count orelse 1;
     // pending operator: this key is its motion
     if (self.vi_pend == .d or self.vi_pend == .c or self.vi_pend == .y) {
-        const op = self.vi_pend;
-        const opc: u21 = switch (op) {
-            .d => 'd',
-            .c => 'c',
-            else => 'y',
-        };
-        if (c == opc) { // dd cc yy
-            self.vi_pend = .none;
-            self.vi_count = null;
-            self.vi_op_count = null;
-            switch (op) {
-                .y => {
-                    self.vi_reg.clearRetainingCapacity();
-                    self.vi_reg.appendSlice(self.gpa, self.buf.items) catch {};
-                },
-                .d => {
-                    self.viSaveUndo();
-                    self.vi_reg.clearRetainingCapacity();
-                    self.vi_reg.appendSlice(self.gpa, self.buf.items) catch {};
-                    self.buf.clearRetainingCapacity();
-                    self.cur = 0;
-                },
-                else => {
-                    self.viSaveUndo();
-                    self.vi_reg.clearRetainingCapacity();
-                    self.vi_reg.appendSlice(self.gpa, self.buf.items) catch {};
-                    self.buf.clearRetainingCapacity();
-                    self.cur = 0;
-                    self.vi_insert = true;
-                },
-            }
-            return;
-        }
-        if (c == 'f' or c == 'F' or c == 't' or c == 'T') {
-            // need one more key
-            self.vi_op_find = @intCast(c);
-            self.vi_pend = .none;
-            self.vi_op_pending = op;
-            self.vi_count = if (have_count) count else null;
-            return;
-        }
-        var mcount = count;
-        if (self.vi_op_count) |oc| if (!have_count) {
-            mcount = oc;
-        } else {
-            mcount = @min(oc * count, max_count);
-        };
-        self.vi_pend = .none;
-        self.vi_count = null;
-        var motion_c = c;
-        if (op == .c and (c == 'w' or c == 'W')) motion_c = if (c == 'w') 'e' else 'E';
-        var tgt = self.viMotion(motion_c, mcount, true, null) orelse {
-            // `cw` on the last character or ` ` still works: treat as end
-            if (op == .c and (c == 'w' or c == 'W') and self.cur < self.buf.items.len) {
-                self.viOperate(op, self.cur, .{ .pos = self.cur, .inclusive = true });
-                return;
-            }
-            self.alert();
-            return;
-        };
-        if (op == .c and (c == 'w' or c == 'W') and isBlank(self.buf.items[self.cur])) {
-            tgt = self.viMotion(c, mcount, true, null) orelse tgt;
-            tgt.inclusive = false;
-        }
-        // `dw` on the last word deletes to the end of the line
-        if ((c == 'w' or c == 'W') and op != .c and tgt.pos == self.cur) tgt.pos = self.buf.items.len;
-        if ((c == 'w' or c == 'W') and op != .c and tgt.pos >= self.lastCharPos() and tgt.pos < self.buf.items.len and self.viNextWord(self.cur, if (c == 'w') .word else .big) >= self.buf.items.len) tgt.pos = self.buf.items.len;
-        self.viOperate(op, self.cur, tgt);
+        viOperatorMotion(self, c, count, have_count);
         return;
     }
     if (self.vi_op_pending != .none) {
-        const op = self.vi_op_pending;
-        self.vi_op_pending = .none;
-        const cnt = self.vi_count orelse 1;
-        self.vi_count = null;
-        if (self.viFind(self.vi_op_find, c, cnt)) |t| {
-            self.viOperate(op, self.cur, t);
-        } else self.alert();
+        viOperatorFind(self, c);
         return;
     }
     self.vi_count = null;
@@ -605,6 +474,392 @@ pub fn viCommandKey(self: *Editor, k: Key) void {
             self.status = .accepted;
             return;
         },
+        'i', 'a', 'I', 'A', 'R' => viEnterInsert(self, c),
+        'd' => {
+            self.vi_pend = .d;
+            self.vi_op_count = if (have_count) count else null;
+            self.vi_count = null;
+            return;
+        },
+        'c' => {
+            self.vi_pend = .c;
+            self.vi_op_count = if (have_count) count else null;
+            return;
+        },
+        'y' => {
+            self.vi_pend = .y;
+            self.vi_op_count = if (have_count) count else null;
+            return;
+        },
+        'D', 'C', 'S', 's', 'Y', 'x', 'X' => viCut(self, c, count),
+        'r' => {
+            self.vi_pend = .r;
+            self.vi_count = if (have_count) count else null;
+            return;
+        },
+        'f' => {
+            self.vi_pend = .f;
+            self.vi_count = if (have_count) count else null;
+            return;
+        },
+        'F' => {
+            self.vi_pend = .F;
+            self.vi_count = if (have_count) count else null;
+            return;
+        },
+        't' => {
+            self.vi_pend = .t;
+            self.vi_count = if (have_count) count else null;
+            return;
+        },
+        'T' => {
+            self.vi_pend = .T;
+            self.vi_count = if (have_count) count else null;
+            return;
+        },
+        '@' => {
+            self.vi_pend = .@"@";
+            return;
+        },
+        'p', 'P' => viPut(self, c, count),
+        '~' => viToggleCase(self, count),
+        '_' => viAppendWord(self, count, have_count),
+        'u' => viUndoLast(self),
+        'U' => {
+            {
+                self.viSaveUndo();
+                self.setText(self.vi_start.items);
+                self.cur = 0;
+            }
+        },
+        '.' => viRepeat(self, count, have_count),
+        'k', '-' => self.viHistory(-1, count),
+        'j', '+' => self.viHistory(1, count),
+        'G' => viGoToHistory(self, count, have_count),
+        '/', '?' => viStartSearch(self, c),
+        'n', 'N' => viSearchAgain(self, c),
+        'v' => {
+            self.status = .external_edit;
+            return;
+        },
+        '=' => {
+            self.listCompletions();
+        },
+        '\\' => {
+            self.viCompleteUnique();
+        },
+        '*' => {
+            self.viExpandAll();
+        },
+        27 => {},
+        else => {
+            if (self.viMotion(c, count, have_count, null)) |t| {
+                self.cur = t.pos;
+            } else {
+                // unknown commands and failed motions alert
+                self.alert();
+            }
+        },
+    }
+    self.vi_op_count = null;
+}
+
+/// Arrows and the other keys that are not plain characters.
+fn viSpecialKey(self: *Editor, kind: rl.KeyKind) void {
+    switch (kind) {
+        .left => self.cur = self.prevBoundary(self.cur),
+        .right => self.cur = self.nextBoundary(self.cur),
+        .up => self.viHistory(-1, 1),
+        .down => self.viHistory(1, 1),
+        .home => self.cur = 0,
+        .end => self.cur = self.lastCharPos(),
+        .delete => {
+            self.viSaveUndo();
+            self.viDelete(self.cur, self.nextBoundary(self.cur), true);
+        },
+        else => {},
+    }
+}
+
+/// The character that f, F, t, T, r or @ was waiting for. False when none of
+/// them is waiting.
+fn viPendingArgument(self: *Editor, c: u21) bool {
+    switch (self.vi_pend) {
+        .f, .F, .t, .T => {
+            const kind: u8 = switch (self.vi_pend) {
+                .f => 'f',
+                .F => 'F',
+                .t => 't',
+                else => 'T',
+            };
+            self.vi_pend = .none;
+            const count = self.vi_count orelse 1;
+            self.vi_count = null;
+            if (self.viFind(kind, c, count)) |t| {
+                self.cur = t.pos;
+            } else self.alert();
+            return true;
+        },
+        .r => {
+            self.vi_pend = .none;
+            const count = self.vi_count orelse 1;
+            self.vi_count = null;
+            // ESC, ^C and Enter give the command up
+            if (c != 27 and c != 3 and c != 13 and c != 10) self.viReplaceChars(c, count);
+            return true;
+        },
+        .@"@" => {
+            self.vi_pend = .none;
+            self.vi_count = null;
+            // an alias that runs itself must not recurse without end
+            if (self.vi_depth < max_vi_depth) if (self.alias_fn) |af| if (c < 128) if (af(self.cb_ctx, @intCast(c))) |txt| {
+                const copy = self.gpa.dupe(u8, txt) catch return true;
+                defer self.gpa.free(copy);
+                const saved = self.vi_replaying;
+                self.vi_replaying = true;
+                self.vi_depth += 1;
+                defer self.vi_depth -= 1;
+                for (copy) |b| {
+                    if (self.parser.push(b)) |kk| self.viKey(kk);
+                }
+                self.vi_replaying = saved;
+                return true;
+            };
+            self.alert();
+            return true;
+        },
+        else => return false,
+    }
+}
+
+/// The key after d, c or y: the operator again, or its motion.
+fn viOperatorMotion(self: *Editor, c: u21, count: usize, have_count: bool) void {
+    const op = self.vi_pend;
+    const opc: u21 = switch (op) {
+        .d => 'd',
+        .c => 'c',
+        else => 'y',
+    };
+    if (c == opc) { // dd cc yy
+        self.vi_pend = .none;
+        self.vi_count = null;
+        self.vi_op_count = null;
+        switch (op) {
+            .y => {
+                self.vi_reg.clearRetainingCapacity();
+                self.vi_reg.appendSlice(self.gpa, self.buf.items) catch {};
+            },
+            .d => {
+                self.viSaveUndo();
+                self.vi_reg.clearRetainingCapacity();
+                self.vi_reg.appendSlice(self.gpa, self.buf.items) catch {};
+                self.buf.clearRetainingCapacity();
+                self.cur = 0;
+            },
+            else => {
+                self.viSaveUndo();
+                self.vi_reg.clearRetainingCapacity();
+                self.vi_reg.appendSlice(self.gpa, self.buf.items) catch {};
+                self.buf.clearRetainingCapacity();
+                self.cur = 0;
+                self.vi_insert = true;
+            },
+        }
+        return;
+    }
+    if (c == 'f' or c == 'F' or c == 't' or c == 'T') {
+        // need one more key
+        self.vi_op_find = @intCast(c);
+        self.vi_pend = .none;
+        self.vi_op_pending = op;
+        self.vi_count = if (have_count) count else null;
+        return;
+    }
+    var mcount = count;
+    if (self.vi_op_count) |oc| if (!have_count) {
+        mcount = oc;
+    } else {
+        mcount = @min(oc * count, max_count);
+    };
+    self.vi_pend = .none;
+    self.vi_count = null;
+    var motion_c = c;
+    if (op == .c and (c == 'w' or c == 'W')) motion_c = if (c == 'w') 'e' else 'E';
+    var tgt = self.viMotion(motion_c, mcount, true, null) orelse {
+        // `cw` on the last character or ` ` still works: treat as end
+        if (op == .c and (c == 'w' or c == 'W') and self.cur < self.buf.items.len) {
+            self.viOperate(op, self.cur, .{ .pos = self.cur, .inclusive = true });
+            return;
+        }
+        self.alert();
+        return;
+    };
+    if (op == .c and (c == 'w' or c == 'W') and isBlank(self.buf.items[self.cur])) {
+        tgt = self.viMotion(c, mcount, true, null) orelse tgt;
+        tgt.inclusive = false;
+    }
+    // `dw` on the last word deletes to the end of the line
+    if ((c == 'w' or c == 'W') and op != .c and tgt.pos == self.cur) tgt.pos = self.buf.items.len;
+    if ((c == 'w' or c == 'W') and op != .c and tgt.pos >= self.lastCharPos() and tgt.pos < self.buf.items.len and self.viNextWord(self.cur, if (c == 'w') .word else .big) >= self.buf.items.len) tgt.pos = self.buf.items.len;
+    self.viOperate(op, self.cur, tgt);
+}
+
+/// The character that completes d, c or y with f, F, t or T.
+fn viOperatorFind(self: *Editor, c: u21) void {
+    const op = self.vi_op_pending;
+    self.vi_op_pending = .none;
+    const cnt = self.vi_count orelse 1;
+    self.vi_count = null;
+    if (self.viFind(self.vi_op_find, c, cnt)) |t| {
+        self.viOperate(op, self.cur, t);
+    } else self.alert();
+}
+
+/// p and P: put the saved text after or before the cursor.
+fn viPut(self: *Editor, c: u21, count: usize) void {
+    if (self.vi_reg.items.len == 0) {
+        self.alert();
+    } else {
+        self.viSaveUndo();
+        const at = if (c == 'p' and self.buf.items.len > 0) self.nextBoundary(self.cur) else self.cur;
+        var last = at;
+        for (0..@min(count, max_copies)) |_| {
+            self.buf.insertSlice(self.gpa, last, self.vi_reg.items) catch return;
+            last += self.vi_reg.items.len;
+        }
+        self.cur = self.prevBoundary(last);
+    }
+}
+
+/// ~: change the case of the characters at the cursor.
+fn viToggleCase(self: *Editor, count: usize) void {
+    if (self.buf.items.len == 0) {
+        self.alert();
+    } else {
+        self.viSaveUndo();
+        var p = self.cur;
+        for (0..count) |_| {
+            if (p >= self.buf.items.len) break;
+            const ch = self.buf.items[p];
+            self.buf.items[p] = if (std.ascii.isLower(ch)) std.ascii.toUpper(ch) else std.ascii.toLower(ch);
+            p = self.nextBoundary(p);
+        }
+        self.cur = if (p >= self.buf.items.len) self.lastCharPos() else p;
+    }
+}
+
+/// _: append a word of the previous history line.
+fn viAppendWord(self: *Editor, count: usize, have_count: bool) void {
+    if (self.history.len > 0) {
+        const prev = std.mem.trimEnd(u8, self.history[self.history.len - 1], " \t\n");
+        var words: std.ArrayList([]const u8) = .empty;
+        defer words.deinit(self.gpa);
+        var it = std.mem.tokenizeAny(u8, prev, " \t");
+        while (it.next()) |w| words.append(self.gpa, w) catch return;
+        if (words.items.len > 0) {
+            const w = if (have_count) (if (count <= words.items.len) words.items[count - 1] else {
+                self.alert();
+                return;
+            }) else words.items[words.items.len - 1];
+            self.viSaveUndo();
+            self.cur = if (self.buf.items.len == 0) 0 else self.nextBoundary(self.cur);
+            self.insertBytes(" ");
+            self.insertBytes(w);
+            self.vi_insert = true;
+        } else self.alert();
+    } else self.alert();
+}
+
+/// u: undo the last change; a second u brings it back.
+fn viUndoLast(self: *Editor) void {
+    const saved_text = self.gpa.dupe(u8, self.buf.items) catch return;
+    defer self.gpa.free(saved_text);
+    const saved_cur = self.cur;
+    if (self.vi_undo_text.items.len == 0 and !self.vi_changed_ever) {
+        self.alert();
+    } else {
+        self.setText(self.vi_undo_text.items);
+        self.cur = @min(self.vi_undo_cur, self.buf.items.len);
+        self.vi_undo_text.clearRetainingCapacity();
+        self.vi_undo_text.appendSlice(self.gpa, saved_text) catch {};
+        self.vi_undo_cur = saved_cur;
+    }
+}
+
+/// .: do the last change again.
+fn viRepeat(self: *Editor, count: usize, have_count: bool) void {
+    if (self.vi_last.items.len == 0 or self.vi_depth >= max_vi_depth) {
+        self.alert();
+        return;
+    }
+    const keys = self.gpa.dupe(Key, self.vi_last.items) catch return;
+    defer self.gpa.free(keys);
+    const cnt = if (have_count) count else (self.vi_last_count orelse 1);
+    if (have_count) self.vi_last_count = count;
+    const saved = self.vi_replaying;
+    self.vi_replaying = true;
+    self.vi_depth += 1;
+    defer {
+        self.vi_depth -= 1;
+        self.vi_replaying = saved;
+        // what was replayed is not a new change: `.` must never
+        // become the command that `.` repeats
+        self.vi_changed = false;
+        self.vi_rec.clearRetainingCapacity();
+    }
+    if (cnt > 1 or have_count) {
+        // the recorded count digits were kept out; apply as prefix
+        var tmp: [24]u8 = undefined;
+        const digits = std.fmt.bufPrint(&tmp, "{d}", .{cnt}) catch "";
+        for (digits) |dch| self.viKey(.{ .cp = dch });
+    }
+    for (keys) |kk| self.viKey(kk);
+    if (!self.vi_insert) self.viClamp();
+    return;
+}
+
+/// n and N: repeat the search, the same way or the other.
+fn viSearchAgain(self: *Editor, c: u21) void {
+    if (self.vi_search) |s| {
+        const fwd = if (c == 'n') s.fwd else !s.fwd;
+        const pat = self.gpa.dupe(u8, s.pat) catch return;
+        defer self.gpa.free(pat);
+        const was = s.fwd;
+        self.viRunSearch(pat, fwd);
+        if (self.vi_search) |*ns| ns.fwd = was;
+    } else self.alert();
+}
+
+/// / and ?: read a pattern to search the history for.
+fn viStartSearch(self: *Editor, c: u21) void {
+    self.vi_orig.clearRetainingCapacity();
+    self.vi_orig.appendSlice(self.gpa, self.buf.items) catch {};
+    self.vi_undo_cur = self.cur;
+    self.vi_search_fwd = c == '?';
+    self.vi_search_mode = true;
+    self.vi_insert = true;
+    self.setText(if (c == '/') "/" else "?");
+    self.cur = 1;
+    // the leading character is the search direction; stored in buf[0]
+    self.redraw();
+}
+
+/// G: go to a history line by number, or to the oldest.
+fn viGoToHistory(self: *Editor, count: usize, have_count: bool) void {
+    if (have_count) {
+        if (count >= self.history_first and count - self.history_first < self.history.len) {
+            self.historyLoad(count - self.history_first);
+            self.cur = 0;
+        } else self.alert();
+    } else if (self.history.len > 0) {
+        self.historyLoad(0);
+        self.cur = 0;
+    } else self.alert();
+}
+
+/// i, a, I, A and R: start inserting or replacing.
+fn viEnterInsert(self: *Editor, c: u21) void {
+    switch (c) {
         'i' => {
             self.viSaveUndo();
             self.vi_insert = true;
@@ -634,22 +889,13 @@ pub fn viCommandKey(self: *Editor, k: Key) void {
             self.vi_replace = true;
             self.last_was_insert = false;
         },
-        'd' => {
-            self.vi_pend = .d;
-            self.vi_op_count = if (have_count) count else null;
-            self.vi_count = null;
-            return;
-        },
-        'c' => {
-            self.vi_pend = .c;
-            self.vi_op_count = if (have_count) count else null;
-            return;
-        },
-        'y' => {
-            self.vi_pend = .y;
-            self.vi_op_count = if (have_count) count else null;
-            return;
-        },
+        else => unreachable,
+    }
+}
+
+/// D, C, S, s, Y, x and X: delete or copy without a motion.
+fn viCut(self: *Editor, c: u21, count: usize) void {
+    switch (c) {
         'D' => {
             self.viSaveUndo();
             self.viDelete(self.cur, self.buf.items.len, true);
@@ -698,194 +944,8 @@ pub fn viCommandKey(self: *Editor, k: Key) void {
                 self.viDelete(s0, self.cur, true);
             }
         },
-        'r' => {
-            self.vi_pend = .r;
-            self.vi_count = if (have_count) count else null;
-            return;
-        },
-        'f' => {
-            self.vi_pend = .f;
-            self.vi_count = if (have_count) count else null;
-            return;
-        },
-        'F' => {
-            self.vi_pend = .F;
-            self.vi_count = if (have_count) count else null;
-            return;
-        },
-        't' => {
-            self.vi_pend = .t;
-            self.vi_count = if (have_count) count else null;
-            return;
-        },
-        'T' => {
-            self.vi_pend = .T;
-            self.vi_count = if (have_count) count else null;
-            return;
-        },
-        '@' => {
-            self.vi_pend = .@"@";
-            return;
-        },
-        'p', 'P' => {
-            if (self.vi_reg.items.len == 0) {
-                self.alert();
-            } else {
-                self.viSaveUndo();
-                const at = if (c == 'p' and self.buf.items.len > 0) self.nextBoundary(self.cur) else self.cur;
-                var last = at;
-                for (0..@min(count, max_copies)) |_| {
-                    self.buf.insertSlice(self.gpa, last, self.vi_reg.items) catch return;
-                    last += self.vi_reg.items.len;
-                }
-                self.cur = self.prevBoundary(last);
-            }
-        },
-        '~' => {
-            if (self.buf.items.len == 0) {
-                self.alert();
-            } else {
-                self.viSaveUndo();
-                var p = self.cur;
-                for (0..count) |_| {
-                    if (p >= self.buf.items.len) break;
-                    const ch = self.buf.items[p];
-                    self.buf.items[p] = if (std.ascii.isLower(ch)) std.ascii.toUpper(ch) else std.ascii.toLower(ch);
-                    p = self.nextBoundary(p);
-                }
-                self.cur = if (p >= self.buf.items.len) self.lastCharPos() else p;
-            }
-        },
-        '_' => {
-            if (self.history.len > 0) {
-                const prev = std.mem.trimEnd(u8, self.history[self.history.len - 1], " \t\n");
-                var words: std.ArrayList([]const u8) = .empty;
-                defer words.deinit(self.gpa);
-                var it = std.mem.tokenizeAny(u8, prev, " \t");
-                while (it.next()) |w| words.append(self.gpa, w) catch return;
-                if (words.items.len > 0) {
-                    const w = if (have_count) (if (count <= words.items.len) words.items[count - 1] else {
-                        self.alert();
-                        return;
-                    }) else words.items[words.items.len - 1];
-                    self.viSaveUndo();
-                    self.cur = if (self.buf.items.len == 0) 0 else self.nextBoundary(self.cur);
-                    self.insertBytes(" ");
-                    self.insertBytes(w);
-                    self.vi_insert = true;
-                } else self.alert();
-            } else self.alert();
-        },
-        'u' => {
-            const saved_text = self.gpa.dupe(u8, self.buf.items) catch return;
-            defer self.gpa.free(saved_text);
-            const saved_cur = self.cur;
-            if (self.vi_undo_text.items.len == 0 and !self.vi_changed_ever) {
-                self.alert();
-            } else {
-                self.setText(self.vi_undo_text.items);
-                self.cur = @min(self.vi_undo_cur, self.buf.items.len);
-                self.vi_undo_text.clearRetainingCapacity();
-                self.vi_undo_text.appendSlice(self.gpa, saved_text) catch {};
-                self.vi_undo_cur = saved_cur;
-            }
-        },
-        'U' => {
-            {
-                self.viSaveUndo();
-                self.setText(self.vi_start.items);
-                self.cur = 0;
-            }
-        },
-        '.' => {
-            if (self.vi_last.items.len == 0 or self.vi_depth >= max_vi_depth) {
-                self.alert();
-                return;
-            }
-            const keys = self.gpa.dupe(Key, self.vi_last.items) catch return;
-            defer self.gpa.free(keys);
-            const cnt = if (have_count) count else (self.vi_last_count orelse 1);
-            if (have_count) self.vi_last_count = count;
-            const saved = self.vi_replaying;
-            self.vi_replaying = true;
-            self.vi_depth += 1;
-            defer {
-                self.vi_depth -= 1;
-                self.vi_replaying = saved;
-                // what was replayed is not a new change: `.` must never
-                // become the command that `.` repeats
-                self.vi_changed = false;
-                self.vi_rec.clearRetainingCapacity();
-            }
-            if (cnt > 1 or have_count) {
-                // the recorded count digits were kept out; apply as prefix
-                var tmp: [24]u8 = undefined;
-                const digits = std.fmt.bufPrint(&tmp, "{d}", .{cnt}) catch "";
-                for (digits) |dch| self.viKey(.{ .cp = dch });
-            }
-            for (keys) |kk| self.viKey(kk);
-            if (!self.vi_insert) self.viClamp();
-            return;
-        },
-        'k', '-' => self.viHistory(-1, count),
-        'j', '+' => self.viHistory(1, count),
-        'G' => {
-            if (have_count) {
-                if (count >= self.history_first and count - self.history_first < self.history.len) {
-                    self.historyLoad(count - self.history_first);
-                    self.cur = 0;
-                } else self.alert();
-            } else if (self.history.len > 0) {
-                self.historyLoad(0);
-                self.cur = 0;
-            } else self.alert();
-        },
-        '/', '?' => {
-            self.vi_orig.clearRetainingCapacity();
-            self.vi_orig.appendSlice(self.gpa, self.buf.items) catch {};
-            self.vi_undo_cur = self.cur;
-            self.vi_search_fwd = c == '?';
-            self.vi_search_mode = true;
-            self.vi_insert = true;
-            self.setText(if (c == '/') "/" else "?");
-            self.cur = 1;
-            // the leading character is the search direction; stored in buf[0]
-            self.redraw();
-        },
-        'n', 'N' => {
-            if (self.vi_search) |s| {
-                const fwd = if (c == 'n') s.fwd else !s.fwd;
-                const pat = self.gpa.dupe(u8, s.pat) catch return;
-                defer self.gpa.free(pat);
-                const was = s.fwd;
-                self.viRunSearch(pat, fwd);
-                if (self.vi_search) |*ns| ns.fwd = was;
-            } else self.alert();
-        },
-        'v' => {
-            self.status = .external_edit;
-            return;
-        },
-        '=' => {
-            self.listCompletions();
-        },
-        '\\' => {
-            self.viCompleteUnique();
-        },
-        '*' => {
-            self.viExpandAll();
-        },
-        27 => {},
-        else => {
-            if (self.viMotion(c, count, have_count, null)) |t| {
-                self.cur = t.pos;
-            } else {
-                // unknown commands and failed motions alert
-                self.alert();
-            }
-        },
+        else => unreachable,
     }
-    self.vi_op_count = null;
 }
 
 pub fn viReplaceChars(self: *Editor, c: u21, count: usize) void {
