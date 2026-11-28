@@ -115,13 +115,46 @@ pub fn putOwned(comptime V: type, gpa: Allocator, map: *std.StringHashMapUnmanag
     return null;
 }
 
+/// The memory a piece of parsed code lives in. It is held by whoever is
+/// running that code and by every function defined in it, and freed when the
+/// last of them lets go: a function may be redefined or unset while it runs.
+pub const Unit = struct {
+    arena: std.heap.ArenaAllocator,
+    refs: u32 = 1,
+
+    pub fn create(gpa: Allocator) Allocator.Error!*Unit {
+        const u = try gpa.create(Unit);
+        u.* = .{ .arena = std.heap.ArenaAllocator.init(gpa) };
+        return u;
+    }
+
+    pub fn retain(self: *Unit) *Unit {
+        self.refs += 1;
+        return self;
+    }
+
+    pub fn release(self: *Unit) void {
+        self.refs -= 1;
+        if (self.refs > 0) return;
+        const gpa = self.arena.child_allocator;
+        self.arena.deinit();
+        gpa.destroy(self);
+    }
+};
+
+pub const Func = struct {
+    body: *const ast.Node,
+    /// where `body` lives; null for code the host keeps
+    unit: ?*Unit,
+};
+
 pub const Shell = struct {
     env: Env,
     gpa: Allocator,
     name: []u8,
     prog: []u8,
     vars: std.StringHashMapUnmanaged(Var) = .empty,
-    funcs: std.StringHashMapUnmanaged(*const ast.Node) = .empty,
+    funcs: std.StringHashMapUnmanaged(Func) = .empty,
     aliases: std.StringHashMapUnmanaged([]u8) = .empty,
     hash: std.StringHashMapUnmanaged([]u8) = .empty,
     host_builtins: std.StringHashMapUnmanaged(HostBuiltin) = .empty,
@@ -185,11 +218,8 @@ pub const Shell = struct {
     keep_process: bool = false,
     /// Variables saved by `local`, restored when the function returns.
     locals: std.ArrayList(Saved) = .empty,
-    /// Arenas of programs that defined functions; kept for the shell's life.
-    pinned: std.ArrayList(std.heap.ArenaAllocator) = .empty,
-    funcs_defined: u32 = 0,
-    /// Scripts being run, each holding an arena it may have to keep.
-    arenas_running: u32 = 0,
+    /// The parsed code being run, which a function defined now points into.
+    cur_unit: ?*Unit = null,
     reporter: ?*const fn (ctx: ?*anyopaque, d: *const Diagnostic) void = null,
     reporter_ctx: ?*anyopaque = null,
     /// getopts: position inside a grouped option argument.
@@ -318,7 +348,10 @@ pub const Shell = struct {
         }
         self.vars.deinit(gpa);
         var fit = self.funcs.iterator();
-        while (fit.next()) |e| gpa.free(e.key_ptr.*);
+        while (fit.next()) |e| {
+            if (e.value_ptr.unit) |u| u.release();
+            gpa.free(e.key_ptr.*);
+        }
         self.funcs.deinit(gpa);
         var ait = self.aliases.iterator();
         while (ait.next()) |e| {
@@ -346,8 +379,6 @@ pub const Shell = struct {
             if (l.old) |o| if (o.value) |v| gpa.free(v);
         }
         self.locals.deinit(gpa);
-        for (self.pinned.items) |*p| p.deinit();
-        self.pinned.deinit(gpa);
         gpa.free(self.name);
         gpa.free(self.prog);
         gpa.free(self.label);

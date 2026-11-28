@@ -509,7 +509,10 @@ fn unsetCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     }
     for (args[i..]) |name| {
         if (funcs) {
-            if (sh.funcs.fetchRemove(name)) |kv| sh.gpa.free(kv.key);
+            if (sh.funcs.fetchRemove(name)) |kv| {
+                if (kv.value.unit) |u| u.release();
+                sh.gpa.free(kv.key);
+            }
             continue;
         }
         if (!lexer.isName(name)) {

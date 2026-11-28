@@ -567,6 +567,11 @@ cat > "$TEST_TMP/size.sh" <<'SIZE'
 while read -r k v u; do case $k in VmRSS:) if [ "$v" -lt 9000 ]; then echo small; else echo "$v kB"; fi ;; esac; done < "/proc/$$/status"
 SIZE
 c "a script on stdin is not kept once it has run" 'line=": $(printf "%0200d" 0)"; i=0; while [ $i -lt 500 ]; do printf "%s\n" "$line"; i=$((i+1)); done > part; { j=0; while [ $j -lt 150 ]; do cat part; j=$((j+1)); done; cat '"$TEST_TMP"'/size.sh; } | sh' P
+c "a function may redefine itself while it runs" 'f() { f() { echo new $1; }; for w in old still; do echo $w $1; done; case $1 in x) echo end ;; esac; }; f x; f y'
+c "a function may unset itself while it runs" 'eval "g() { unset -f g; for w in a b; do echo \$w; done; echo \$1; }"; g z; g 2>/dev/null || echo gone'
+c "a function defined inside another outlives it" 'eval "o() { i() { echo inner \$1; }; }"; o; unset -f o; i 1; eval "i() { i() { echo again; }; echo second; }"; i; i'
+c "a function redefined by a trap or an eval it is running" 'h() { eval "h() { echo two; }"; echo one; h; echo \"back in one\"; }; h; h'
+c "redefining functions does not use more and more memory" 'i=0; while [ $i -lt 30000 ]; do eval "f() { echo some text to be kept in the body $i; }"; i=$((i+1)); done; . '"$TEST_TMP"'/size.sh' P
 c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
 c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
 c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'

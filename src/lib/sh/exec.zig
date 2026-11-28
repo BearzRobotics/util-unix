@@ -42,16 +42,12 @@ fn aliasGet(ctx: *anyopaque, name: []const u8) ?[]const u8 {
 
 /// Parse and execute `src` one complete command at a time.
 pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!u8 {
-    var arena = std.heap.ArenaAllocator.init(sh.gpa);
-    // the arena is kept when a function now points into it, else freed
-    const defined_before = sh.funcs_defined;
-    sh.arenas_running += 1;
-    defer {
-        sh.arenas_running -= 1;
-        // room was reserved when the function was defined
-        if (sh.funcs_defined != defined_before) sh.pinned.appendAssumeCapacity(arena) else arena.deinit();
-    }
-    const a = arena.allocator();
+    const unit = try shell.Unit.create(sh.gpa);
+    defer unit.release();
+    const outer_unit = sh.cur_unit;
+    sh.cur_unit = unit;
+    defer sh.cur_unit = outer_unit;
+    const a = unit.arena.allocator();
     // NUL bytes in a script are ignored (dash, FreeBSD sh)
     const src = if (std.mem.indexOfScalar(u8, src_in, 0) != null) blk: {
         var clean: std.ArrayList(u8) = .empty;
@@ -125,8 +121,8 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
     var line: u32 = 1;
     var eof = false;
     var last: u8 = 0;
-    sh.arenas_running += 1;
-    defer sh.arenas_running -= 1;
+    const outer_unit = sh.cur_unit;
+    defer sh.cur_unit = outer_unit;
     const saved_src = sh.cur_src;
     const saved_start = sh.cur_src_start;
     defer {
@@ -153,28 +149,27 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
         }
         sh.cur_src = buf.items;
         sh.cur_src_start = first_line;
-        var arena = std.heap.ArenaAllocator.init(gpa);
-        const a = arena.allocator();
-        const defined_before = sh.funcs_defined;
+        const unit = try shell.Unit.create(gpa);
+        const a = unit.arena.allocator();
         const text = a.dupe(u8, buf.items[start..]) catch {
-            arena.deinit();
+            unit.release();
             return error.OutOfMemory;
         };
         var d: parser.Diag = .{};
         var p = parser.Parser.initProgram(a, text, &d) catch {
-            arena.deinit();
+            unit.release();
             return error.OutOfMemory;
         };
         p.line = line;
         p.aliases = .{ .ctx = sh, .get = aliasGet };
         p.resumeAlias(carry) catch {
-            arena.deinit();
+            unit.release();
             return error.OutOfMemory;
         };
         const maybe = p.nextCommand() catch |e| switch (e) {
             error.Syntax => {
                 if (!eof and p.pos >= p.src.len) {
-                    arena.deinit();
+                    unit.release();
                     eof = readMore(gpa, &buf, fd, &chunk) catch |re| switch (re) {
                         error.OutOfMemory => return error.OutOfMemory,
                         error.ReadFailed => return readFailed(sh),
@@ -187,11 +182,11 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
                 reportSyntax(sh, &d, "", buf.items);
                 sh.status = 2;
                 sh.flow = .exit_shell;
-                arena.deinit();
+                unit.release();
                 return 2;
             },
             error.OutOfMemory => {
-                arena.deinit();
+                unit.release();
                 return error.OutOfMemory;
             },
         };
@@ -203,7 +198,7 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
             // reads themselves are the same, so no more of the input is taken.
             var delim_store: [128]u8 = undefined;
             const delim: ?[]const u8 = if (p.warn_heredoc) |w| (std.fmt.bufPrint(&delim_store, "{s}\n", .{w.delim}) catch null) else null;
-            arena.deinit();
+            unit.release();
             while (true) {
                 const had = buf.items.len;
                 eof = readMore(gpa, &buf, fd, &chunk) catch |re| switch (re) {
@@ -223,14 +218,14 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
             sh.emit(&wd);
         }
         const node = maybe orelse {
-            arena.deinit();
+            unit.release();
             break;
         };
         const consumed = text.len - @min(tail, text.len);
         // `carry` was copied into this parser's arena, so its store can be reused
         _ = carry_store.reset(.retain_capacity);
         carry = p.aliasCarry(carry_store.allocator()) catch {
-            arena.deinit();
+            unit.release();
             return error.OutOfMemory;
         };
         sh.cur_src = buf.items;
@@ -238,12 +233,12 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
         start += consumed;
         line = p.line;
         if (!sh.flags.noexec) {
+            sh.cur_unit = unit;
+            defer sh.cur_unit = outer_unit;
             last = execNode(sh, node);
             checkTraps(sh);
         }
-        if (sh.funcs_defined != defined_before) {
-            sh.pinned.appendAssumeCapacity(arena);
-        } else arena.deinit();
+        unit.release();
         if (sh.flow != .none) break;
     }
     return last;
@@ -617,10 +612,9 @@ fn execInner(sh: *Shell, node: *const Node) u8 {
         .for_clause => |f| return execFor(sh, f.name, f.words, f.body),
         .case_clause => |c| return execCase(sh, c.word, c.items),
         .function => |f| {
-            // every running script may have to keep its arena for this
-            sh.pinned.ensureUnusedCapacity(sh.gpa, sh.arenas_running) catch |oe| return sh.oom(oe);
-            _ = shell.putOwned(*const Node, sh.gpa, &sh.funcs, f.name, f.body) catch |oe| return sh.oom(oe);
-            sh.funcs_defined += 1;
+            const old = shell.putOwned(shell.Func, sh.gpa, &sh.funcs, f.name, .{ .body = f.body, .unit = sh.cur_unit }) catch |oe| return sh.oom(oe);
+            if (sh.cur_unit) |u| _ = u.retain();
+            if (old) |o| if (o.unit) |u| u.release();
             return 0;
         },
     }
@@ -1137,7 +1131,7 @@ fn xtrace(sh: *Shell, a: Allocator, s: ast.Simple, vals: []const []const u8, arg
 
 const Resolved = union(enum) {
     special: builtins.Builtin,
-    function: *const Node,
+    function: shell.Func,
     builtin: builtins.Builtin,
     host: shell.HostBuiltin,
     external: []const u8,
@@ -1557,8 +1551,14 @@ pub fn restoreVar(sh: *Shell, sv: shell.Saved) void {
     }
 }
 
-pub fn callFunction(sh: *Shell, body: *const Node, args: []const []const u8) u8 {
+pub fn callFunction(sh: *Shell, f: shell.Func, args: []const []const u8) u8 {
     const gpa = sh.gpa;
+    // held while it runs, whatever it does to its own definition
+    const unit = if (f.unit) |u| u.retain() else null;
+    defer if (unit) |u| u.release();
+    const outer_unit = sh.cur_unit;
+    sh.cur_unit = unit;
+    defer sh.cur_unit = outer_unit;
     var old_params = sh.params;
     sh.params = .empty;
     sh.setParams(args) catch |oe| {
@@ -1572,7 +1572,7 @@ pub fn callFunction(sh: *Shell, body: *const Node, args: []const []const u8) u8 
     sh.func_depth += 1;
     const saved_loops = sh.loop_depth;
     sh.loop_depth = 0;
-    var st = execNode(sh, body);
+    var st = execNode(sh, f.body);
     sh.loop_depth = saved_loops;
     sh.func_depth -= 1;
     if (sh.flow == .return_func) {
