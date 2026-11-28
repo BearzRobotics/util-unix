@@ -223,6 +223,21 @@ pub fn read(fd: i32, buf: []u8) Error!usize {
     return check(linux.read(fd, buf.ptr, buf.len));
 }
 
+/// Append all that `fd` still has to `out`, retrying on EINTR. `error.TooLarge`
+/// past `max` bytes. On any error the text read is not the whole of it.
+pub fn readToEnd(gpa: std.mem.Allocator, fd: i32, out: *std.ArrayList(u8), max: usize) (Error || error{ OutOfMemory, TooLarge })!void {
+    var chunk: [8192]u8 = undefined;
+    while (true) {
+        const n = read(fd, &chunk) catch |e| {
+            if (errno() == E_INTR) continue;
+            return e;
+        };
+        if (n == 0) return;
+        if (n > max -| out.items.len) return error.TooLarge;
+        try out.appendSlice(gpa, chunk[0..n]);
+    }
+}
+
 /// Write all of `bytes`, retrying on EINTR and short writes.
 pub fn writeAll(fd: i32, bytes: []const u8) Error!void {
     if (comptime !is_linux) return nosys();
@@ -900,4 +915,19 @@ pub const SIGWINCH: u8 = 28;
 /// True when `sig` was caught since its flag was last taken (does not clear it).
 pub fn peekPending(sig: u8) bool {
     return sig < nsig and pending_flags[sig];
+}
+
+test "readToEnd stops at its limit and reports a failed read" {
+    if (comptime !is_linux) return error.SkipZigTest;
+    const a = std.testing.allocator;
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(a);
+    const fd = try memfileWith("0123456789");
+    defer close(fd);
+    try readToEnd(a, fd, &out, 10);
+    try std.testing.expectEqualStrings("0123456789", out.items);
+    out.clearRetainingCapacity();
+    _ = linux.lseek(fd, 0, 0);
+    try std.testing.expectError(error.TooLarge, readToEnd(a, fd, &out, 9));
+    try std.testing.expectError(error.Sys, readToEnd(a, -1, &out, 9));
 }

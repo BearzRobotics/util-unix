@@ -102,13 +102,7 @@ pub const History = struct {
     fn read(self: *History, fd: i32) (Allocator.Error || sys.Error || error{TooLarge})!void {
         var data: std.ArrayList(u8) = .empty;
         defer data.deinit(self.gpa);
-        var chunk: [4096]u8 = undefined;
-        while (true) {
-            const n = try sys.read(fd, &chunk);
-            if (n == 0) break;
-            if (data.items.len + n > max_file_bytes) return error.TooLarge;
-            try data.appendSlice(self.gpa, chunk[0..n]);
-        }
+        try sys.readToEnd(self.gpa, fd, &data, max_file_bytes);
         var it = std.mem.splitScalar(u8, data.items, '\n');
         while (it.next()) |raw| {
             if (raw.len == 0) continue;
@@ -436,12 +430,14 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     const rfd = sys.open(path, .{ .cloexec = true }, 0) catch return 1;
     defer sys.close(rfd);
     var data: std.ArrayList(u8) = .empty;
-    var chunk: [4096]u8 = undefined;
-    while (true) {
-        const k = sys.read(rfd, &chunk) catch break;
-        if (k == 0) break;
-        data.appendSlice(a, chunk[0..k]) catch |oe| return sh.oom(oe);
-    }
+    sys.readToEnd(a, rfd, &data, std.math.maxInt(usize)) catch |e| switch (e) {
+        error.OutOfMemory => return sh.oom(error.OutOfMemory),
+        // part of the commands must not run as if it were all of them
+        error.Sys, error.TooLarge => {
+            sh.diagCmdK(.cannot_open, path, "fc", "cannot read {s}: {s}", .{ path, sys.strerror(sys.errno()) });
+            return 1;
+        },
+    };
     return runText(sh, a, data.items, false);
 }
 

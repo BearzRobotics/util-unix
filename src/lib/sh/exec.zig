@@ -1132,24 +1132,27 @@ const Resolved = union(enum) {
     not_found,
 };
 
-fn pathFind(sh: *Shell, a: Allocator, name: []const u8, want_exec: bool) ?[]const u8 {
-    const path = sh.lookup_path orelse sh.getVar("PATH") orelse "";
+/// The first file called `name` in the directories of `path` that is not a
+/// directory and, when asked for, may be executed.
+pub fn searchPath(sh: *Shell, a: Allocator, path: []const u8, name: []const u8, want_exec: bool) Allocator.Error!?[]const u8 {
     var it = std.mem.splitScalar(u8, path, ':');
     while (it.next()) |dir| {
-        const full = (if (dir.len == 0)
-            std.fmt.allocPrint(a, "./{s}", .{name})
-        else
-            std.fmt.allocPrint(a, "{s}/{s}", .{ dir, name })) catch |oe| {
-            // not the same as "not found"
-            _ = sh.oom(oe);
-            return null;
-        };
+        const full = try std.fmt.allocPrint(a, "{s}/{s}", .{ if (dir.len == 0) "." else dir, name });
         const info = sys.stat(full, true) catch continue;
         if (info.kind == .dir) continue;
         if (want_exec and !osio.access(sh.env.io, full, .{ .execute = true })) continue;
         return full;
     }
     return null;
+}
+
+/// `searchPath` for a command: in the PATH the lookup is to use.
+fn pathFind(sh: *Shell, a: Allocator, name: []const u8, want_exec: bool) ?[]const u8 {
+    return searchPath(sh, a, sh.lookup_path orelse sh.getVar("PATH") orelse "", name, want_exec) catch |oe| {
+        // not the same as "not found"
+        _ = sh.oom(oe);
+        return null;
+    };
 }
 
 pub fn resolve(sh: *Shell, a: Allocator, name: []const u8) Resolved {
@@ -1729,15 +1732,7 @@ pub fn readFile(a: Allocator, path: []const u8) ?[]const u8 {
     const fd = sys.open(path, .{ .cloexec = true }, 0) catch return null;
     defer sys.close(fd);
     var data: std.ArrayList(u8) = .empty;
-    var chunk: [8192]u8 = undefined;
-    while (true) {
-        const n = sys.read(fd, &chunk) catch {
-            if (sys.errno() == sys.E_INTR) continue;
-            return null;
-        };
-        if (n == 0) break;
-        data.appendSlice(a, chunk[0..n]) catch return null;
-    }
+    sys.readToEnd(a, fd, &data, std.math.maxInt(usize)) catch return null;
     return data.items;
 }
 

@@ -26,15 +26,7 @@ const usage_text = @embedFile("sh_help.txt");
 
 fn readAll(gpa: std.mem.Allocator, fd: i32) ?[]u8 {
     var data: std.ArrayList(u8) = .empty;
-    var chunk: [8192]u8 = undefined;
-    while (true) {
-        const n = sys.read(fd, &chunk) catch {
-            if (sys.errno() == sys.E_INTR) continue;
-            return null;
-        };
-        if (n == 0) break;
-        data.appendSlice(gpa, chunk[0..n]) catch return null;
-    }
+    sys.readToEnd(gpa, fd, &data, std.math.maxInt(usize)) catch return null;
     return data.toOwnedSlice(gpa) catch null;
 }
 

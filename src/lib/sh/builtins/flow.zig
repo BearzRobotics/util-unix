@@ -122,17 +122,9 @@ pub fn dot(sh: *Shell, a: Allocator, args_in: []const []const u8) u8 {
     const name = args[1];
     var path: []const u8 = name;
     if (std.mem.indexOfScalar(u8, name, '/') == null) {
-        const found = blk: {
-            const pv = sh.getVar("PATH") orelse "";
-            var it = std.mem.splitScalar(u8, pv, ':');
-            while (it.next()) |dir| {
-                const full = std.fmt.allocPrint(a, "{s}/{s}", .{ if (dir.len == 0) "." else dir, name }) catch |oe| return sh.oom(oe);
-                const info = sys.stat(full, true) catch continue;
-                if (info.kind == .dir) continue;
-                break :blk full;
-            }
-            break :blk null;
-        };
+        // the file only has to be readable, and `command -p` does not change
+        // where it is looked for
+        const found = exec.searchPath(sh, a, sh.getVar("PATH") orelse "", name, false) catch |oe| return sh.oom(oe);
         if (found) |f| path = f else {
             sh.diagCmdK(.not_found, name, ".", "{s}: not found", .{name});
             return die(sh, 2);
