@@ -14,6 +14,7 @@
 
 const std = @import("std");
 const num = @import("../num.zig");
+const userdb = @import("../userdb.zig");
 const sys = @import("../../sys.zig");
 const osio = @import("osio.zig");
 const ast = @import("ast.zig");
@@ -195,18 +196,26 @@ pub fn homeOf(sh: *Shell, a: Allocator, user: []const u8) ?[]const u8 {
         if (e == error.OutOfMemory) _ = sh.oom(error.OutOfMemory);
         return null;
     };
+    return homeIn(data, user);
+}
+
+/// The home directory of `user` in the text of a passwd file, read as `id`
+/// and getpwnam(3) read it: malformed lines are passed over.
+fn homeIn(data: []const u8, user: []const u8) ?[]const u8 {
     var lines = std.mem.splitScalar(u8, data, '\n');
-    while (lines.next()) |ln| {
-        var f = std.mem.splitScalar(u8, ln, ':');
-        const nm = f.next() orelse continue;
-        if (!std.mem.eql(u8, nm, user)) continue;
-        _ = f.next();
-        _ = f.next();
-        _ = f.next();
-        _ = f.next();
-        return f.next();
+    while (lines.next()) |line| {
+        const entry = userdb.parsePasswd(line) orelse continue;
+        if (std.mem.eql(u8, entry.name, user)) return entry.dir;
     }
     return null;
+}
+
+test "~user reads the passwd file as id does" {
+    const text = "# root:x:0:0::/comment:\nann:x:notanumber:5::/bad:/bin/sh\nann:x:5:5::/home/ann:/bin/sh\n  bob:x:6:6::/home/bob\n";
+    try std.testing.expectEqualStrings("/home/ann", homeIn(text, "ann").?);
+    try std.testing.expectEqualStrings("/home/bob", homeIn(text, "bob").?);
+    try std.testing.expect(homeIn(text, "# root") == null);
+    try std.testing.expect(homeIn(text, "root") == null);
 }
 
 fn tilde(x: *X, user: []const u8, is_assign_tilde: bool) Error!void {
