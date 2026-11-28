@@ -399,10 +399,6 @@ fn errexitCheck(sh: *Shell, st: u8, what: []const u8) void {
     }
 }
 
-const signal_text = [_][]const u8{
-    "", "Hangup", "", "Quit", "Illegal instruction", "Trace/breakpoint trap", "Aborted", "Bus error", "Floating point exception", "Killed", "User defined signal 1", "Segmentation fault", "User defined signal 2", "", "Alarm clock", "Terminated", "Stack fault", "", "Continued", "Stopped (signal)", "Stopped", "Stopped (tty input)", "Stopped (tty output)", "Urgent I/O condition", "CPU time limit exceeded", "File size limit exceeded", "Virtual timer expired", "Profiling timer expired", "Window changed", "I/O possible", "Power failure", "Bad system call",
-};
-
 /// Wait for `pid`; on termination by a signal print dash's message.
 pub fn waitFor(sh: *Shell, pid: i32, report: bool) u8 {
     while (true) {
@@ -411,13 +407,9 @@ pub fn waitFor(sh: *Shell, pid: i32, report: bool) u8 {
             return 127;
         };
         if (report) {
+            // as dash: nothing for INT, PIPE, CHLD or a real-time signal
             const sig = sys.statusSignal(r.status);
-            if (sig != 0 and sig != 2 and sig != 13 and sig < signal_text.len and signal_text[sig].len > 0) {
-                var buf: [96]u8 = undefined;
-                const core = if (r.status & 0x80 != 0) " (core dumped)" else "";
-                const msg = std.fmt.bufPrint(&buf, "{s}{s}\n", .{ signal_text[sig], core }) catch "";
-                sh.errRaw(msg);
-            }
+            if (sig != 0 and sig != 2 and sig != 13 and sig != sys.SIGCHLD and sig < 32) jobs.reportDeath(sh, r.status);
         }
         return sys.statusCode(r.status);
     }

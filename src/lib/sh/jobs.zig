@@ -462,7 +462,14 @@ const signal_text = [_][]const u8{
     "", "Hangup", "Interrupt", "Quit", "Illegal instruction", "Trace/breakpoint trap", "Aborted", "Bus error", "Floating point exception", "Killed", "User defined signal 1", "Segmentation fault", "User defined signal 2", "Broken pipe", "Alarm clock", "Terminated", "Stack fault", "Child exited", "Continued", "Stopped (signal)", "Stopped", "Stopped (tty input)", "Stopped (tty output)", "Urgent I/O condition", "CPU time limit exceeded", "File size limit exceeded", "Virtual timer expired", "Profiling timer expired", "Window changed", "I/O possible", "Power failure", "Bad system call",
 };
 
-pub fn signalText(sig: u8) []const u8 {
+/// Say which signal ended a process, from its wait status, as dash does.
+pub fn reportDeath(sh: *Shell, status: u32) void {
+    var buf: [96]u8 = undefined;
+    const core = if (sys.statusCoreDumped(status)) " (core dumped)" else "";
+    sh.errRaw(std.fmt.bufPrint(&buf, "{s}{s}\n", .{ signalText(sys.statusSignal(status)), core }) catch "");
+}
+
+fn signalText(sig: u8) []const u8 {
     if (sig < signal_text.len and signal_text[sig].len > 0) return signal_text[sig];
     return "Unknown signal";
 }
@@ -643,9 +650,7 @@ pub fn waitFg(sh: *Shell, j: *Job) u8 {
     const last = j.procs.items[j.procs.items.len - 1];
     const sig = sys.statusSignal(last.status);
     if (sig != 0 and sig != 2 and sig != 13) {
-        var buf: [96]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, "{s}{s}\n", .{ signalText(sig), if (sys.statusCoreDumped(last.status)) " (core dumped)" else "" }) catch "";
-        sh.errRaw(msg);
+        reportDeath(sh, last.status);
     } else if (sig == 2 and sh.tty_fd >= 0 and !(sh.flags.interactive and sh.traps[2] == null)) sh.errRaw("\n");
     // With job control the terminal's SIGINT reaches only the job. It was meant
     // for the commands around it too, so the shell sends it to itself: its trap
