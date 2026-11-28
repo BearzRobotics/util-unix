@@ -152,7 +152,12 @@ pub fn uname() error{ Unexpected, Unsupported }!Uname {
 
 test "identity, groups, umask and uname answer without failing" {
     if (!is_linux) return error.SkipZigTest;
-    _ = try identity();
+    const id = try identity();
+    // the test runs with no set-id bit: the ids are the process's own, twice
+    try std.testing.expectEqual(std.os.linux.getuid(), id.uid);
+    try std.testing.expectEqual(std.os.linux.geteuid(), id.euid);
+    try std.testing.expectEqual(std.os.linux.getgid(), id.gid);
+    try std.testing.expectEqual(std.os.linux.getegid(), id.egid);
     const groups = try supplementaryGroups(std.testing.allocator);
     defer std.testing.allocator.free(groups);
     try std.testing.expect(umask() <= 0o777);

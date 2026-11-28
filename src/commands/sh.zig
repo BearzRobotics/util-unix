@@ -463,6 +463,9 @@ fn runCheck(ctx: cli.Context, shell: *sh.Shell, text: []const u8, label: []const
     return if (findings.items.len > 0) 1 else 0;
 }
 
-test "usage text names the synopsis" {
+test "usage text names the options the shell takes" {
     try std.testing.expect(std.mem.startsWith(u8, usage_text, "Usage: sh"));
+    for ([_][]const u8{ "-c", "-i", "-s", "--check", "--explain", "--diagnostics" }) |option| {
+        try std.testing.expect(std.mem.indexOf(u8, usage_text, option) != null);
+    }
 }

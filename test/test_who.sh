@@ -95,7 +95,9 @@ run_cmp "-- file"            -- "$U"
 # run_cmp pins GNU to LC_ALL=C, so the locale-dependent time style is compared here.
 run_loc() { # description, "VAR=value ...", args...
     description="$1"; envs="$2"; shift 2
-    g="$(env -u LC_ALL $envs "$GNU_WHO" "$@" 2>&1)"; o="$(env -u LC_ALL $envs "$BIN_DIR/who" "$@" 2>&1)"
+    g="$(env -u LC_ALL $envs "$GNU_WHO" "$@" 2>&1)"
+    if [ -n "${OURS_MULTICALL:-}" ]; then o="$(env -u LC_ALL $envs "$BIN_DIR/util-unix" who "$@" 2>&1)"
+    else o="$(env -u LC_ALL $envs "$BIN_DIR/who" "$@" 2>&1)"; fi
     if [ "$g" = "$o" ]; then PASS=$((PASS + 1)); echo "PASS $description"
     else FAIL=$((FAIL + 1)); echo "FAIL $description"; echo "     GNU : $g" | head -3; echo "     OURS: $o" | head -3; fi
 }

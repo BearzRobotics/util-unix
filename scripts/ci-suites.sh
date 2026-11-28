@@ -33,4 +33,8 @@ cp -r /src/docs /src/src /src/test /src/tools /src/zig-out /work/
 chown -R tester:tester /work
 
 cd /work
-exec su tester -c 'env -u NO_COLOR TERM=xterm LANG=C.UTF-8 UU_REQUIRE_SANDBOX=1 sh test/run_all_tests.sh'
+su tester -c 'env -u NO_COLOR TERM=xterm LANG=C.UTF-8 UU_REQUIRE_SANDBOX=1 sh test/run_all_tests.sh'
+# the tools once more through the multicall binary (`util-unix NAME ...`)
+exec su tester -c 'rc=0; for s in chcon chgrp chmod chown getent groups hostname id pinky runcon stty tty uname who; do
+    env -u NO_COLOR TERM=xterm LANG=C.UTF-8 UU_REQUIRE_SANDBOX=1 OURS_MULTICALL=1 sh test/test_$s.sh > /tmp/multi-$s.log 2>&1 || { rc=1; echo "multicall $s FAILED"; grep -A6 "^FAIL" /tmp/multi-$s.log | head -20; }
+done; [ $rc = 0 ] && echo "multicall pass: all tool suites passed"; exit $rc'

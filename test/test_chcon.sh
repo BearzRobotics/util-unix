@@ -152,6 +152,6 @@ ctree "--verbose=1"                  --verbose=1 a:b:c:d d/f
 ctree "--rec abbreviation"           --rec a:b:c:d d
 ctree "--re (ambiguous)"             --re a:b:c:d d
 g="$(/usr/bin/chcon --help | sed 's#/usr/bin/chcon#chcon#g' | sed '/^GNU coreutils online help/,$d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
-o="$("$BIN_DIR/chcon" --help)"
+o="$(ours --help)"
 if [ "$g" = "$o" ]; then PASS=$((PASS + 1)); echo "PASS --help"; else FAIL=$((FAIL + 1)); echo "FAIL --help"; fi
 print_summary
