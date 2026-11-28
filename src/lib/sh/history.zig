@@ -478,6 +478,10 @@ test "history numbering and limit" {
     try std.testing.expectEqual(@as(u64, 2), h.first);
     try std.testing.expectEqualStrings("d", h.get(4).?);
     try std.testing.expect(h.get(1) == null);
+    // below the limit, so that only being a repeat can keep it out
+    h.setMax(10);
     try h.add("d");
     try std.testing.expectEqual(@as(usize, 3), h.entries.items.len);
+    try h.add("e");
+    try std.testing.expectEqual(@as(usize, 4), h.entries.items.len);
 }

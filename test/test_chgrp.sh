@@ -49,7 +49,7 @@ t "unknown long option"                  --bogus "$G1" f
 t "ambiguous --no"                       --no "$G1" f
 t "--reference with missing file"        --reference=nonexistent f
 t "--reference no files"                 --reference=f
-t "--from not accepted by chgrp"         --from=:"$G1" "$G1" f
+g "--from that does not match"          --from=:"$G2" -v "$G2" f
 # --help: GNU appends three "online help" lines; compare all but those.
 t "empty group spec"                     "" f
 t "-R --dereference needs -H or -L"      -R --dereference "$G1" d
@@ -57,9 +57,10 @@ t "dangling link default (dereference)"  "$G1" dangling
 t "dangling link -h"                     -h -v "$G1" dangling
 
 printf "\n[ --reference ]\n"
-g "--reference"                          --reference=g f
-g "--reference -v"                       -v --reference=g f
-g "--reference to a link follows it"     -v --reference=l g
+# `ref` has the second group, so ignoring it shows
+g "--reference"                          --reference=ref f
+g "--reference -v"                       -v --reference=ref f
+g "--reference to a link follows it"     -v --reference=reflink g
 
 printf "\n[ Symbolic links ]\n"
 g "link, default dereferences"           -v "$G2" l
@@ -100,7 +101,6 @@ root_sandboxed "$SCRATCH" t "-R --preserve-root /."                -R --preserve
 root_sandboxed "$SCRATCH" t "-R --preserve-root //"                -R --preserve-root "$G1" //
 g "--preserve-root without -R is fine"   --preserve-root "$G2" f
 t "--no-preserve-root accepted"          --no-preserve-root "$G1" f
-root_sandboxed "$SCRATCH" t "-RL --preserve-root on link to /"     -RL --preserve-root "$G1" rootlink
 root_sandboxed "$SCRATCH" run_tree "-RL --preserve-root link to /" "$SETUP; ln -s / rootlink" -RL --preserve-root "$G1" rootlink
 root_sandboxed "$SCRATCH" run_tree "-RH --preserve-root link to /" "$SETUP; ln -s / rootlink" -RH --preserve-root "$G1" rootlink
 

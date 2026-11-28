@@ -34,15 +34,17 @@ sys.stdout.buffer.write(data)' "$TMPDIR_CMP.idraw" "$@"
     gnu_full() { "/usr/bin/id" "$@"; }
 fi
 ME="$(/usr/bin/id -un)"
-USERS="$ME root nobody daemon bin sys sync games www-data 0 1 1000 65534 99999 nosuchuser_xyz ''"
+USERS="$ME root nobody daemon bin sys sync games www-data 0 1 1000 65534 99999 nosuchuser_xyz"
 for o in "" -u -g -G -un -gn -Gn -ur -gr -Gr -unr -gnr -Gnr -z "-z -G" "-zG" "-zGn" -uz -gz -a "-a -u" "-n" "-r" "-nr" "-ug" "-uG" "-gG" "-ugG" -Z "-Z -u" --user --group --groups "--user --name" "--groups --name --real" --zero "--groups --zero" --context; do
     run_cmp "id $o"        $o
 done
 for u in $USERS; do
-    for o in "" -u -g -G -un -gn -Gn -ur -z; do
+    for o in "" -u -g -G -un -gn -Gn -ur -z -uz -Gz -Gnz; do
         run_cmp "id $o $u"     $o "$u"
     done
 done
+# (quotes inside $USERS would not make an empty operand)
+for o in "" -u -g -G -un -z; do run_cmp "id $o empty user" $o ""; done
 run_cmp "two users"        root nobody
 run_cmp "user then bad"    root nosuchuser_xyz nobody
 run_cmp "-G two users"     -G root nobody

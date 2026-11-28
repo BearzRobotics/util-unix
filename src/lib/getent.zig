@@ -745,8 +745,10 @@ test "protocols and rpc formats" {
 }
 
 test "hosts: name prefers IPv6, address lookup, formatting" {
-    const h = "127.0.0.1 localhost\n::1 ip6-localhost ip6-loopback\n10.0.0.1 a b\nfe00::0 net\n";
+    const h = "127.0.0.1 localhost\n::1 ip6-localhost ip6-loopback\n10.0.0.1 a b\nfe00::0 net\n10.0.0.2 both\nfe00::2 both\n";
     try expectQuery(.hosts, "localhost", h, .found, "127.0.0.1       localhost\n");
+    // a name with an address of each family: the IPv6 one
+    try expectQuery(.hosts, "both", h, .found, "fe00::2         both\n");
     try expectQuery(.hosts, "::1", h, .found, "::1             ip6-localhost ip6-loopback\n");
     try expectQuery(.hosts, "10.0.0.1", h, .found, "10.0.0.1        a b\n");
     try expectQuery(.hosts, "B", h, .found, "10.0.0.1        a b\n");

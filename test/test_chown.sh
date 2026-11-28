@@ -50,13 +50,13 @@ g "dot with warning prints warning"      "$U.$G2" f g
 
 printf "\n[ --from ]\n"
 t "--from=user matches"                  --from="$U" -v "$U" f
-t "--from=user does not match"           --from=root -v "$U" f
+g "--from=user does not match"           --from=root -v ":$G2" f
 g "--from=:group matches"                --from=:"$G1" -v ":$G2" f
-g "--from=:group does not match"         --from=:"$G2" -v ":$G1" f
+g "--from=:group does not match"         --from=:"$G2" -v ":$G2" f
 g "--from=user:group matches"            --from="$U:$G1" -v ":$G2" f
 t "--from=nosuchuser"                    --from=nosuchuser -v "$U" f
 t "--from=nosuchgroup"                   --from=:nosuchgroup -v "$U" f
-t "--from=0 (numeric)"                   --from=0 -v "$U" f
+g "--from=0 (numeric)"                   --from=0 -v ":$G2" f
 g "--from with -R"                       --from="$U:$G1" -R -v ":$G2" d
 g "--from -R mismatch"                   --from=root -R -v ":$G2" d
 g "--from -h link"                       --from="$U" -h -v ":$G2" l
@@ -82,9 +82,9 @@ t "dangling link default"                "$U" dangling
 t "dangling link -h"                     -h -v "$U" dangling
 
 printf "\n[ --reference ]\n"
-g "--reference (owner and group)"        -v --reference=g f
+g "--reference (owner and group)"        -v --reference=ref f
 t "--reference self"                     -v --reference=f f
-g "--reference via link"                 -v --reference=l g
+g "--reference via link"                 -v --reference=reflink g
 
 printf "\n[ Recursion and symbolic links ]\n"
 g "-R tree"                              -R -v "$U:$G2" d

@@ -15,18 +15,29 @@ check() { # name, command that must succeed
 py() { python3 -c "$1"; }
 
 check "uname --json parses" "$BIN/uname --json | python3 -m json.tool"
-check "uname --json -m equals uname -m" \
-    "[ \"\$($BIN/uname --json -m | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"machine\"])')\" = \"\$($BIN/uname -m)\" ]"
-check "uname --json -sn has exactly two keys" \
-    "[ \"\$($BIN/uname --json -sn | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')\" = 2 ]"
-check "id --json uid equals id -u" \
-    "[ \"\$($BIN/id --json | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"euid\"])')\" = \"\$($BIN/id -u)\" ]"
-check "id --json groups match id -G" \
-    "[ \"\$($BIN/id --json | python3 -c 'import json,sys;print(\" \".join(str(g[\"id\"]) for g in json.load(sys.stdin)[\"groups\"]))')\" = \"\$($BIN/id -G)\" ]"
-check "id --json root: one object per operand" \
-    "[ \"\$($BIN/id --json root 0 | wc -l)\" = 2 ]"
-check "id --json -u is refused" "! $BIN/id --json -u"
-check "id --json unknown user fails" "! $BIN/id --json no-such-user-zz"
+# jget "COMMAND" EXPR: EXPR over the parsed output of a command that succeeds
+jget() {
+    out=$($1) || return 1
+    printf '%s' "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); print($2)"
+}
+# same NAME A B: both succeed and print the same, which is not nothing
+same() {
+    if a=$(eval "$2" 2>/dev/null) && b=$(eval "$3" 2>/dev/null) && [ -n "$a" ] && [ "$a" = "$b" ]; then ok "$1"; else bad "$1"; fi
+}
+# refused NAME MESSAGE COMMAND...: status 1 with the message, not any failure
+refused() {
+    name=$1 want=$2; shift 2
+    err=$("$@" 2>&1 >/dev/null); rc=$?
+    case "$rc:$err" in 1:*"$want"*) ok "$name" ;; *) echo "     status $rc: $err"; bad "$name" ;; esac
+}
+
+same "uname --json -m equals uname -m" 'jget "$BIN/uname --json -m" "d[\"machine\"]"' '"$BIN/uname" -m'
+same "uname --json -sn has exactly two keys" 'jget "$BIN/uname --json -sn" "len(d)"' 'echo 2'
+same "id --json uid equals id -u" 'jget "$BIN/id --json" "d[\"euid\"]"' '"$BIN/id" -u'
+same "id --json groups match id -G" 'jget "$BIN/id --json" "\" \".join(str(g[\"id\"]) for g in d[\"groups\"])"' '"$BIN/id" -G'
+same "id --json root: one object per operand" '"$BIN/id" --json root 0 | grep -c "^{"' 'echo 2'
+refused "id --json -u is refused" "--json" "$BIN/id" --json -u
+refused "id --json unknown user fails" "no such user" "$BIN/id" --json no-such-user-zz
 
 d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
 python3 - "$d/utmp" <<'PY'
@@ -56,7 +67,7 @@ PY
 check "who --json: run levels of any bytes still parse" \
     "$BIN/who --json -r $d/levels | python3 -c 'import json,sys;r=json.load(sys.stdin);assert [x[\"runlevel\"] for x in r]==[None,chr(34),chr(0xfffd),\"5\"];assert r[3][\"previous\"]==\"S\" and r[0][\"previous\"] is None'"
 check "who --json -b selects the boot record" \
-    "[ \"\$($BIN/who --json -b $d/utmp | python3 -c 'import json,sys;print(json.load(sys.stdin)[0][\"type\"])')\" = boot ]"
+    "[ \"\$($BIN/who --json -b $d/utmp | python3 -c 'import json,sys;r=json.load(sys.stdin);print(len(r),r[0][\"type\"])')\" = '1 boot' ]"
 check "who --json -q" \
     "[ \"\$($BIN/who --json -q $d/utmp | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"count\"])')\" = 2 ]"
 check "who --json record count equals plain who line count" \

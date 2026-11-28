@@ -517,7 +517,9 @@ test "--from that does not match leaves the file alone and reports retained" {
     defer col.deinit();
     const gid = try ownGid(tmp.dir, "f");
     const ok = try run(testing.io, testing.allocator, .{
-        .gid = gid,
+        // another group than the file has: were the filter ignored, the file
+        // would be changed (or the change would fail)
+        .gid = gid +% 2,
         .required_gid = gid +% 1, // matches nothing
         .verbosity = .verbose,
         .db = &db,
@@ -526,6 +528,7 @@ test "--from that does not match leaves the file alone and reports retained" {
     }, &.{"f"});
     try testing.expect(ok);
     try col.expect(&.{"no_change_requested f"});
+    try testing.expectEqual(gid, try ownGid(tmp.dir, "f"));
 }
 
 test "missing path is reported and makes run return false" {

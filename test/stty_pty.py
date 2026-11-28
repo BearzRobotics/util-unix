@@ -63,6 +63,8 @@ def case(desc, *steps, columns=None, rows=24, cols=80, lc="C"):
     if columns:
         env["COLUMNS"] = str(columns)
     steps = [list(x) for x in steps]
+    # with no step neither program would run, and nothing could differ
+    assert steps, "case %r has no step" % desc
     g, gf = run_steps([GNU], steps, env, rows, cols)
     o, of = run_steps(OURS, steps, env, rows, cols)
     # A pseudo-terminal keeps 8 data bits, no parity and the receiver on. When a
@@ -107,7 +109,7 @@ chars = "intr quit erase kill eof eol eol2 swtch start stop susp rprnt werase ln
 combos = "evenp parity oddp nl ek sane cooked raw pass8 litout cbreak decctlq crt dec".split()
 
 # Plain display and all-settings display, in the pristine state.
-case("no arguments")
+case("no arguments", [])
 case("-a", ["-a"])
 case("--all", ["--all"])
 case("-g", ["-g"])

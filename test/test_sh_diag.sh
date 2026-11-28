@@ -11,6 +11,9 @@
 # a memory-limited scope of its own, so a runaway case cannot take the caller down
 [ "${TEST_CONTAINED:-}" = "cg:$(cat /proc/self/cgroup 2>/dev/null)" ] || exec sh "$(dirname "$0")/contain.sh" sh "$0" "$@"
 UTIL="sh"
+# the colour cases set these themselves: what the caller has must not matter
+unset NO_COLOR
+TERM=xterm; export TERM
 PASS=0
 FAIL=0
 HERE="$(cd "$(dirname "$0")" && pwd)"

@@ -318,6 +318,12 @@ test "setting a full context on a file and a partial one after it" {
     var buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const n = try tmp.dir.realPathFile(t.io, "f", &buf);
     const path = buf[0..n];
+    // skip only where the file system will not take the attribute at all; any
+    // other failure below is ours
+    selinux.setFileContext(path, "u:r:t:s0", true) catch |e| switch (e) {
+        error.NotSupported, error.PermissionDenied, error.AccessDenied => return error.SkipZigTest,
+        else => return e,
+    };
 
     const Sink = struct {
         problems: usize = 0,
@@ -329,7 +335,7 @@ test "setting a full context on a file and a partial one after it" {
     var sink: Sink = .{};
     const rep: Reporter = .{ .context = &sink, .on_event = Sink.on };
     const ok = try run(t.io, t.allocator, .{ .target = .{ .full = "u:r:t:s0" }, .reporter = rep }, &.{path});
-    if (!ok) return error.SkipZigTest; // this file system refuses security.* for us
+    try t.expect(ok);
     try t.expect(try run(t.io, t.allocator, .{ .target = .{ .partial = .{ .type = "nt" } }, .reporter = rep }, &.{path}));
     const got = try selinux.getFileContext(t.allocator, path, true);
     defer t.allocator.free(got);

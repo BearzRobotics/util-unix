@@ -17,7 +17,10 @@ UID1=$(id -u)
 # A tree with every kind of entry the traversal rules distinguish.
 SETUP='mkdir -p d/sub e; touch f d/a d/sub/b e/x; ln -s f l; ln -s d dl; ln -s nosuch dangling
 ln -s ../f d/inner_l; ln -s ../e d/inner_dl; ln -s .. d/sub/up; mkdir noread; touch noread/y; chmod 000 noread
-touch zero; chmod 000 zero; printf "data" > g; chmod 755 d'
+touch zero; chmod 000 zero; printf "data" > g; chmod 755 d
+touch ref; ln -s ref reflink'
+# the reference file of the --reference cases has another group than the rest
+[ -n "$G2" ] && SETUP="$SETUP; chgrp $G2 ref"
 
 # need_group2: skip group-changing tests when the user has only one group.
 need_group2() {
