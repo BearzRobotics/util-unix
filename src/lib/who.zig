@@ -139,7 +139,7 @@ pub fn formatTime(buf: []u8, style: TimeStyle, zone: *const localtime.Zone, ts: 
 pub fn idleText(buf: []u8, last: ?i64, now: i64, boot: i64) []const u8 {
     const when = last orelse return "  ?";
     if (boot < when and when <= now) {
-        const idle = now - when;
+        const idle = now -| when;
         if (idle < 60) return "  .  ";
         if (idle < 24 * 3600) {
             return std.fmt.bufPrint(buf, "{d:0>2}:{d:0>2}", .{ @as(u64, @intCast(@divFloor(idle, 3600))), @as(u64, @intCast(@divFloor(@mod(idle, 3600), 60))) }) catch "";
@@ -376,6 +376,8 @@ test "idle text" {
     try t.expectEqualStrings("01:01", idleText(&buf, 1000, 1000 + 3661, 0));
     try t.expectEqualStrings(" old ", idleText(&buf, 1000, 1000 + 86400 + 5, 0));
     try t.expectEqualStrings(" old ", idleText(&buf, 100, 1000, 500)); // before the boot
+    // a damaged record against any clock: the difference must not overflow
+    try t.expectEqualStrings(" old ", idleText(&buf, std.math.minInt(i64) + 1, std.math.maxInt(i64), std.math.minInt(i64)));
 }
 
 test "time formats" {

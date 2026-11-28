@@ -129,6 +129,26 @@ pub fn build(b: *std.Build) void {
         },
     }) });
     test_step.dependOn(&runUnitTest(b, cli_unit, target).step);
+
+    // Fuzz tests (src/fuzz/, decision 0010): ordinary tests driven by our own mutation
+    // engine (src/fuzz/engine.zig; Zig 0.17.1's built-in fuzzer does not run). `zig build
+    // test` runs them as short regression tests, memory-capped like the others;
+    // `zig build fuzz` is the campaign and is meant to be started through tools/fuzz.sh,
+    // which sets the iteration count and caps memory and time. Never pass --fuzz.
+    {
+        const fuzz_t = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/fuzz.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "util_unix", .module = lib_mod }},
+            }),
+        });
+        test_step.dependOn(&runUnitTest(b, fuzz_t, target).step);
+        const campaign = b.addRunArtifact(fuzz_t);
+        campaign.has_side_effects = true; // never cached: every campaign really runs
+        b.step("fuzz", "Run the fuzz campaign (use tools/fuzz.sh)").dependOn(&campaign.step);
+    }
 }
 
 /// Some unit tests run shell scripts in the test process. On a systemd host,

@@ -177,7 +177,7 @@ test "what is held back between reads" {
 
 /// Idle column text: blank under a minute, `HH:MM` under a day, else `Nd`.
 pub fn idleText(buf: []u8, last: i64, now: i64) []const u8 {
-    const idle = now - last;
+    const idle = now -| last;
     if (idle < 60) return "     ";
     if (idle < 24 * 3600) {
         return std.fmt.bufPrint(buf, "{d:0>2}:{d:0>2}", .{ @as(u64, @intCast(@divFloor(idle, 3600))), @as(u64, @intCast(@divFloor(@mod(idle, 3600), 60))) }) catch "";
@@ -263,6 +263,7 @@ test "idle text" {
     try t.expectEqualStrings("     ", idleText(&buf, 100, 130));
     try t.expectEqualStrings("15:24", idleText(&buf, 0, 15 * 3600 + 24 * 60 + 5));
     try t.expectEqualStrings("3d", idleText(&buf, 0, 3 * 86400 + 5));
+    try t.expectEqualStrings("106751991167300d", idleText(&buf, std.math.minInt(i64), std.math.maxInt(i64))); // no overflow
 }
 
 test "long format of an unknown and a known account" {

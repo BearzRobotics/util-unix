@@ -4,3 +4,5 @@ zig-pkg/
 dist/
 __pycache__/
 docs/bugs/
+fuzz-findings/
+fuzz-current.bin
