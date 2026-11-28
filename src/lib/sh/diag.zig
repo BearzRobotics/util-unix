@@ -14,6 +14,7 @@
 //! style is this shell's own (decision 0008).
 
 const std = @import("std");
+const json = @import("../json.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Severity = enum { err, warning };
@@ -487,25 +488,11 @@ pub fn render(a: Allocator, d: *const Diagnostic, name: []const u8, style: Style
 }
 
 fn jsonStr(out: *std.ArrayList(u8), a: Allocator, s: []const u8) Allocator.Error!void {
-    try out.append(a, '"');
-    var i: usize = 0;
-    while (i < s.len) : (i += 1) switch (s[i]) {
-        '"' => try out.appendSlice(a, "\\\""),
-        '\\' => try out.appendSlice(a, "\\\\"),
-        '\n' => try out.appendSlice(a, "\\n"),
-        '\t' => try out.appendSlice(a, "\\t"),
-        0...8, 11...31 => |c| try out.print(a, "\\u{x:0>4}", .{c}),
-        // JSON is UTF-8, and a script need not be: what is not is replaced
-        0x80...0xff => {
-            const n: usize = std.unicode.utf8ByteSequenceLength(s[i]) catch 0;
-            if (n > 0 and n <= s.len - i and std.unicode.utf8ValidateSlice(s[i..][0..n])) {
-                try out.appendSlice(a, s[i..][0..n]);
-                i += n - 1;
-            } else try out.appendSlice(a, "\u{fffd}");
-        },
-        else => |c| try out.append(a, c),
-    };
-    try out.append(a, '"');
+    var w: std.Io.Writer.Allocating = .init(a);
+    defer w.deinit();
+    // writing to memory fails only for want of it
+    json.writeString(&w.writer, s) catch return error.OutOfMemory;
+    try out.appendSlice(a, w.written());
 }
 
 /// The catalog as the markdown of docs/sh-diagnostics.md.
@@ -632,5 +619,5 @@ test "JSON strings are UTF-8 whatever the script holds" {
     defer arena.deinit();
     var out: std.ArrayList(u8) = .empty;
     try jsonStr(&out, arena.allocator(), "a\xff\xc3\xa9\xc3\x01\"");
-    try std.testing.expectEqualStrings("\"a\u{fffd}\xc3\xa9\u{fffd}\\u0001\\\"\"", out.items);
+    try std.testing.expectEqualStrings("\"a\\ufffd\xc3\xa9\\ufffd\\u0001\\\"\"", out.items);
 }
