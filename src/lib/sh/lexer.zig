@@ -18,6 +18,7 @@ pub const Op = enum {
     lparen, // (
     rparen, // )
     dsemi, // ;;
+    semi_amp, // ;&
     less, // <
     great, // >
     dless, // <<
@@ -38,6 +39,7 @@ pub const Op = enum {
             .lparen => "(",
             .rparen => ")",
             .dsemi => ";;",
+            .semi_amp => ";&",
             .less => "<",
             .great => ">",
             .dless => "<<",

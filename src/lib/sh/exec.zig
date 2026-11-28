@@ -834,10 +834,16 @@ fn execCase(sh: *Shell, word: ast.Word, items: []const ast.CaseItem) u8 {
     defer arena.deinit();
     const a = arena.allocator();
     const w = expand.string(sh, a, word) catch |e| return xerr(sh, e);
-    for (items) |it| {
+    for (items, 0..) |it, first| {
         for (it.patterns) |pw| {
             const pat = expand.patternString(sh, a, pw) catch |e| return xerr(sh, e);
-            if (pattern.match(pat, w)) return if (it.body) |b| execNode(sh, b) else 0;
+            if (!pattern.match(pat, w)) continue;
+            var st: u8 = 0;
+            for (items[first..]) |run| {
+                if (run.body) |b| st = execNode(sh, b);
+                if (!run.falls_through or sh.flow != .none) break;
+            }
+            return st;
         }
     }
     return 0;

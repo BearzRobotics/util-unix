@@ -166,8 +166,11 @@ fn part(x: *X, p: ast.Part, text_flag: u8) Error!void {
 
 const ArithHost = struct {
     sh: *Shell,
+    line_text: [12]u8 = undefined,
     fn get(ctx: *anyopaque, name: []const u8) ?[]const u8 {
         const self: *ArithHost = @ptrCast(@alignCast(ctx));
+        // as in `$LINENO`: the line being run, whatever has been assigned
+        if (std.mem.eql(u8, name, "LINENO")) return std.fmt.bufPrint(&self.line_text, "{d}", .{self.sh.line}) catch null;
         return self.sh.getVar(name);
     }
     fn set(ctx: *anyopaque, name: []const u8, v: i64) bool {

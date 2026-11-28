@@ -729,7 +729,8 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             const t = if (sh.in_subshell and !sh.trap_set[n]) (sh.parent_traps[n] orelse own) else own;
             const cmd = t orelse continue;
             const q = quoteSingle(a, cmd) catch |oe| return sh.oom(oe);
-            out.print(a, "trap -- {s} {s}\n", .{ q, sys.signal_names[n] }) catch |oe| return sh.oom(oe);
+            var nb: [12]u8 = undefined;
+            out.print(a, "trap -- {s} {s}\n", .{ q, sys.signalName(n, &nb) orelse continue }) catch |oe| return sh.oom(oe);
         }
         _ = sh.out(out.items);
         return 0;
@@ -739,6 +740,28 @@ fn trapCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         for (sys.signal_names[1..]) |nm| out.print(a, "{s}\n", .{nm}) catch |oe| return sh.oom(oe);
         _ = sh.out(out.items);
         return 0;
+    }
+    // `trap -p condition...` (POSIX 2024) writes how each is set, the default too
+    if (!had_dd and std.mem.eql(u8, args[i], "-p")) {
+        i += 1;
+        if (i < args.len and std.mem.eql(u8, args[i], "--")) i += 1;
+        if (i >= args.len) return trapCmd(sh, a, args[0..1]);
+        var out: std.ArrayList(u8) = .empty;
+        var bad: u8 = 0;
+        for (args[i..]) |s| {
+            const n = sys.signalNumber(s) orelse {
+                sh.diagBareK(.bad_trap, s, std.fmt.allocPrint(a, "trap: {s}: bad trap", .{s}) catch "");
+                bad = 1;
+                continue;
+            };
+            const own = sh.traps[n];
+            const t = if (sh.in_subshell and !sh.trap_set[n]) (sh.parent_traps[n] orelse own) else own;
+            var nb: [12]u8 = undefined;
+            const q = if (t) |cmd| quoteSingle(a, cmd) catch |oe| return sh.oom(oe) else "-";
+            out.print(a, "trap -- {s} {s}\n", .{ q, sys.signalName(n, &nb) orelse s }) catch |oe| return sh.oom(oe);
+        }
+        _ = sh.out(out.items);
+        return bad;
     }
     if (!had_dd and args[i].len > 1 and args[i][0] == '-' and std.mem.indexOfAny(u8, args[i], " \t\n") == null) {
         sh.diagBareK(.illegal_option, args[i], std.fmt.allocPrint(a, "trap: Illegal option {s}", .{args[i]}) catch "");
@@ -866,6 +889,9 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         for (args[i][1..]) |c| switch (c) {
             'P' => physical = true,
             'L' => physical = false,
+            // POSIX 2024: with -P, fail if the new directory cannot be named.
+            // It always can be here: its path is used when getcwd cannot.
+            'e' => {},
             else => {
                 sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), "cd", "Illegal option -{c}", .{c});
                 return 2;
@@ -981,6 +1007,7 @@ fn escapes(a: Allocator, out: *std.ArrayList(u8), s: []const u8, is_b: bool) All
             'a' => try out.append(a, 7),
             'b' => try out.append(a, 8),
             'c' => return false,
+            'e' => try out.append(a, 27),
             'f' => try out.append(a, 12),
             'n' => try out.append(a, '\n'),
             'r' => try out.append(a, '\r'),
@@ -1099,17 +1126,27 @@ fn printfNumberK(sh: *Shell, s: []const u8, st: *u8, unsigned: bool) i64 {
     if (s[0] == '\'' or s[0] == '"') return if (s.len > 1) s[1] else 0;
     if (printfRanged(sh, s, st, unsigned)) |v| return v;
     if (arith.parseNumber(s)) |v| return v;
-    // partial conversion: the longest numeric prefix (leading blanks allowed)
+    // As strtoimax: the longest valid prefix, in the base its start names
+    // (`09` is 0 and `0778` is 077), and a failure.
     var end: usize = 0;
     while (end < s.len and (s[end] == ' ' or (s[end] >= '\t' and s[end] <= '\r'))) end += 1;
-    const num_start = end;
     if (end < s.len and (s[end] == '-' or s[end] == '+')) end += 1;
-    const digits_start = end;
-    while (end < s.len and std.ascii.isDigit(s[end])) end += 1;
+    var base: u8 = 10;
+    var digits_start = end;
+    if (end < s.len and s[end] == '0') {
+        base = 8;
+        // (`0x` with no digit after it is a 0 followed by an x)
+        if (end + 2 < s.len and (s[end + 1] == 'x' or s[end + 1] == 'X') and std.ascii.isHex(s[end + 2])) {
+            base = 16;
+            end += 2;
+            digits_start = end;
+        }
+    }
+    while (end < s.len) : (end += 1) _ = std.fmt.charToDigit(s[end], base) catch break;
     if (end > digits_start) {
         sh.diagCmdK(.printf_number, s, "printf", "{s}: not completely converted", .{s});
         st.* = 1;
-        return num.parseInt(i64, s[num_start..end], 10) catch 0;
+        return printfRanged(sh, s[0..end], st, unsigned) orelse 0;
     }
     sh.diagCmdK(.printf_number, s, "printf", "{s}: expected numeric value", .{s});
     st.* = 1;
@@ -1234,10 +1271,16 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 if (k < fmt.len and fmt[k] == '*') {
                     const v = if (ai < rest.len) printfNumber(sh, rest[ai], &st) else 0;
                     ai += 1;
-                    p = if (v < 0) 0 else @intCast(v);
+                    // a negative one counts as none (C, and so POSIX)
+                    if (v >= 0) {
+                        p = @intCast(v);
+                        prec = p;
+                    }
                     k += 1;
-                } else while (k < fmt.len and std.ascii.isDigit(fmt[k])) : (k += 1) p = p *| 10 +| (fmt[k] - '0');
-                prec = p;
+                } else {
+                    while (k < fmt.len and std.ascii.isDigit(fmt[k])) : (k += 1) p = p *| 10 +| (fmt[k] - '0');
+                    prec = p;
+                }
             }
             if (k >= fmt.len) {
                 sh.diagCmdK(.usage, null, "printf", "%: invalid directive", .{});
@@ -1298,7 +1341,9 @@ fn printfCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     }
                     // `%#.0o` of zero is still "0"
                     if (prec) |p| padDigits(a, &digits, p, v == 0 and !(alt and conv == 'o')) catch |oe| return sh.oom(oe);
-                    const pre: []const u8 = if (alt and v != 0) (if (conv == 'x') "0x" else if (conv == 'X') "0X" else if (conv == 'o') "0" else "") else "";
+                    // `#` makes octal start with a 0, which the precision may have done
+                    const zero_first = digits.items.len > 0 and digits.items[0] == '0';
+                    const pre: []const u8 = if (alt and v != 0) (if (conv == 'x') "0x" else if (conv == 'X') "0X" else if (conv == 'o' and !zero_first) "0" else "") else "";
                     padNum(a, &body, pre, digits.items, width, left, zero and prec == null) catch |oe| return sh.oom(oe);
                     width = 0;
                 },
@@ -1380,6 +1425,7 @@ fn padNum(a: Allocator, body: *std.ArrayList(u8), sign: []const u8, digits: []co
 
 fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var raw = false;
+    var delim: u8 = '\n';
     var i: usize = 1;
     while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
         if (std.mem.eql(u8, args[i], "--")) {
@@ -1389,6 +1435,20 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         var j: usize = 1;
         while (j < args[i].len) : (j += 1) switch (args[i][j]) {
             'r' => raw = true,
+            'd' => {
+                // POSIX 2024: the line ends at this byte (a NUL if empty)
+                var arg = args[i][j + 1 ..];
+                if (arg.len == 0) {
+                    if (i + 1 >= args.len) {
+                        sh.diagCmdK(.usage, null, "read", "No arg for -d option", .{});
+                        return 2;
+                    }
+                    i += 1;
+                    arg = args[i];
+                }
+                delim = if (arg.len > 0) arg[0] else 0;
+                break;
+            },
             'p' => {
                 // `read -p prompt` is not POSIX; dash and FreeBSD sh accept it and
                 // write the prompt to standard error when reading a terminal.
@@ -1438,7 +1498,7 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 
         const c = ch[0];
         // as in script text and $(...): what a program gets would stop there
-        if (c == 0) continue;
+        if (c == 0 and delim != 0) continue;
         if (escaped) {
             escaped = false;
             if (c == '\n') continue;
@@ -1450,7 +1510,7 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             escaped = true;
             continue;
         }
-        if (c == '\n') break;
+        if (c == delim) break;
         bytes.append(a, c) catch |oe| return sh.oom(oe);
         esc.append(a, false) catch |oe| return sh.oom(oe);
     }
@@ -1488,8 +1548,12 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
             if (val.items.len > 0) {
                 const li = pos + val.items.len - 1;
                 if (!esc.items[li] and isIfs(ifs, b[li]) and !isWs(ifs, b[li])) {
+                    // only when what precedes is one field: any delimiter in
+                    // it, white space included, means there are several
+                    var before = val.items.len - 1;
+                    while (before > 0 and !esc.items[pos + before - 1] and isWs(ifs, b[pos + before - 1])) before -= 1;
                     var other = false;
-                    for (val.items[0 .. val.items.len - 1], 0..) |ch, k| if (!esc.items[pos + k] and isIfs(ifs, ch) and !isWs(ifs, ch)) {
+                    for (val.items[0..before], 0..) |ch, k| if (!esc.items[pos + k] and isIfs(ifs, ch)) {
                         other = true;
                     };
                     if (!other) {
@@ -1731,6 +1795,9 @@ fn evalCounted(t: *T, args: []const []const u8) TestErr!bool {
         },
         3 => {
             if (T.binop(args[1])) |op| return t.evalBin(op, args[0], args[2]);
+            // `-a` and `-o` between two strings, whatever the strings are
+            if (eq(u8, args[1], "-a")) return args[0].len > 0 and args[2].len > 0;
+            if (eq(u8, args[1], "-o")) return args[0].len > 0 or args[2].len > 0;
             if (eq(u8, args[0], "!")) return !(try evalCounted(t, args[1..]));
             if (eq(u8, args[0], "(") and eq(u8, args[2], ")")) return args[1].len > 0;
         },
@@ -1850,9 +1917,16 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 
 fn hashCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
-    if (i < args.len and std.mem.eql(u8, args[i], "-r")) {
+    while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--")) {
+            i += 1;
+            break;
+        }
+        for (args[i][1..]) |c| if (c != 'r') {
+            sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), "hash", "Illegal option -{c}", .{c});
+            return 2;
+        };
         sh.clearHash();
-        i += 1;
     }
     if (i >= args.len and args.len == 1) {
         const keys = sortedKeys(a, sh.hash) catch |oe| return sh.oom(oe);
@@ -1903,18 +1977,26 @@ fn aliasCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     return st;
 }
 
-fn unaliasCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
+fn unaliasCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var st: u8 = 0;
-    for (args[1..]) |arg| {
-        if (std.mem.eql(u8, arg, "-a")) {
-            var it = sh.aliases.iterator();
-            while (it.next()) |e| {
-                sh.gpa.free(e.key_ptr.*);
-                sh.gpa.free(e.value_ptr.*);
-            }
-            sh.aliases.clearRetainingCapacity();
-            continue;
+    var i: usize = 1;
+    while (i < args.len and args[i].len > 1 and args[i][0] == '-') : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--")) {
+            i += 1;
+            break;
         }
+        for (args[i][1..]) |c| if (c != 'a') {
+            sh.diagCmdK(.illegal_option, optText(a, "-{c}", .{c}), "unalias", "Illegal option -{c}", .{c});
+            return 2;
+        };
+        var it = sh.aliases.iterator();
+        while (it.next()) |e| {
+            sh.gpa.free(e.key_ptr.*);
+            sh.gpa.free(e.value_ptr.*);
+        }
+        sh.aliases.clearRetainingCapacity();
+    }
+    for (args[i..]) |arg| {
         if (sh.aliases.fetchRemove(arg)) |kv| {
             sh.gpa.free(kv.key);
             sh.gpa.free(kv.value);
@@ -2036,11 +2118,12 @@ fn killCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 return 2;
             };
             const s: i64 = if (n > 128) n - 128 else n;
-            if (s <= 0 or s >= sys.signal_names.len) {
+            if (s <= 0 or s >= sys.nsig or (s >= sys.signal_names.len and s < sys.rtmin)) {
                 sh.diagCmdK(.kill_error, null, "kill", "invalid signal number or exit status: {s}", .{args[i + 1]});
                 return 2;
             }
-            out.print(a, "{s}\n", .{sys.signal_names[@intCast(s)]}) catch |oe| return sh.oom(oe);
+            var nb: [12]u8 = undefined;
+            out.print(a, "{s}\n", .{sys.signalName(@intCast(s), &nb).?}) catch |oe| return sh.oom(oe);
         } else for (sys.signal_names[1..]) |nm| out.print(a, "{s}\n", .{nm}) catch |oe| return sh.oom(oe);
         _ = sh.out(out.items);
         return 0;
@@ -2140,7 +2223,8 @@ fn umaskCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
 fn ulimitCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var i: usize = 1;
     var res: u32 = 1; // -f
-    var scale: u64 = 1024;
+    // -f is the default, counted in blocks of 512 bytes (POSIX)
+    var scale: u64 = 512;
     var hard = false;
     var soft_set = false;
     var all = false;

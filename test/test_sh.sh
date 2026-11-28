@@ -18,6 +18,7 @@ if [ -n "${SHCMP_DUMP:-}" ]; then
     # tools/sh-gold.py reads the snippets from here; the .meta file has the
     # description, the flags and the note of the case (tab separated)
     c() { SHCMP_N=$((SHCMP_N + 1)); printf '%s\n' "$2" > "$SHCMP_DUMP/${SHCMP_EXEMPT:+x_}case$SHCMP_N.sh"; printf '%s\t%s\t%s\n' "$1" "${3:-}" "${4:-}" > "$SHCMP_DUMP/${SHCMP_EXEMPT:+x_}case$SHCMP_N.meta"; }
+    must() { :; }
     cx() { SHCMP_N=$((SHCMP_N + 1)); printf '%s\n' "$2" > "$SHCMP_DUMP/x_case$SHCMP_N.sh"; printf '%s\t%s\t%s\n' "$1" "${3:-}" "${4:-}" > "$SHCMP_DUMP/x_case$SHCMP_N.meta"; }
 fi
 
@@ -572,6 +573,35 @@ c "a function may unset itself while it runs" 'eval "g() { unset -f g; for w in 
 c "a function defined inside another outlives it" 'eval "o() { i() { echo inner \$1; }; }"; o; unset -f o; i 1; eval "i() { i() { echo again; }; echo second; }"; i; i'
 c "a function redefined by a trap or an eval it is running" 'h() { eval "h() { echo two; }"; echo one; h; echo \"back in one\"; }; h; h'
 c "redefining functions does not use more and more memory" 'i=0; while [ $i -lt 30000 ]; do eval "f() { echo some text to be kept in the body $i; }"; i=$((i+1)); done; . '"$TEST_TMP"'/size.sh' P
+c "ulimit with no resource counts as -f does" '(ulimit 100; ulimit -f; ulimit; ulimit -H -f)'
+c "printf reads an incomplete number in its own base" 'for v in 09 0778 0x1fg 0x -09; do printf "%d " "$v" 2>/dev/null; echo $?; done; printf "%x\n" 0778 2>/dev/null' e
+c "LINENO is the same in arithmetic" ':
+echo "$LINENO $((LINENO))"; LINENO=50; echo "$((LINENO > 40))"' P
+c "a real-time signal can be trapped, sent and named" 'trap "echo got" 34; kill -34 $$; trap "echo rt" RTMIN+1; kill -s RTMIN+1 $$; kill -l 34; sleep 5 & kill -64 $!; wait $!; echo $?' Pe
+c "read keeps a delimiter after several fields" 'for l in "a b : " "a b  :  " "x : " "A-B-"; do echo "$l" | { IFS=": -" read -r x; echo "[$x]"; }; done'
+must "test -a and -o between any two strings" 'x="!"; [ "$x" -a "$x" ]; echo $?; [ a -a "(" ]; echo $?; [ "" -o "(" ]; echo $?; [ "!" -a "" ]; echo $?' "0
+0
+0
+1
+rc=0"
+c "printf takes a negative star precision as none" 'printf "[%.*s][%.*b][%.*d]\n" -1 abc -2 def -1 7'
+c "printf alternate octal adds one zero at most" 'printf "%#.3o [%#5.3o] %#.1o %#o %#o\n" 5 5 8 8 0'
+c "printf knows backslash e" 'printf "\e[1m|%b\n" "\e" | od -An -tx1' P
+cx "unalias and hash take options" 'alias a=b; unalias -- a; echo $?; hash -- ls; echo $?; unalias -Z 2>/dev/null; echo $?; hash -Z 2>/dev/null; echo $?' P
+must "case falls through at semicolon-ampersand" 'for v in a b c; do case $v in a) echo 1 ;& b) echo 2 ;; c) echo 3 ;& esac; done' "1
+2
+2
+3
+rc=0"
+must "read takes another delimiter" 'printf "a b:c\nd:" | { read -r -d : x y; echo "[$x][$y]"; read -rd: z; echo "[$z]"; }' "[a][b]
+[c
+d]
+rc=0"
+must "trap -p writes a condition" 'trap "echo bye" INT; trap -p INT; trap -p TERM; trap - INT' "trap -- 'echo bye' INT
+trap -- - TERM
+rc=0"
+must "cd takes -e with -P" 'cd -P -e / && pwd' "/
+rc=0"
 c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
 c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
 c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'

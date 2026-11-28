@@ -17,3 +17,11 @@ oils	builtin-trap.test.sh	trap 1 is equivalent to SIGHUP; HUP is equivalent to S
 oils	command_.test.sh	filling $PATH cache, then deleting command	a remembered command that disappeared is searched again (FreeBSD sh, bash); dash keeps the stale entry and fails with 127
 oils	redirect.test.sh	&>> appends stdout and stderr	&>> is not POSIX; the corpus case exits 1 on dash by design
 oils	toysh-posix.test.sh	no shebang	POSIX.1-2024 trap: a subshell lists the parent's traps (dash and FreeBSD sh print nothing)
+oils	builtin-read.test.sh	read -d : (colon-separated records)	read -d is in POSIX.1-2024; dash lacks it (CONF-12)
+oils	builtin-read.test.sh	read -d '' (null-separated records)	read -d is in POSIX.1-2024; dash lacks it (CONF-12)
+oils	builtin-read.test.sh	read -d when there's no delimiter	read -d is in POSIX.1-2024; dash lacks it (CONF-12)
+oils	builtin-read.test.sh	read -rd	read -d is in POSIX.1-2024; dash lacks it (CONF-12)
+oils	case_.test.sh	Case statement with ;&	;& is in POSIX.1-2024; dash lacks it (CONF-12)
+oils	builtin-trap-bash.test.sh	trap -p in child is BUGGY in bash	trap -p is in POSIX.1-2024; dash lacks it (CONF-12)
+oils	builtin-bracket.test.sh	operator/operand ambiguity with ]	POSIX three-argument rule: -a is the binary operator, as in bash; dash errors (CONF-07)
+oils	builtin-bracket.test.sh	operator/operand ambiguity with -a	POSIX three-argument rule: -a is the binary operator, as in bash; dash errors (CONF-07)

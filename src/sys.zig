@@ -715,17 +715,42 @@ pub const signal_names = [_][]const u8{
     "XCPU",   "XFSZ", "VTALRM", "PROF", "WINCH", "IO",   "PWR",  "SYS",
 };
 
-/// Signal number for a name ("INT", "SIGINT", case-insensitive) or a decimal
-/// number; null when unknown.
+/// The first and last real-time signals as programs know them (the C library
+/// keeps the kernel's first ones for itself).
+pub const rtmin: u8 = 34;
+pub const rtmax: u8 = nsig - 1;
+
+/// The name of signal `sig`, without "SIG"; real-time ones as `RTMIN+n` in
+/// their lower half and `RTMAX-n` above. Null when `sig` has no name.
+pub fn signalName(sig: usize, buf: *[12]u8) ?[]const u8 {
+    if (sig < signal_names.len) return signal_names[sig];
+    if (sig < rtmin or sig > rtmax) return null;
+    if (sig == rtmin) return "RTMIN";
+    if (sig == rtmax) return "RTMAX";
+    const half = (rtmax - rtmin) / 2;
+    return (if (sig - rtmin <= half) std.fmt.bufPrint(buf, "RTMIN+{d}", .{sig - rtmin}) else std.fmt.bufPrint(buf, "RTMAX-{d}", .{rtmax - sig})) catch null;
+}
+
+/// Signal number for a name ("INT", "SIGINT", "RTMIN+3", case-insensitive) or
+/// a decimal number; null when unknown.
 pub fn signalNumber(name: []const u8) ?u8 {
     if (name.len > 0 and std.ascii.isDigit(name[0])) {
         const n = num.parseInt(u8, name, 10) catch return null;
-        return if (n < signal_names.len) n else null;
+        return if (n < nsig) n else null;
     }
     var nm = name;
     if (nm.len > 3 and std.ascii.eqlIgnoreCase(nm[0..3], "SIG")) nm = nm[3..];
     for (signal_names, 0..) |s, i| {
         if (std.ascii.eqlIgnoreCase(s, nm)) return @intCast(i);
+    }
+    for ([_]struct { []const u8, u8, u8 }{ .{ "RTMIN", rtmin, '+' }, .{ "RTMAX", rtmax, '-' } }) |rt| {
+        if (nm.len < rt[0].len or !std.ascii.eqlIgnoreCase(nm[0..rt[0].len], rt[0])) continue;
+        const rest = nm[rt[0].len..];
+        if (rest.len == 0) return rt[1];
+        if (rest.len < 2 or rest[0] != rt[2] or !std.ascii.isDigit(rest[1])) return null;
+        const off = num.parseInt(u8, rest[1..], 10) catch return null;
+        if (off > rtmax - rtmin) return null;
+        return if (rt[2] == '+') rt[1] + off else rt[1] - off;
     }
     return null;
 }

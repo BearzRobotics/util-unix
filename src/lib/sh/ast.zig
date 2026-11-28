@@ -111,6 +111,8 @@ pub const AndOrOp = enum { and_if, or_if };
 pub const CaseItem = struct {
     patterns: []const Word,
     body: ?*const Node,
+    /// ended by `;&`: the next item's commands run too
+    falls_through: bool = false,
 };
 
 pub const Kind = union(enum) {

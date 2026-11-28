@@ -438,7 +438,7 @@ pub const Parser = struct {
         const n = self.look(1);
         const n2 = self.look(2);
         const r: struct { Op, usize } = switch (c) {
-            ';' => if (n == ';') .{ .dsemi, 2 } else .{ .semi, 1 },
+            ';' => if (n == ';') .{ .dsemi, 2 } else if (n == '&') .{ .semi_amp, 2 } else .{ .semi, 1 },
             '&' => if (n == '&') .{ .and_if, 2 } else .{ .amp, 1 },
             '|' => if (n == '|') .{ .or_if, 2 } else .{ .pipe, 1 },
             '(' => .{ .lparen, 1 },
@@ -1066,7 +1066,7 @@ pub const Parser = struct {
 
     fn isTerminator(t: Token) bool {
         switch (t.tag) {
-            .op => |o| return o == .rparen or o == .dsemi,
+            .op => |o| return o == .rparen or o == .dsemi or o == .semi_amp,
             .word => |w| {
                 const r = lexer.reservedOf(w) orelse return false;
                 return switch (r) {
@@ -1344,7 +1344,7 @@ pub const Parser = struct {
                     if (!(c.tag == .op and c.tag.op == .rparen)) return self.unexpected(c, ")");
                     return self.parseTrailingRedirs(try self.mk(t.line, .{ .subshell = body }), t.line);
                 },
-                .rparen, .semi, .amp, .pipe, .and_if, .or_if, .dsemi => return self.unexpected(t, null),
+                .rparen, .semi, .amp, .pipe, .and_if, .or_if, .dsemi, .semi_amp => return self.unexpected(t, null),
                 else => {},
             },
             .eof, .newline => return self.unexpected(t, null),
@@ -1534,7 +1534,8 @@ pub const Parser = struct {
             try items.append(self.a, .{ .patterns = try pats.toOwnedSlice(self.a), .body = body });
             try self.aliasAt();
             const e = try self.peek();
-            if (e.tag == .op and e.tag.op == .dsemi) {
+            if (e.tag == .op and (e.tag.op == .dsemi or e.tag.op == .semi_amp)) {
+                if (e.tag.op == .semi_amp) items.items[items.items.len - 1].falls_through = true;
                 _ = try self.next();
                 continue;
             }

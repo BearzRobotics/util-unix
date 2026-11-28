@@ -163,6 +163,20 @@ c() {
     fi
 }
 
+# must DESCRIPTION SNIPPET EXPECTED: our output and status ("...rc=N") must be
+# exactly EXPECTED. For behaviour dash does not have: `c` accepts whatever
+# agrees with dash, a failure like dash's included.
+must() {
+    base="$TEST_TMP/case"
+    shcmp_exec "$OURS" "$2" "$base.ours"
+    got="$(cat "$base.ours.out"; echo "rc=$(cat "$base.ours.rc")")"
+    if [ "$got" = "$3" ]; then
+        PASS=$((PASS + 1)); printf 'PASS %s\n' "$1"
+    else
+        FAIL=$((FAIL + 1)); printf 'FAIL %s\n     snippet: %s\n     OURS  : %s\n     WANT  : %s\n' "$1" "$2" "$(printf '%s' "$got" | tr '\n' '~')" "$(printf '%s' "$3" | tr '\n' '~')"
+    fi
+}
+
 skip_case() {
     SKIP=$((SKIP + 1)); printf 'SKIP %s\n' "$1"
 }

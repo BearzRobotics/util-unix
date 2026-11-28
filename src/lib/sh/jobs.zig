@@ -976,7 +976,7 @@ fn writeNode(a: Allocator, out: *std.ArrayList(u8), node: *const ast.Node) Alloc
                 }
                 try out.appendSlice(a, ") ");
                 try writeBody(a, out, it.body);
-                try out.appendSlice(a, ";; ");
+                try out.appendSlice(a, if (it.falls_through) ";& " else ";; ");
             }
             try out.appendSlice(a, "esac");
         },
