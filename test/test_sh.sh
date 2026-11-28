@@ -577,7 +577,13 @@ c "ulimit with no resource counts as -f does" '(ulimit 100; ulimit -f; ulimit; u
 c "printf reads an incomplete number in its own base" 'for v in 09 0778 0x1fg 0x -09; do printf "%d " "$v" 2>/dev/null; echo $?; done; printf "%x\n" 0778 2>/dev/null' e
 c "LINENO is the same in arithmetic" ':
 echo "$LINENO $((LINENO))"; LINENO=50; echo "$((LINENO > 40))"' P
-c "a real-time signal can be trapped, sent and named" 'trap "echo got" 34; kill -34 $$; trap "echo rt" RTMIN+1; kill -s RTMIN+1 $$; kill -l 34; sleep 5 & kill -64 $!; wait $!; echo $?' Pe
+# (not compared: musl, and so the reference shells on it, counts real-time
+# signals from 35; we use the numbers glibc and systemd do)
+must "a real-time signal can be trapped, sent and named" 'trap "echo got" 34; kill -34 $$; trap "echo rt" RTMIN+1; kill -s RTMIN+1 $$; kill -l 34; sleep 5 & kill -64 $!; wait $!; echo $?' "got
+rt
+RTMIN
+192
+rc=0"
 c "read keeps a delimiter after several fields" 'for l in "a b : " "a b  :  " "x : " "A-B-"; do echo "$l" | { IFS=": -" read -r x; echo "[$x]"; }; done'
 must "test -a and -o between any two strings" 'x="!"; [ "$x" -a "$x" ]; echo $?; [ a -a "(" ]; echo $?; [ "" -o "(" ]; echo $?; [ "!" -a "" ]; echo $?' "0
 0
