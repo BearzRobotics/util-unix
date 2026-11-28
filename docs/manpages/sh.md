@@ -163,19 +163,21 @@ Special builtins (an error in one exits a non-interactive shell; their variable 
 | eval exec exit | `exec` with only redirections makes them permanent |
 | export readonly | `-p` lists |
 | return set shift | `set -o` names listed under OPTIONS |
-| times trap unset | `trap` accepts signal names and numbers and `EXIT`; `trap -l` lists the signals; `trap` with no operands in a subshell reports the parent's traps (POSIX.1-2024) |
+| times trap unset | `trap` accepts signal names and numbers and `EXIT`; `trap -l` lists the signals; `trap` with no operands in a subshell reports the parent's traps, and `trap -p [condition...]` writes how each is set (POSIX.1-2024). Real-time signals are 34 to 64, `RTMIN`+n and `RTMAX`-n |
 
 Regular builtins:
 
 | Name | Notes |
 |------|-------|
 | alias unalias | expansion at every command and reserved-word position; a value ending in a blank makes the next word eligible too |
-| cd pwd | `-L` `-P`, CDPATH, OLDPWD |
+| cd pwd | `-L` `-P` (`cd -e` is accepted), CDPATH, OLDPWD |
 | command type hash | `command -v -V -p` |
 | echo printf | `echo` is dash's (XSI escapes, only `-n`); `printf` supports `d i u o x X c s b %` and the floating conversions `e E f F g G a A` (exact, round-half-even as C), flags, width, precision |
-| getopts read test [ | the POSIX argument-count rules for `test` |
+| getopts read test [ | `read` takes `-r`, `-d delim` and `-p prompt`; the POSIX argument-count rules for `test`, with `-a` and `-o` as binary operators between any two strings |
 | kill wait umask ulimit jobs fg bg fc | `umask` takes an octal or a symbolic mode (`umask u=rwx,g=rx,o=`, `-S` prints it); `ulimit` supports -c -d -f -n -s -t -v -m, -S, -H |
 | true false local | `local` is not POSIX; see CHECK MODE |
+
+In a `case`, a list ended by `;&` instead of `;;` goes on into the next one (POSIX.1-2024).
 
 # ENVIRONMENT
 
@@ -204,7 +206,7 @@ The consequences of errors follow POSIX XCU 2.8.1. In a non-interactive shell a 
 
 # DIAGNOSTICS
 
-Every message has a code SHxxxx and a kind. The default one-line wording equals dash's; the rich style looks like this:
+Every message has a code SHxxxx and a kind. The default one-line wording follows dash's (the table below gives dash's own, which a few messages word differently); the rich style looks like this:
 
     sh: script.sh:12:1: error[SH1007]: unexpected 'fi', expected 'done' to close the 'while' started at 9:1
        |
@@ -224,20 +226,20 @@ Catalog (what each code means, an example that triggers it, and the dash message
 |------|------|--------|---------|-----------|
 | SH1001 | unexpected_token | 2 | `echo )` | `Syntax error: ")" unexpected` |
 | SH1002 | unterminated_quote | 2 | `echo 'abc` | `Syntax error: Unterminated quoted string` |
-| SH1003 | unterminated_heredoc | - | `cat <<EOF ; body` | `warning: here-document at line 1 delimited by end-of-file (wanted `EOF')` |
+| SH1003 | unterminated_heredoc | - | `cat <<EOF ; body` | `` warning: here-document at line 1 delimited by end-of-file (wanted `EOF') `` |
 | SH1004 | unterminated_command_substitution | 2 | `echo $(date` | `Syntax error: end of file unexpected (expecting ")")` |
 | SH1005 | unterminated_arithmetic | 2 | `echo $((1+2)` | `Syntax error: Missing '))'` |
 | SH1006 | bad_substitution | 2 | `echo ${x/a/b}` | `Bad substitution` |
 | SH1007 | mismatched_closer | 2 | `while true; do ;   echo x ; fi` | `Syntax error: "fi" unexpected (expecting "done")` |
 | SH1008 | bad_for_variable | 2 | `for 1x in a; do :; done` | `Syntax error: Bad for loop variable` |
-| SH1009 | bad_function_name | 2 | `1f() { :; }` | `Syntax error: Bad function name` |
+| SH1009 | bad_function_name | 2 | `eval() { :; }` | `Syntax error: Bad function name` |
 | SH1010 | missing_redirect_target | 2 | `echo >` | `Syntax error: newline unexpected` |
 | SH2001 | division_by_zero | 2 | `echo $((1/0))` | `arithmetic expression: division by zero: "1/0"` |
 | SH2002 | arithmetic_syntax | 2 | `echo $((1+))` | `arithmetic expression: expecting primary: "1+"` |
 | SH2003 | illegal_number | 2 | `x=abc; echo $((x+1))` | `Illegal number: abc` |
 | SH2004 | unset_variable | 2 | `set -u; echo $x` | `x: parameter not set` |
 | SH2005 | parameter_error | 2 | `echo ${x?need x}` | `x: need x` |
-| SH2006 | cannot_assign | 2 | `echo ${1=x}` | `1: cannot assign in this way` |
+| SH2006 | cannot_assign | 2 | `echo ${1=x}` | `1: bad variable name` |
 | SH2007 | readonly_assignment | 2 | `readonly r=1; r=2` | `r: is read only` |
 | SH3001 | cannot_open | 2 | `cat < missing.txt` | `cannot open missing.txt: No such file` |
 | SH3002 | cannot_create | 2 | `echo x > /nonexistent/f` | `cannot create /nonexistent/f: Directory nonexistent` |
@@ -246,27 +248,27 @@ Catalog (what each code means, an example that triggers it, and the dash message
 | SH3005 | bad_fd_number | 2 | `echo hi >&file` | `Syntax error: Bad fd number` |
 | SH4001 | not_found | 127 | `nosuchcommand` | `nosuchcommand: not found` |
 | SH4002 | not_executable | 126 | `./notexecutable` | `./notexecutable: Permission denied` |
-| SH4003 | cannot_fork | 2 | `(ulimit -u 1; : \| :)` | `Cannot fork` |
-| SH4004 | cannot_open_script | 127 | `sh nosuch.sh` | `Can't open nosuch.sh` |
+| SH4003 | cannot_fork | 2 | `(ulimit -n 3; : \| :)` | `Pipe call failed` |
+| SH4004 | cannot_open_script | 127 | `sh nosuch.sh` | `cannot open nosuch.sh: No such file` |
 | SH4005 | errexit_exit | - | `set -e ; false ; echo unreachable` | `(none: dash exits silently)` |
-| SH4006 | stopped_jobs | 1 | `exit` with a stopped job | `You have stopped jobs.` |
+| SH4006 | stopped_jobs | 1 | `(interactive) sleep 9 ^Z; exit` | `You have stopped jobs.` |
 | SH5001 | illegal_option | 2 | `set -Z` | `set: Illegal option -Z` |
 | SH5002 | cannot_shift | 2 | `set -- a; shift 2` | `shift: can't shift that many` |
 | SH5003 | cannot_cd | 2 | `cd /nonexistent` | `cd: can't cd to /nonexistent` |
 | SH5004 | bad_trap | 1 | `trap : NOSUCH` | `trap: NOSUCH: bad trap` |
 | SH5005 | bad_variable_name | 2 | `export 1x=3` | `export: 1x: bad variable name` |
 | SH5006 | test_error | 2 | `[ a b ]` | `[: a: unexpected operator` |
-| SH5007 | printf_number | 1 | `printf '%d\ ; ' abc` | `printf: abc: expected numeric value` |
+| SH5007 | printf_number | 1 | `printf '%d\n' abc` | `printf: abc: expected numeric value` |
 | SH5008 | kill_error | 2 | `kill -s NOSUCH 1` | `kill: invalid signal number or name: NOSUCH` |
-| SH5009 | usage | 2 | `getopts a` | `getopts: usage: getopts optstring var [arg]` |
+| SH5009 | usage | 2 | `getopts a` | `getopts: Usage: getopts optstring var [arg...]` |
 | SH5010 | io_error | 1 | `echo hi >&-` | `echo: echo: I/O error` |
-| SH5011 | alias_not_found | 1 | `unalias nosuch` | `unalias: nosuch: not found` |
-| SH5012 | bad_limit | 1 | `ulimit -n 99999999999` | `ulimit: bad limit: Operation not permitted` |
+| SH5011 | alias_not_found | 1 | `unalias nosuch` | `unalias: nosuch not found` |
+| SH5012 | bad_limit | 2 | `ulimit -n 2000000000` | `ulimit: error setting limit (Operation not permitted)` |
 | SH5013 | not_in_function | 2 | `local x=1` | `local: not in a function` |
 | SH5014 | no_such_job | 1 | `fg` | `fg: No current job` |
-| SH5015 | no_job_control | 1 | `sh -i < file` | `can't access tty; job control turned off` |
-| SH5016 | history_error | 1 | `fc -l` (not interactive) | `fc: history not active` |
-| SH5017 | ambiguous_job | 1 | `fg %sl` | `fg: %sl: Ambiguous` |
+| SH5015 | no_job_control | 1 | `(no terminal) sh -i < script.sh` | `can't access tty; job control turned off` |
+| SH5016 | history_error | 1 | `fc -l` | `fc: not found` |
+| SH5017 | ambiguous_job | 1 | `sleep 7 & sleep 8 & fg %sl` | `fg: %sl: Ambiguous` |
 | SH6001 | invocation_option | 2 | `sh -Z` | `Illegal option -Z` |
 | SH6002 | missing_argument | 2 | `sh -c` | `-c requires an argument` |
 | SH7001 | lint_unquoted_expansion | 1 | `rm $file` | `(none)` |
@@ -278,7 +280,7 @@ Catalog (what each code means, an example that triggers it, and the dash message
 | SH7007 | lint_local | 1 | `f() { local x=1; }` | `(accepted)` |
 | SH7008 | lint_echo_option | 1 | `echo -e "a\tb"` | `(prints -e)` |
 | SH7009 | lint_double_equals | 1 | `[ "$a" == b ]` | `[: a: unexpected operator` |
-| SH9000 | other | - | `-` | - |
+| SH9000 | other | - | - | - |
 
 # DIFFERENCES FROM DASH
 
@@ -286,7 +288,7 @@ Each row is an improvement of a message or a deliberate choice; stdout and the e
 
 | Where | dash | sh |
 |-------|------|----|
-| Rich style (terminal) | one line `sh: 1: msg` | the multi-line message above; `--diagnostics=posix` restores dash's wording exactly |
+| Rich style (terminal) | one line `sh: 1: msg` | the multi-line message above; `--diagnostics=posix` gives one-line messages in dash's wording |
 | `set -e` exit | silent | rich and json styles name the command and line (SH4005); posix style is silent |
 | Unterminated quote or `$(` | `Syntax error: Unterminated quoted string` | rich style names where it was opened |
 | `.` with arguments | positional parameters unchanged | arguments become the positional parameters during the file (as POSIX XCU dot, bash, FreeBSD) |

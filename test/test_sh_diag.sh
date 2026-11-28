@@ -83,6 +83,28 @@ run_case 'echo )' json
 grep -q '"shellcheck":"SC1089"' "$TMP/err" && ok "json diagnostic carries the shellcheck id" || bad "json diagnostic lacks the shellcheck id"
 run_case 'nosuch' json
 grep -q '"shellcheck":null' "$TMP/err" && ok "json diagnostic shellcheck null when none" || bad "json diagnostic shellcheck null"
+# every example in the catalog that can be run as it stands raises its code
+if command -v python3 > /dev/null 2>&1; then
+    python3 -I -c 'import json,sys
+for l in open(sys.argv[1]):
+    e = json.loads(l)
+    # not these: they need a terminal or an invocation, or only describe one
+    if e["code"] not in ("SH4004","SH4006","SH5015","SH5016","SH6001","SH6002","SH9000"):
+        print(e["code"] + "\t" + e["bad"].replace("\\", "\\\\").replace("\n", "\\n"))' "$TMP/catalog.json" > "$TMP/examples"
+    while IFS='	' read -r code snippet; do
+        snippet=$(printf '%b' "$snippet")
+        case "$code" in
+        SH4002) rm -rf "$TMP/w"; mkdir -p "$TMP/w"; : > "$TMP/w/notexecutable"
+                (cd "$TMP/w" && SH_DIAGNOSTICS= NO_COLOR=1 "$OURS" --diagnostics=json -c "$snippet" > "$TMP/out" 2> "$TMP/err" < /dev/null) ;;
+        *) run_case "$snippet" json "$code" ;;
+        esac
+        if grep -q "\"code\":\"$code\"" "$TMP/err"; then ok "the example of $code raises it"; else bad "the catalog example of $code raises another diagnostic"; fi
+    done < "$TMP/examples"
+    if python3 -I "$HERE/../tools/sh-diag-table.py" "$OURS" --check; then ok "the manual's diagnostics table is current"; else bad "docs/manpages/sh.md is stale: python3 -I tools/sh-diag-table.py zig-out/bin/sh"; fi
+else
+    echo "SKIP catalog examples and the manual's table (needs python3)"
+fi
+
 "$OURS" --diagnostics-catalog > "$TMP/cat.md"
 cmp -s "$TMP/cat.md" "$HERE/../docs/sh-diagnostics.md" && ok "docs/sh-diagnostics.md is current" || bad "docs/sh-diagnostics.md is stale: regenerate with sh --diagnostics-catalog"
 

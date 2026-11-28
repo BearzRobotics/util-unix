@@ -49,10 +49,28 @@ fn unquotedExpansion(w: ast.Word) ?[]const u8 {
     return null;
 }
 
+/// `${x:?}` stops the command when `x` is unset or empty, and `${x:-word}` and
+/// `${x:=word}` put the word in its place: with a literal one that is not
+/// empty, the expansion cannot be empty.
+fn cannotBeEmpty(p: ast.Param) bool {
+    if (!p.colon) return false;
+    return switch (p.op) {
+        .error_if_unset => true,
+        .use_default, .assign_default => for (p.arg) |part| {
+            switch (part) {
+                .text, .quoted => |t| if (t.len > 0) break true,
+                else => {},
+            }
+        } else false,
+        else => false,
+    };
+}
+
 /// True for a path that starts with a variable and goes on with a "/": were
 /// the variable empty, it would name something under the root.
 fn startsWithParamAndSlash(w: ast.Word) bool {
     if (w.len == 0 or w[0] != .param) return false;
+    if (cannotBeEmpty(w[0].param.*)) return false;
     for (w[1..]) |p| switch (p) {
         .text, .quoted => |t| if (std.mem.indexOfScalar(u8, t, '/') != null) return true,
         else => {},

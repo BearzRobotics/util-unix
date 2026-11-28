@@ -223,7 +223,7 @@ A function definition `name() body` needs a POSIX name.
 
 Bad:
 
-    1f() { :; }
+    eval() { :; }
 
 Good:
 
@@ -327,7 +327,7 @@ Good:
 
     set -- x
 
-dash says: `1: cannot assign in this way`
+dash says: `1: bad variable name`
 
 ## SH2007 readonly_assignment
 
@@ -467,7 +467,7 @@ Good:
 
     sh ./script.sh
 
-dash says: `Can't open nosuch.sh`
+dash says: `cannot open nosuch.sh: No such file`
 
 ## SH4005 errexit_exit
 
@@ -625,7 +625,7 @@ Good:
 
     getopts a opt
 
-dash says: `getopts: usage: getopts optstring var [arg]`
+dash says: `getopts: Usage: getopts optstring var [arg...]`
 
 ## SH5010 io_error
 
@@ -653,7 +653,7 @@ Good:
 
     alias ll='ls -l'; unalias ll
 
-dash says: `unalias: nosuch: not found`
+dash says: `unalias: nosuch not found`
 
 ## SH5012 bad_limit
 
@@ -703,11 +703,11 @@ An interactive shell enables job control (`set -m`) only when standard input, ou
 
 Bad:
 
-    (sh -i < file) set -m
+    (no terminal) sh -i < script.sh
 
 Good:
 
-    (a terminal)
+    (a terminal) sh -i
 
 dash says: `can't access tty; job control turned off`
 

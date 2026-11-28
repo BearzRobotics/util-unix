@@ -608,6 +608,9 @@ trap -- - TERM
 rc=0"
 must "cd takes -e with -P" 'cd -P -e / && pwd' "/
 rc=0"
+must "check accepts a path guarded against an empty variable" 'printf "%s\n" "rm -rf \"\${dir:?}/x\"" "rm -rf \"\${dir:-/tmp}/x\"" > s; sh --check s && echo clean; printf "%s\n" "rm -rf \"\${dir?}/x\"" > s; sh --check s 2>/dev/null; echo $?' "clean
+1
+rc=0"
 c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
 c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
 c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'
