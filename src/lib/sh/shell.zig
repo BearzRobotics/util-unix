@@ -77,7 +77,7 @@ pub const Options = struct {
     /// How diagnostics are written when no `reporter` is installed.
     diag_style: DiagStyle = .posix,
     /// ANSI colour in the rich style (the host decides: terminal, NO_COLOR).
-    diag_color: bool = false,
+    diag_color: diagmod.Emphasis = .none,
     /// Label for script name in diagnostics (`-c`, a path, `stdin`).
     label: []const u8 = "",
     /// For a host that embeds the shell and must outlive its scripts: `exec`
@@ -243,7 +243,7 @@ pub const Shell = struct {
     /// A write to standard output failed (the builtin that ran reports status 1).
     out_failed: bool = false,
     diag_style: DiagStyle = .posix,
-    diag_color: bool = false,
+    diag_color: diagmod.Emphasis = .none,
     label: []u8 = &.{},
     /// Source text being run and the command-word columns of the current
     /// simple command (for excerpts).

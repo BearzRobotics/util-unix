@@ -627,16 +627,11 @@ fn spawnBackground(sh: *Shell, node: *const Node) u8 {
     }
     const job = jobs.create(sh);
     if (job != null and !useJobs(sh)) job.?.grouped = false;
-    const pid = forkRun(sh, node, .{ .devnull_stdin = !useJobs(sh), .bg = true, .job = if (useJobs(sh)) job else null }) orelse {
+    const pid = forkRun(sh, node, .{ .devnull_stdin = !useJobs(sh), .bg = true, .job = job }) orelse {
         if (job) |j| jobs.remove(sh, j);
         return 1;
     };
     sh.bg_pid = pid;
-    if (job) |j| if (j.procs.items.len == 0) {
-        const t = nodeText(sh, node);
-        defer if (t.len > 0) sh.gpa.free(t);
-        jobs.addPlain(sh, j, pid, t);
-    };
     return 0;
 }
 

@@ -18,6 +18,10 @@ const Allocator = std.mem.Allocator;
 
 pub const Severity = enum { err, warning };
 
+/// What the rich style may send besides text: nothing, text styles that are not
+/// colours (bold), or both. The other styles never send anything.
+pub const Emphasis = enum { none, bold, color };
+
 /// Format into `buf`; a message too long for it is cut off with "...", never
 /// left out.
 pub fn bounded(buf: []u8, comptime fmt: []const u8, args: anytype) []const u8 {
@@ -373,12 +377,12 @@ fn digits(n: u32) usize {
 }
 
 /// The excerpt for `line` of the script, if `d.source` still has it.
-fn excerptAt(out: *std.ArrayList(u8), a: Allocator, d: *const Diagnostic, line: u32, col: u32, end_col: u32, width: usize, color: bool, marker: u8) Allocator.Error!void {
+fn excerptAt(out: *std.ArrayList(u8), a: Allocator, d: *const Diagnostic, line: u32, col: u32, end_col: u32, width: usize, color: Emphasis, marker: u8) Allocator.Error!void {
     if (line < d.source_start) return;
     return excerpt(out, a, d.source, d.source_start, line, col, end_col, width, color, marker);
 }
 
-fn excerpt(out: *std.ArrayList(u8), a: Allocator, src: []const u8, first: u32, line: u32, col: u32, end_col: u32, width: usize, color: bool, marker: u8) Allocator.Error!void {
+fn excerpt(out: *std.ArrayList(u8), a: Allocator, src: []const u8, first: u32, line: u32, col: u32, end_col: u32, width: usize, color: Emphasis, marker: u8) Allocator.Error!void {
     const text = sourceLine(src, line - first + 1) orelse return;
     try out.appendNTimes(a, ' ', width + 1);
     try out.appendSlice(a, "|\n");
@@ -394,16 +398,16 @@ fn excerpt(out: *std.ArrayList(u8), a: Allocator, src: []const u8, first: u32, l
         var i: u32 = 1;
         while (i < col) : (i += 1) try out.append(a, ' ');
         const len: u32 = if (end_col > col) end_col - col else 1;
-        if (color) try out.appendSlice(a, "\x1b[1;31m");
+        if (color != .none) try out.appendSlice(a, if (color == .color) "\x1b[1;31m" else "\x1b[1m");
         var k: u32 = 0;
         while (k < len) : (k += 1) try out.append(a, marker);
-        if (color) try out.appendSlice(a, "\x1b[0m");
+        if (color != .none) try out.appendSlice(a, "\x1b[0m");
         try out.append(a, '\n');
     }
 }
 
 /// Render `d` for standard error, including the trailing newline.
-pub fn render(a: Allocator, d: *const Diagnostic, name: []const u8, style: Style, color: bool, interactive: bool) Allocator.Error![]const u8 {
+pub fn render(a: Allocator, d: *const Diagnostic, name: []const u8, style: Style, color: Emphasis, interactive: bool) Allocator.Error![]const u8 {
     const e = entryByCode(d.code) orelse entryOf(.other);
     var out: std.ArrayList(u8) = .empty;
     // An unterminated construct is reported where it was opened.
@@ -463,11 +467,11 @@ pub fn render(a: Allocator, d: *const Diagnostic, name: []const u8, style: Style
                 if (col > 0) try out.print(a, ":{d}", .{col});
                 try out.appendSlice(a, ": ");
             }
-            if (color) try out.appendSlice(a, if (d.severity == .err) "\x1b[1;31m" else "\x1b[1;33m");
+            if (color != .none) try out.appendSlice(a, if (color == .bold) "\x1b[1m" else if (d.severity == .err) "\x1b[1;31m" else "\x1b[1;33m");
             try out.print(a, "{s}[SH{d}]", .{ sev, d.code });
-            if (color) try out.appendSlice(a, "\x1b[0m\x1b[1m");
+            if (color != .none) try out.appendSlice(a, "\x1b[0m\x1b[1m");
             try out.print(a, ": {s}", .{msg});
-            if (color) try out.appendSlice(a, "\x1b[0m");
+            if (color != .none) try out.appendSlice(a, "\x1b[0m");
             try out.append(a, '\n');
             var width = digits(line);
             if (d.opener) |o| width = @max(width, digits(o.line));
@@ -617,7 +621,7 @@ test "rich rendering of a mismatched closer" {
         .posix = "Syntax error: \"fi\" unexpected (expecting \"done\")",
         .source = "while true; do\n  echo x\nfi\n",
     };
-    const text = try render(a, &d, "sh", .rich, false, false);
+    const text = try render(a, &d, "sh", .rich, .none, false);
     try std.testing.expect(std.mem.startsWith(u8, text, "sh: s.sh:3:1: error[SH1007]: unexpected 'fi', expected 'done' to close the 'while' started at 1:1\n"));
     try std.testing.expect(std.mem.indexOf(u8, text, "3 | fi\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "  | ^^\n") != null);

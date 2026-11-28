@@ -58,6 +58,7 @@ pub const Job = struct {
     }
 
     pub fn lastPid(self: *const Job) i32 {
+        if (self.procs.items.len == 0) return 0;
         return self.procs.items[self.procs.items.len - 1].pid;
     }
 
@@ -263,9 +264,14 @@ pub fn resolve(sh: *Shell, spec: []const u8, err: *SpecError) ?*Job {
     const sub = s[0] == '?';
     const needle = if (sub) s[1..] else s;
     var found: ?*Job = null;
+    var arena = std.heap.ArenaAllocator.init(sh.gpa);
+    defer arena.deinit();
     for (sh.jobs.items) |j| {
-        var buf: [1024]u8 = undefined;
-        const t = jobText(j, &buf);
+        // the whole command, however long
+        const t = commandText(arena.allocator(), j) catch {
+            err.* = .no_such;
+            return null;
+        };
         const hit = if (sub) std.mem.indexOf(u8, t, needle) != null else std.mem.startsWith(u8, t, needle);
         if (hit) {
             if (found != null) {
@@ -277,28 +283,6 @@ pub fn resolve(sh: *Shell, spec: []const u8, err: *SpecError) ?*Job {
     }
     if (found == null) err.* = .no_such;
     return found;
-}
-
-fn jobText(j: *const Job, buf: []u8) []const u8 {
-    var n: usize = 0;
-    for (j.procs.items, 0..) |p, i| {
-        if (i > 0 and n < buf.len) {
-            buf[n] = ' ';
-            n += 1;
-        }
-        const k = @min(p.text.len, buf.len - n);
-        @memcpy(buf[n .. n + k], p.text[0..k]);
-        n += k;
-        if (i + 1 < j.procs.items.len and n < buf.len) {
-            buf[n] = ' ';
-            n += 1;
-            if (n < buf.len) {
-                buf[n] = '|';
-                n += 1;
-            }
-        }
-    }
-    return buf[0..n];
 }
 
 /// The job's command as `jobs` prints it ("a | b").
@@ -322,6 +306,15 @@ pub fn commandText(a: Allocator, j: *const Job) Allocator.Error![]u8 {
 /// handlers, which would only note a signal sent to it and lose it. It calls
 /// `releaseSignals` once its own dispositions are in place.
 pub fn forkInto(sh: *Shell, job: ?*Job, text: []const u8, foreground: bool) sys.Error!i32 {
+    // what the job needs for the child is got first: after the fork a failure
+    // would leave a job without it, and a child nobody waits for
+    var copy: []u8 = &.{};
+    if (job) |j| {
+        j.procs.ensureUnusedCapacity(sh.gpa, 1) catch return error.Sys;
+        copy = sh.gpa.dupe(u8, text) catch &.{};
+    }
+    var kept = false;
+    defer if (!kept) sh.gpa.free(copy);
     const mask = sys.blockSignals();
     const pid = sys.fork() catch |e| {
         sys.restoreMask(mask);
@@ -330,7 +323,10 @@ pub fn forkInto(sh: *Shell, job: ?*Job, text: []const u8, foreground: bool) sys.
     if (pid == 0) sh.fork_mask = mask else sys.restoreMask(mask);
     if (job) |j| {
         if (!(sh.jc and !sh.in_subshell)) {
-            if (pid != 0) addPlain(sh, j, pid, text);
+            if (pid != 0) {
+                j.procs.appendAssumeCapacity(.{ .pid = pid, .text = copy });
+                kept = true;
+            }
             return pid;
         }
         const pgid = if (j.pgid == 0) (if (pid == 0) sys.getpid() else pid) else j.pgid;
@@ -342,8 +338,8 @@ pub fn forkInto(sh: *Shell, job: ?*Job, text: []const u8, foreground: bool) sys.
         sys.setpgid(pid, pgid) catch {};
         if (j.pgid == 0) j.pgid = pgid;
         j.grouped = true;
-        const copy = sh.gpa.dupe(u8, text) catch return pid;
-        j.procs.append(sh.gpa, .{ .pid = pid, .text = copy }) catch sh.gpa.free(copy);
+        j.procs.appendAssumeCapacity(.{ .pid = pid, .text = copy });
+        kept = true;
     }
     return pid;
 }
@@ -356,11 +352,6 @@ pub fn releaseSignals(sh: *Shell) void {
     }
 }
 
-/// Add an already-forked process to a job (no process group).
-pub fn addPlain(sh: *Shell, j: *Job, pid: i32, text: []const u8) void {
-    const copy = sh.gpa.dupe(u8, text) catch return;
-    j.procs.append(sh.gpa, .{ .pid = pid, .text = copy }) catch sh.gpa.free(copy);
-}
 
 // --- reaping and waiting ---------------------------------------------------------
 

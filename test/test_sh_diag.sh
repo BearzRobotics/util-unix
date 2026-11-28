@@ -148,11 +148,25 @@ plain "$("$OURS" --diagnostics=rich --color=auto -c 'nosuch' 2>&1)" && ok "--col
 if command -v script > /dev/null 2>&1; then
     esc=$(printf '\033')
     script -qec "$OURS --diagnostics=rich -c nosuch" /dev/null 2>&1 | grep -q "$esc" && ok "auto colours on a pty" || bad "auto colours on a pty"
-    NO_COLOR=1 script -qec "$OURS --diagnostics=rich -c nosuch" /dev/null 2>&1 | grep -q "$esc" && bad "NO_COLOR on a pty" || ok "NO_COLOR on a pty"
     script -qec "$OURS --diagnostics=rich --color=never -c nosuch" /dev/null 2>&1 | grep -q "$esc" && bad "--color=never on a pty" || ok "--color=never on a pty"
     script -qec "$OURS -c nosuch" /dev/null 2>&1 | grep -q "error\[SH4001\]" && ok "auto is rich on a pty" || bad "auto is rich on a pty"
+    # SPECS 6.3: NO_COLOR takes colour and leaves bold, empty it counts as
+    # unset, a dumb terminal gets neither, and an option overrides both
+    pty() { env "$@" script -qec "$OURS --diagnostics=rich -c nosuch" /dev/null 2>&1; }
+    bold=$esc'[1m' red=$esc'[1;31m'
+    out=$(pty NO_COLOR=1); case $out in *"$red"*) bad "NO_COLOR keeps no colour" ;; *"$bold"*) ok "NO_COLOR keeps bold, not colour" ;; *) bad "NO_COLOR lost the bold" ;; esac
+    out=$(pty NO_COLOR=); case $out in *"$red"*) ok "an empty NO_COLOR counts as unset" ;; *) bad "an empty NO_COLOR counts as unset" ;; esac
+    out=$(pty TERM=dumb); case $out in *"$esc["*) bad "TERM=dumb gets no escapes" ;; *SH4001*) ok "TERM=dumb gets no escapes" ;; *) bad "TERM=dumb: no message" ;; esac
+    out=$(env TERM=dumb NO_COLOR=1 "$OURS" --diagnostics=rich --color=always -c nosuch 2>&1); case $out in *"$red"*) ok "--color=always overrides TERM and NO_COLOR" ;; *) bad "--color=always overrides TERM and NO_COLOR" ;; esac
 else
     printf 'SKIP pty colour tests (no script(1))\n'
+fi
+if [ -w /dev/full ]; then
+    for option in --help --list-diagnostics "--explain SH1001" --diagnostics-catalog; do
+        # shellcheck disable=SC2086
+        "$OURS" $option > /dev/full 2> "$TMP/err"; rc=$?
+        { [ "$rc" = 1 ] && grep -q 'write error' "$TMP/err"; } && ok "$option reports a full disk" || bad "$option reports a full disk"
+    done
 fi
 
 # the environment is inherited: an inner shell under SH_DIAGNOSTICS=json prints json,

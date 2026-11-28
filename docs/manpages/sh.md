@@ -76,10 +76,10 @@ Bold type is literal text. Italic or uppercase names are values you supply. A di
 : Parse the file and run the static checks of the CHECK MODE section. Nothing is executed. Exit status 0 clean, 1 findings, 2 syntax error.
 
 --diagnostics=STYLE
-: How diagnostics are written to standard error: **posix** (dash's one-line wording), **rich** (see DIAGNOSTICS), **json** (one object per line), **gcc** (file:line:column: severity: message) or **auto**. The environment variable SH_DIAGNOSTICS supplies a default. Default **auto**: rich when standard error is a terminal, posix otherwise. Colour is used only in the rich style, only on a terminal and never when NO_COLOR is set. The style never changes standard output, exit statuses or any behaviour POSIX specifies.
+: How diagnostics are written to standard error: **posix** (dash's one-line wording), **rich** (see DIAGNOSTICS), **json** (one object per line), **gcc** (file:line:column: severity: message) or **auto**. The environment variable SH_DIAGNOSTICS supplies a default. Default **auto**: rich when standard error is a terminal, posix otherwise. Colour and bold are used only in the rich style, only on a terminal whose TERM is not `dumb`; when NO_COLOR is set to a value that is not empty, there is bold but no colour. The style never changes standard output, exit statuses or any behaviour POSIX specifies.
 
 --color=WHEN, --diagnostics-color=WHEN
-: Colour of the rich style: **auto** (the default: only when standard error is a terminal and NO_COLOR is not set), **always** (escapes even off a terminal, also with NO_COLOR) or **never**. The other styles never use colour.
+: Colour of the rich style: **auto** (the default: bold and colour when standard error is a terminal whose TERM is not `dumb`; bold only when NO_COLOR is not empty), **always** (bold and colour even off a terminal, whatever TERM and NO_COLOR say) or **never** (neither). The other styles never use colour.
 
 --explain CODE
 : Print the long explanation of a diagnostic (for example `sh --explain SH1007`) with a bad and a good example, and the ShellCheck id where one exists. With `--diagnostics=json` one JSON object with the keys code, kind, severity, exit, summary, message, posix, shellcheck, help, explain, bad and good.
@@ -183,7 +183,7 @@ In a `case`, a list ended by `;&` instead of `;;` goes on into the next one (POS
 
 HOME, PATH, IFS, PWD, OLDPWD, PS1, PS2, PS4, OPTIND, OPTARG, CDPATH, PPID, ENV, HISTFILE, HISTSIZE and FCEDIT are used or set as POSIX describes (TMOUT and MAIL are not implemented). PS4 is expanded (parameters, command substitution, arithmetic) each time it is printed.
 
-SH_DIAGNOSTICS (`posix`, `rich`, `json`, `gcc`) is the default of `--diagnostics`. Like every variable it is inherited: when it is set to `json`, a `sh -c` started by a script also prints JSON. An explicit `--diagnostics=STYLE` or `--color=WHEN` on the inner shell wins over the environment, and the colour setting is not inherited (it is decided from the terminal and NO_COLOR of each shell). NO_COLOR (any value) turns colour off in `auto` mode. These variables change only what is written to standard error, never standard output or an exit status.
+SH_DIAGNOSTICS (`posix`, `rich`, `json`, `gcc`) is the default of `--diagnostics`. Like every variable it is inherited: when it is set to `json`, a `sh -c` started by a script also prints JSON. An explicit `--diagnostics=STYLE` or `--color=WHEN` on the inner shell wins over the environment, and the colour setting is not inherited (it is decided from the terminal and NO_COLOR of each shell). NO_COLOR (any value that is not empty) turns colour, though not bold, off in `auto` mode. These variables change only what is written to standard error, never standard output or an exit status.
 
 # EXIT STATUS
 

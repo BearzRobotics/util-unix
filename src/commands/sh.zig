@@ -12,7 +12,7 @@
 //! environment variable SH_DIAGNOSTICS. `auto` (the default) is rich when
 //! standard error is a terminal and posix (dash's one-line wording)
 //! otherwise, so scripts that parse stderr keep working. Colour only in the
-//! rich style, only on a terminal, never when NO_COLOR is set.
+//! rich style, only on a terminal that is not dumb; NO_COLOR takes colour only.
 
 const std = @import("std");
 const uu = @import("util_unix");
@@ -55,8 +55,14 @@ fn parseStyle(s: []const u8) ?diag.Style {
     return null;
 }
 
-fn writeOut(text: []const u8) void {
-    sys.writeAll(1, text) catch {};
+/// Write what was asked for; the exit status says whether all of it went out
+/// (`sh --diagnostics-catalog > file` must not leave a short file and succeed).
+fn writeOut(ctx: cli.Context, text: []const u8) u8 {
+    sys.writeAll(1, text) catch {
+        cli.warn(ctx, "write error: {s}", .{sys.strerror(sys.errno())});
+        return 1;
+    };
+    return 0;
 }
 
 fn argError(ctx: cli.Context, style: diag.Style, comptime kind: diag.Kind, subject: []const u8, posix: []const u8) void {
@@ -64,7 +70,7 @@ fn argError(ctx: cli.Context, style: diag.Style, comptime kind: diag.Kind, subje
     var arena = std.heap.ArenaAllocator.init(ctx.gpa);
     defer arena.deinit();
     const d: diag.Diagnostic = .{ .code = e.code, .kind = kind, .subject = subject, .posix = posix };
-    const text = diag.render(arena.allocator(), &d, ctx.name, style, false, false) catch return;
+    const text = diag.render(arena.allocator(), &d, ctx.name, style, .none, false) catch return;
     sys.writeAll(2, text) catch {};
 }
 
@@ -82,17 +88,14 @@ fn listOrExplain(ctx: cli.Context, list: bool, want: ?[]const u8, json: bool) u8
             sys.writeAll(2, m) catch {};
             return 2;
         };
-        writeOut((if (json) diag.explainJson(a, e) else diag.explain(a, e)) catch return outOfMemory(ctx));
-        return 0;
+        return writeOut(ctx, (if (json) diag.explainJson(a, e) else diag.explain(a, e)) catch return outOfMemory(ctx));
     }
     if (list and json) {
-        writeOut(diag.catalogJson(a) catch return outOfMemory(ctx));
-        return 0;
+        return writeOut(ctx, diag.catalogJson(a) catch return outOfMemory(ctx));
     }
     var out: std.ArrayList(u8) = .empty;
     for (&diag.catalog) |*e| out.print(a, "SH{d} {s}\n", .{ e.code, @tagName(e.kind) }) catch return outOfMemory(ctx);
-    writeOut(out.items);
-    return 0;
+    return writeOut(ctx, out.items);
 }
 
 pub fn main(ctx: cli.Context) u8 {
@@ -143,15 +146,13 @@ pub fn main(ctx: cli.Context) u8 {
             } else if (std.mem.eql(u8, a, "--check")) {
                 check_mode = true;
             } else if (std.mem.eql(u8, a, "--help")) {
-                writeOut(usage_text);
-                return 0;
+                return writeOut(ctx, usage_text);
             } else if (std.mem.eql(u8, a, "--version")) {
                 return if (cli.printVersion(ctx)) 0 else 1;
             } else if (std.mem.eql(u8, a, "--diagnostics-catalog")) {
                 var arena = std.heap.ArenaAllocator.init(gpa);
                 defer arena.deinit();
-                writeOut(diag.catalogMarkdown(arena.allocator()) catch return outOfMemory(ctx));
-                return 0;
+                return writeOut(ctx, diag.catalogMarkdown(arena.allocator()) catch return outOfMemory(ctx));
             } else if (std.mem.eql(u8, a, "--list-diagnostics")) {
                 list_diag = true;
             } else if (std.mem.startsWith(u8, a, "--color=") or std.mem.startsWith(u8, a, "--diagnostics-color=")) {
@@ -334,10 +335,14 @@ pub fn main(ctx: cli.Context) u8 {
     // Diagnostics style: explicit, else rich on a terminal, else posix.
     const tty = sys.isatty(2);
     const style: diag.Style = style_opt orelse if (style_auto and tty) .rich else .posix;
-    const color = style == .rich and switch (color_mode) {
-        .always => true,
-        .never => false,
-        .auto => tty and cli.getenv(ctx, "NO_COLOR") == null,
+    // SPECS 6.3: by itself only on a terminal that is not dumb; NO_COLOR (an
+    // empty one counts as unset) takes the colours and leaves the bold
+    const emphasis: diag.Emphasis = if (style != .rich) .none else switch (color_mode) {
+        .always => .color,
+        .never => .none,
+        .auto => if (!tty or std.mem.eql(u8, cli.getenv(ctx, "TERM") orelse "", "dumb"))
+            .none
+        else if (cli.getenv(ctx, "NO_COLOR")) |v| (if (v.len > 0) .bold else .color) else .color,
     };
 
     var st_io = std.Io.Threaded.init_single_threaded;
@@ -347,7 +352,7 @@ pub fn main(ctx: cli.Context) u8 {
         .environ = ctx.environ,
         .flags = flags,
         .diag_style = style,
-        .diag_color = color,
+        .diag_color = emphasis,
         .label = label,
     }) catch return outOfMemory(ctx);
     defer shell.deinit();
@@ -440,7 +445,7 @@ fn reportFinding(ctx: cli.Context, f: sh.lint.Finding, label: []const u8, text: 
         .posix = e.summary,
         .source = text,
     };
-    const out = diag.render(arena.allocator(), &dd, ctx.name, style, false, false) catch return;
+    const out = diag.render(arena.allocator(), &dd, ctx.name, style, .none, false) catch return;
     sys.writeAll(2, out) catch {};
 }
 
