@@ -82,6 +82,12 @@ pub fn errno() u16 {
     return last_errno;
 }
 
+/// For `lib/sh/osio.zig`: report `e` as a direct call would.
+pub fn setErrno(e: u16) Error {
+    last_errno = e;
+    return error.Sys;
+}
+
 pub const E_AGAIN: u16 = 11;
 pub const E_NOENT: u16 = 2;
 pub const E_INTR: u16 = 4;
@@ -393,50 +399,9 @@ pub fn statusSignal(status: u32) u8 {
     return 0;
 }
 
-pub fn chdir(path: []const u8) Error!void {
-    if (comptime !is_linux) return nosys();
-    var cp: CPath = .{};
-    const p = try cp.init(path);
-    _ = try check(linux.chdir(p.ptr));
-}
-
-/// The current directory as the kernel knows it, written into `buf`.
-pub fn getcwd(buf: []u8) Error![]const u8 {
-    if (comptime !is_linux) return nosys();
-    const r = try check(linux.getcwd(buf.ptr, buf.len));
-    if (r == 0) return buf[0..0];
-    return buf[0 .. r - 1];
-}
-
 pub fn kill(pid: i32, sig: u8) Error!void {
     if (comptime !is_linux) return nosys();
     _ = try check(linux.kill(pid, @fromBackingInt(@intCast(sig))));
-}
-
-/// rename(2): `new` is replaced in one step.
-pub fn rename(old: []const u8, new: []const u8) Error!void {
-    if (comptime !is_linux) return nosys();
-    var cp_old: CPath = .{};
-    var cp_new: CPath = .{};
-    const o = try cp_old.init(old);
-    const n = try cp_new.init(new);
-    _ = try check(linux.renameat(linux.AT.FDCWD, o, linux.AT.FDCWD, n));
-}
-
-pub fn unlink(path: []const u8) Error!void {
-    if (comptime !is_linux) return nosys();
-    var cp: CPath = .{};
-    const p = try cp.init(path);
-    _ = try check(linux.unlinkat(linux.AT.FDCWD, p, 0));
-}
-
-/// The text of the symbolic link `path`, written into `buf`.
-pub fn readlink(path: []const u8, buf: []u8) Error![]const u8 {
-    if (comptime !is_linux) return nosys();
-    var cp: CPath = .{};
-    const p = try cp.init(path);
-    const n = try check(linux.readlinkat(linux.AT.FDCWD, p, buf.ptr, buf.len));
-    return buf[0..n];
 }
 
 /// flock(2) LOCK_EX: wait for the file's exclusive lock; closing releases it.
@@ -513,20 +478,6 @@ fn infoOf(sx: *const linux.Statx) FileInfo {
         .mtime_sec = sx.mtime.sec,
         .mtime_nsec = sx.mtime.nsec,
     };
-}
-
-/// access(2) with real ids: `mode` bits 4 read, 2 write, 1 execute, 0 exists.
-pub fn access(path: []const u8, mode: u32) bool {
-    if (comptime !is_linux) return false;
-    var cp: CPath = .{};
-    const p = cp.init(path) catch return false;
-    return linux.errno(linux.faccessat(linux.AT.FDCWD, p.ptr, mode, 0)) == .SUCCESS;
-}
-
-pub fn isatty(fd: i32) bool {
-    if (comptime !is_linux) return false;
-    var tio: [64]u8 = undefined;
-    return linux.errno(linux.ioctl(fd, 0x5401, @intFromPtr(&tio))) == .SUCCESS;
 }
 
 /// Names in directory `path` (without "." and ".."), each owned by `gpa`.
@@ -834,19 +785,6 @@ pub fn unguardTerminal() void {
         if (old.handler.handler == &dieRestoring) _ = setSignal(s, .default);
     };
     guard.armed = false;
-}
-
-/// A random number, for names that others must not guess. Falls back to the
-/// clock where there is no source of randomness.
-pub fn random32() u32 {
-    var v: u32 = 0;
-    if (comptime is_linux) {
-        if (linux.getrandom(std.mem.asBytes(&v), 4, 0) == 4) return v;
-        var ts: linux.timespec = undefined;
-        _ = linux.clock_gettime(.MONOTONIC, &ts);
-        return @truncate(@as(u64, @bitCast(@as(i64, ts.nsec))));
-    }
-    return v;
 }
 
 /// `t` with the modes a line editor needs: no echo, no canonical mode, no

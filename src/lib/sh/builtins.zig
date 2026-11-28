@@ -11,6 +11,7 @@ const std = @import("std");
 const diagmod = @import("diag.zig");
 const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
+const osio = @import("osio.zig");
 const ast = @import("ast.zig");
 const lexer = @import("lexer.zig");
 const exec = @import("exec.zig");
@@ -826,9 +827,9 @@ fn truePwd(sh: *Shell) ?[]const u8 {
     return if (named.ino == here.ino and named.dev == here.dev) p else null;
 }
 
-fn physicalCwd(a: Allocator) ?[]const u8 {
+fn physicalCwd(sh: *Shell, a: Allocator) ?[]const u8 {
     var buf: [4096]u8 = undefined;
-    const p = sys.getcwd(&buf) catch return null;
+    const p = osio.getcwd(sh.env.io, &buf) catch return null;
     return a.dupe(u8, p) catch null;
 }
 
@@ -906,7 +907,7 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         if (std.mem.eql(u8, dir, "-")) {
             // POSIX leaves an unset OLDPWD unspecified; dash stays in the current directory (FreeBSD sh fails)
             // a copy: OLDPWD is assigned before this is last used
-            dir = a.dupe(u8, sh.getVar("OLDPWD") orelse (sh.getVar("PWD") orelse (physicalCwd(a) orelse "."))) catch |oe| return sh.oom(oe);
+            dir = a.dupe(u8, sh.getVar("OLDPWD") orelse (sh.getVar("PWD") orelse (physicalCwd(sh, a) orelse "."))) catch |oe| return sh.oom(oe);
             print = true;
         }
     } else {
@@ -942,7 +943,7 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         }
     }
     // $PWD is a variable like any other: a script may have given it any value
-    const old_pwd = truePwd(sh) orelse physicalCwd(a) orelse absolutePwd(sh) orelse "";
+    const old_pwd = truePwd(sh) orelse physicalCwd(sh, a) orelse absolutePwd(sh) orelse "";
     var curpath = target;
     if (!physical) {
         const abs = if (target.len > 0 and target[0] == '/') target else std.fmt.allocPrint(a, "{s}/{s}", .{ old_pwd, target }) catch |oe| return sh.oom(oe);
@@ -952,14 +953,12 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         }
         curpath = canonical(a, abs) catch |oe| return sh.oom(oe);
     }
-    sys.chdir(if (physical) target else curpath) catch {
-        const e = sys.errno();
+    if (!osio.chdir(sh.env.io, if (physical) target else curpath)) {
         sh.diagCmdK(.cannot_cd, dir, "cd", "can't cd to {s}", .{dir});
-        _ = e;
         return 2;
-    };
+    }
     sh.clearRelativeHash();
-    const new_pwd: []const u8 = if (physical) (physicalCwd(a) orelse target) else curpath;
+    const new_pwd: []const u8 = if (physical) (physicalCwd(sh, a) orelse target) else curpath;
     sh.setVarRaw("OLDPWD", old_pwd) catch |oe| return sh.oom(oe);
     if (sh.vars.getPtr("OLDPWD")) |v| v.exported = true; // dash, bash and FreeBSD sh export it
     sh.setVarRaw("PWD", new_pwd) catch |oe| return sh.oom(oe);
@@ -981,7 +980,7 @@ fn pwdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         };
     }
     var path: []const u8 = if (physical) "" else truePwd(sh) orelse "";
-    if (path.len == 0) path = physicalCwd(a) orelse blk: {
+    if (path.len == 0) path = physicalCwd(sh, a) orelse blk: {
         // the directory was removed under us: the logical name is all there is (dash, FreeBSD sh)
         if (!physical and sys.errno() == sys.E_NOENT) if (absolutePwd(sh)) |p| break :blk p;
         sh.diagCmdK(.other, null, "pwd", "getcwd() failed: {s}", .{sys.strerror(sys.errno())});
@@ -1462,7 +1461,7 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                     i += 1;
                     prompt = args[i];
                 }
-                if (sys.isatty(0)) sh.errRaw(prompt);
+                if (osio.isatty(sh.env.io, 0)) sh.errRaw(prompt);
                 break;
             },
             else => |c| {
@@ -1717,11 +1716,11 @@ const T = struct {
             't' => {
                 const fd = parseNum(s) orelse return self.fail("Illegal number: {s}", .{s});
                 if (fd < 0 or fd > std.math.maxInt(i32)) return false;
-                return sys.isatty(@intCast(fd));
+                return osio.isatty(self.sh.env.io, @intCast(fd));
             },
-            'r' => return sys.access(s, 4),
-            'w' => return sys.access(s, 2),
-            'x' => return sys.access(s, 1),
+            'r' => return osio.access(self.sh.env.io, s, .{ .read = true }),
+            'w' => return osio.access(self.sh.env.io, s, .{ .write = true }),
+            'x' => return osio.access(self.sh.env.io, s, .{ .execute = true }),
             'e' => return if (sys.stat(s, true)) |_| true else |_| false,
             'h', 'L' => return if (sys.stat(s, false)) |i| i.kind == .symlink else |_| false,
             else => {},
@@ -1861,7 +1860,7 @@ fn describe(sh: *Shell, a: Allocator, name: []const u8, verbose: bool, out: *std
         if (verbose) try out.print(a, "{s} is a shell builtin\n", .{name}) else try out.print(a, "{s}\n", .{name});
         return true;
     }
-    const path = if (std.mem.indexOfScalar(u8, name, '/') != null) (if (sys.access(name, 1)) name else null) else exec.findExecutable(sh, a, name);
+    const path = if (std.mem.indexOfScalar(u8, name, '/') != null) (if (osio.access(sh.env.io, name, .{ .execute = true })) name else null) else exec.findExecutable(sh, a, name);
     if (path) |p| {
         if (verbose) try out.print(a, "{s} is {s}\n", .{ name, p }) else try out.print(a, "{s}\n", .{p});
         return true;

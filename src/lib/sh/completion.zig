@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const sys = @import("../../sys.zig");
+const osio = @import("osio.zig");
 const shell = @import("shell.zig");
 const builtins = @import("builtins.zig");
 const expand = @import("expand.zig");
@@ -299,7 +300,7 @@ fn completeCommand(sh: *Shell, a: Allocator, word: []const u8, quote: Quote, sta
             if (!std.mem.startsWith(u8, n, word)) continue;
             const full = try std.fmt.allocPrint(a, "{s}/{s}", .{ if (dir.len == 0) "." else dir, n });
             const info = sys.stat(full, true) catch continue;
-            if (info.kind == .dir or !sys.access(full, 1)) continue;
+            if (info.kind == .dir or !osio.access(sh.env.io, full, .{ .execute = true })) continue;
             try list.append(a, try a.dupe(u8, n));
         }
     }

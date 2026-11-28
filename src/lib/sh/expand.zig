@@ -15,6 +15,7 @@
 const std = @import("std");
 const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
+const osio = @import("osio.zig");
 const ast = @import("ast.zig");
 const arith = @import("arith.zig");
 const pattern = @import("pattern.zig");
@@ -190,19 +191,11 @@ pub fn evalArith(sh: *Shell, text: []const u8) Error!i64 {
 
 pub fn homeOf(sh: *Shell, a: Allocator, user: []const u8) ?[]const u8 {
     if (user.len == 0) return sh.getVar("HOME");
-    const fd = sys.open("/etc/passwd", .{ .cloexec = true }, 0) catch return null;
-    defer sys.close(fd);
-    var data: std.ArrayList(u8) = .empty;
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = sys.read(fd, &buf) catch return null;
-        if (n == 0) break;
-        data.appendSlice(a, buf[0..n]) catch |oe| {
-            _ = sh.oom(oe);
-            return null;
-        };
-    }
-    var lines = std.mem.splitScalar(u8, data.items, '\n');
+    const data = std.Io.Dir.cwd().readFileAlloc(sh.env.io, "/etc/passwd", a, .limited(64 << 20)) catch |e| {
+        if (e == error.OutOfMemory) _ = sh.oom(error.OutOfMemory);
+        return null;
+    };
+    var lines = std.mem.splitScalar(u8, data, '\n');
     while (lines.next()) |ln| {
         var f = std.mem.splitScalar(u8, ln, ':');
         const nm = f.next() orelse continue;

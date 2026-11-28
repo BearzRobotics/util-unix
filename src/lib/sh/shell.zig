@@ -13,6 +13,7 @@
 
 const std = @import("std");
 const sys = @import("../../sys.zig");
+const osio = @import("osio.zig");
 const ast = @import("ast.zig");
 const parser = @import("parser.zig");
 const diagmod = @import("diag.zig");
@@ -323,7 +324,7 @@ pub const Shell = struct {
 
     fn initPwd(self: *Shell) Allocator.Error!void {
         var buf: [4096]u8 = undefined;
-        const phys = sys.getcwd(&buf) catch return;
+        const phys = osio.getcwd(self.env.io, &buf) catch return;
         if (self.getVar("PWD")) |p| {
             if (p.len > 0 and p[0] == '/') {
                 const a = sys.stat(p, true) catch null;

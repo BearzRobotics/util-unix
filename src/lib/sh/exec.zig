@@ -15,6 +15,7 @@
 const std = @import("std");
 const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
+const osio = @import("osio.zig");
 const ast = @import("ast.zig");
 const parser = @import("parser.zig");
 const expand = @import("expand.zig");
@@ -1153,7 +1154,7 @@ fn pathFind(sh: *Shell, a: Allocator, name: []const u8, want_exec: bool) ?[]cons
         };
         const info = sys.stat(full, true) catch continue;
         if (info.kind == .dir) continue;
-        if (want_exec and !sys.access(full, 1)) continue;
+        if (want_exec and !osio.access(sh.env.io, full, .{ .execute = true })) continue;
         return full;
     }
     return null;

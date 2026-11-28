@@ -19,6 +19,7 @@
 const std = @import("std");
 const num = @import("../num.zig");
 const sys = @import("../../sys.zig");
+const osio = @import("osio.zig");
 const ast = @import("ast.zig");
 const shell = @import("shell.zig");
 const Shell = shell.Shell;
@@ -710,7 +711,7 @@ pub fn continueJob(j: *Job) bool {
 pub fn enable(sh: *Shell, need_tty: bool) bool {
     if (sh.jc) return true;
     var tty: i32 = -1;
-    for ([_]i32{ 2, 0, 1 }) |fd| if (sys.isatty(fd)) {
+    for ([_]i32{ 2, 0, 1 }) |fd| if (osio.isatty(sh.env.io, fd)) {
         tty = sys.dupAbove(fd, 10) catch -1;
         break;
     };

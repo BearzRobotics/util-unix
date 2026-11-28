@@ -317,7 +317,7 @@ pub fn main(ctx: cli.Context) u8 {
         from_stdin = true;
         name = argv0(&argv0_buf) orelse ctx.name;
         // Interactive: -i, or standard input and error are terminals (POSIX sh, "Interactive").
-        if (!flags.interactive and !check_mode and sys.isatty(0) and sys.isatty(2) and !(from_explicit_s and rest.len > 0)) flags.interactive = true;
+        if (!flags.interactive and !check_mode and isTty(ctx, .stdin()) and isTty(ctx, .stderr()) and !(from_explicit_s and rest.len > 0)) flags.interactive = true;
     } else {
         name = rest[0];
         label = rest[0];
@@ -333,7 +333,7 @@ pub fn main(ctx: cli.Context) u8 {
     if (from_stdin) flags.stdin_mode = true;
 
     // Diagnostics style: explicit, else rich on a terminal, else posix.
-    const tty = sys.isatty(2);
+    const tty = isTty(ctx, .stderr());
     const style: diag.Style = style_opt orelse if (style_auto and tty) .rich else .posix;
     // SPECS 6.3: by itself only on a terminal that is not dumb; NO_COLOR (an
     // empty one counts as unset) takes the colours and leaves the bold
@@ -473,4 +473,8 @@ test "usage text names the options the shell takes" {
     for ([_][]const u8{ "-c", "-i", "-s", "--check", "--explain", "--diagnostics" }) |option| {
         try std.testing.expect(std.mem.indexOf(u8, usage_text, option) != null);
     }
+}
+
+fn isTty(ctx: cli.Context, file: std.Io.File) bool {
+    return file.isTty(ctx.io) catch false;
 }

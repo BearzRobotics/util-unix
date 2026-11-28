@@ -13,6 +13,7 @@
 const std = @import("std");
 const numparse = @import("../num.zig");
 const sys = @import("../../sys.zig");
+const osio = @import("osio.zig");
 const shell = @import("shell.zig");
 const exec = @import("exec.zig");
 const builtins = @import("builtins.zig");
@@ -292,7 +293,7 @@ pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
     sh.ignoreJobSignals();
     if (!sh.flags.vi and !sh.flags.emacs) sh.flags.emacs = true;
     const term_env = sh.getVar("TERM") orelse "";
-    s.use_editor = sys.isatty(0) and sys.isatty(2) and !std.mem.eql(u8, term_env, "dumb");
+    s.use_editor = osio.isatty(sh.env.io, 0) and osio.isatty(sh.env.io, 2) and !std.mem.eql(u8, term_env, "dumb");
     var ed = readline.Editor.init(gpa, .{ .ctx = &s.term, .read = tRead, .write = tWrite, .size = tSize, .setRaw = tRaw });
     ed.complete_fn = completion.complete;
     ed.cb_ctx = sh;
@@ -376,7 +377,7 @@ fn externalEdit(sh: *Shell, a: Allocator, text: []const u8) ?[]const u8 {
         sh.diagK(.history_error, null, "cannot create a temporary file: {s}", .{sys.strerror(sys.errno())});
         return null;
     };
-    defer sys.unlink(temp.path) catch {};
+    defer osio.unlink(sh.env.io, temp.path);
     {
         defer sys.close(temp.fd);
         sys.writeAll(temp.fd, text) catch return null;
@@ -491,12 +492,12 @@ fn historyFile(sh: *Shell) ?[]const u8 {
 pub fn saveHistory(sh: *Shell) void {
     const hist = sh.history orelse return;
     if (!hist.unsaved()) return;
-    if (historyFile(sh)) |hf| hist.save(hf, false) catch {};
+    if (historyFile(sh)) |hf| hist.save(sh.env.io, hf, false) catch {};
 }
 
 fn finish(s: *Session) u8 {
     const sh = s.sh;
-    if (historyFile(sh)) |hf| s.hist.save(hf, true) catch |e| {
+    if (historyFile(sh)) |hf| s.hist.save(sh.env.io, hf, true) catch |e| {
         sh.diagK(.history_error, null, "cannot save the history to {s}: {s}", .{ hf, switch (e) {
             error.Sys => sys.strerror(sys.errno()),
             error.OutOfMemory => "out of memory",

@@ -12,6 +12,7 @@
 const std = @import("std");
 const numparse = @import("../num.zig");
 const sys = @import("../../sys.zig");
+const osio = @import("osio.zig");
 const shell = @import("shell.zig");
 const exec = @import("exec.zig");
 const builtins = @import("builtins.zig");
@@ -132,9 +133,9 @@ pub const History = struct {
     /// symbolic link stays, and the file it names is replaced. Saving to a
     /// character device such as /dev/null does nothing. When `sys` failed,
     /// `sys.errno` says why; the old file is then still whole.
-    pub fn save(self: *History, path: []const u8, durable: bool) SaveError!void {
+    pub fn save(self: *History, io: std.Io, path: []const u8, durable: bool) SaveError!void {
         var link_buf: [2][4096]u8 = undefined;
-        const target = try followLinks(path, &link_buf);
+        const target = try followLinks(io, path, &link_buf);
         if (sys.stat(target, true)) |info| {
             if (info.kind == .char) return;
             if (info.kind != .file) return error.NotRegularFile;
@@ -168,7 +169,7 @@ pub const History = struct {
         defer self.gpa.free(temp);
         const fd = try sys.open(temp, .{ .read = false, .write = true, .create = true, .excl = true, .cloexec = true }, 0o600);
         var keep = false;
-        defer if (!keep) sys.unlink(temp) catch {};
+        defer if (!keep) osio.unlink(io, temp);
         {
             defer sys.close(fd);
             // someone else's file (a shell run through su keeps HOME) stays theirs
@@ -176,7 +177,7 @@ pub const History = struct {
             try sys.writeAll(fd, out.items);
             if (durable) try sys.fsync(fd);
         }
-        try sys.rename(temp, target);
+        try osio.rename(io, temp, target);
         keep = true;
         // these are in the file now: a later save must not add them again
         self.loaded_from = std.hash.Wyhash.hash(0, path);
@@ -196,7 +197,7 @@ pub fn tempFile(sh: *Shell, a: Allocator, kind: []const u8) (Allocator.Error || 
     const dir = sh.getVar("TMPDIR") orelse "/tmp";
     var tries: usize = 0;
     while (true) : (tries += 1) {
-        const path = try std.fmt.allocPrint(a, "{s}/sh-{s}.{d}.{x:0>8}", .{ dir, kind, sys.getpid(), sys.random32() });
+        const path = try std.fmt.allocPrint(a, "{s}/sh-{s}.{d}.{x:0>8}", .{ dir, kind, sys.getpid(), osio.random32(sh.env.io) });
         const fd = sys.open(path, .{ .read = false, .write = true, .create = true, .excl = true, .cloexec = true }, 0o600) catch |e| {
             if (sys.errno() == sys.E_EXIST and tries < 100) continue;
             return e;
@@ -209,14 +210,14 @@ pub fn tempFile(sh: *Shell, a: Allocator, kind: []const u8) (Allocator.Error || 
 const max_file_bytes = 32 << 20;
 
 /// The file `path` stands for once final symbolic links are followed.
-fn followLinks(path: []const u8, bufs: *[2][4096]u8) History.SaveError![]const u8 {
+fn followLinks(io: std.Io, path: []const u8, bufs: *[2][4096]u8) History.SaveError![]const u8 {
     var current = path;
     var hops: usize = 0;
     while (hops < 16) : (hops += 1) {
         const info = sys.stat(current, false) catch return current;
         if (info.kind != .symlink) return current;
         var text_buf: [4096]u8 = undefined;
-        const text = try sys.readlink(current, &text_buf);
+        const text = try osio.readlink(io, current, &text_buf);
         // `current` may be in the other buffer: write into this one
         const next = &bufs[hops % 2];
         const dir_len = if (text.len > 0 and text[0] == '/') 0 else if (std.mem.lastIndexOfScalar(u8, current, '/')) |at| at + 1 else 0;
@@ -420,7 +421,7 @@ pub fn fcCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         return 1;
     };
     const path = temp.path;
-    defer sys.unlink(path) catch {};
+    defer osio.unlink(sh.env.io, path);
     {
         defer sys.close(temp.fd);
         sys.writeAll(temp.fd, body.items) catch {
