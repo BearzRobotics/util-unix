@@ -135,9 +135,10 @@ c() {
     # stderr vs dash
     err_ok=1
     case "$flags" in
-    # the wording is not compared, but a failure that dash explains must not
-    # pass in silence
-    *e*) [ -n "$dash_err" ] && [ -z "$ours_err" ] && [ "$(cat "$base.ours.rc")" != 0 ] && err_ok=0 ;;
+    # the wording is not compared, but where dash fails as we do and says why,
+    # we must not fail in silence (where it fails otherwise, say for want of
+    # `pipefail`, its message is about something else)
+    *e*) [ -n "$dash_err" ] && [ -z "$ours_err" ] && [ "$dash_sig" = "$ours_sig" ] && [ "$(cat "$base.ours.rc")" != 0 ] && err_ok=0 ;;
     *) [ -n "$dash_sig" ] && [ "$dash_err" != "$ours_err" ] && err_ok=0 ;;
     esac
     verdict=PASS; kind=AGREE
