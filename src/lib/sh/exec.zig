@@ -1655,7 +1655,7 @@ pub fn execProgram(sh: *Shell, a: Allocator, path: []const u8, args: []const []c
 /// control...) reaches the script. Does not return.
 pub fn execScript(sh: *Shell, a: Allocator, path: []const u8, args: []const []const u8, assigns: []const ast.Assign, vals: []const []const u8) noreturn {
     const text = readFile(a, path) orelse {
-        sh.diagK(.not_executable, args[0], "{s}: Permission denied", .{args[0]});
+        sh.diagK(.not_executable, args[0], "{s}: {s}", .{ args[0], sys.strerror(sys.errno()) });
         sys.exit(126);
     };
     // a file with NUL bytes in its first line is a binary, not a script
@@ -1738,9 +1738,21 @@ pub fn readFile(a: Allocator, path: []const u8) ?[]const u8 {
     var data: std.ArrayList(u8) = .empty;
     var chunk: [8192]u8 = undefined;
     while (true) {
-        const n = sys.read(fd, &chunk) catch return null;
+        const n = sys.read(fd, &chunk) catch {
+            if (sys.errno() == sys.E_INTR) continue;
+            return null;
+        };
         if (n == 0) break;
         data.appendSlice(a, chunk[0..n]) catch return null;
     }
     return data.items;
+}
+
+/// A startup file's text. One that is not there is passed over in silence; one
+/// that is there and cannot be read is reported.
+pub fn readStartup(sh: *Shell, a: Allocator, path: []const u8) ?[]const u8 {
+    if (readFile(a, path)) |t| return t;
+    const e = sys.errno();
+    if (e != sys.E_NOENT and e != 20) sh.diagK(.cannot_open, path, "cannot open {s}: {s}", .{ path, sys.strerror(e) });
+    return null;
 }

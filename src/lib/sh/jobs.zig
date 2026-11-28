@@ -684,13 +684,22 @@ pub fn anyStopped(sh: *const Shell) bool {
     return false;
 }
 
-pub fn continueJob(sh: *Shell, j: *Job) void {
+/// Send SIGCONT to a job and take it to be running. False when it could not
+/// be sent, with errno saying why; a group that has gone is no failure, since
+/// waiting for it finds that out.
+pub fn continueJob(j: *Job) bool {
+    const SIGCONT = 18;
+    const esrch = 3;
+    if (j.pgid != 0 and j.grouped) {
+        sys.killpg(j.pgid, SIGCONT) catch if (sys.errno() != esrch) return false;
+    } else for (j.procs.items) |p| {
+        if (p.state != .done) sys.kill(p.pid, SIGCONT) catch if (sys.errno() != esrch) return false;
+    }
     for (j.procs.items) |*p| if (p.state == .stopped) {
         p.state = .running;
     };
     j.notified = false;
-    if (j.pgid != 0 and j.grouped) sys.killpg(j.pgid, 18) catch {} else for (j.procs.items) |p| sys.kill(p.pid, 18) catch {};
-    _ = sh;
+    return true;
 }
 
 // --- enabling job control ---------------------------------------------------------

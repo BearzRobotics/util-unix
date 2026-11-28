@@ -614,7 +614,7 @@ fn glob(sh: *Shell, a: Allocator, fb: FieldBuf, out: *std.ArrayList([]const u8))
             }
             if (pattern.hasMagic(pat.items)) {
                 const before = out.items.len;
-                try globWalk(a, pat.items, out);
+                try globWalk(sh, a, pat.items, out);
                 if (out.items.len > before) return;
             }
         }
@@ -646,7 +646,7 @@ fn lessThanDir(_: void, l: []u8, r: []u8) bool {
     }
 }
 
-fn globWalk(a: Allocator, pat: []const u8, out: *std.ArrayList([]const u8)) Error!void {
+fn globWalk(sh: *Shell, a: Allocator, pat: []const u8, out: *std.ArrayList([]const u8)) Error!void {
     var segs: std.ArrayList([]const u8) = .empty;
     var it = std.mem.splitScalar(u8, pat, '/');
     while (it.next()) |s| try segs.append(a, s);
@@ -658,10 +658,10 @@ fn globWalk(a: Allocator, pat: []const u8, out: *std.ArrayList([]const u8)) Erro
         prefix = pat[0..lead];
         start = lead;
     }
-    try walk(a, prefix, lead, segs.items, start, out);
+    try walk(sh, a, prefix, lead, segs.items, start, out);
 }
 
-fn walk(a: Allocator, prefix: []const u8, lead: usize, segs: []const []const u8, idx: usize, out: *std.ArrayList([]const u8)) Error!void {
+fn walk(sh: *Shell, a: Allocator, prefix: []const u8, lead: usize, segs: []const []const u8, idx: usize, out: *std.ArrayList([]const u8)) Error!void {
     if (idx >= segs.len) {
         try out.append(a, prefix);
         return;
@@ -677,7 +677,7 @@ fn walk(a: Allocator, prefix: []const u8, lead: usize, segs: []const []const u8,
             } else |_| {}
             return;
         }
-        return walk(a, p2, lead, segs, idx + 1, out);
+        return walk(sh, a, p2, lead, segs, idx + 1, out);
     }
     if (!pattern.hasMagic(seg)) {
         const name = try pattern.unescape(a, seg);
@@ -685,11 +685,25 @@ fn walk(a: Allocator, prefix: []const u8, lead: usize, segs: []const []const u8,
         if (last) {
             _ = sys.stat(path, false) catch return;
             try out.append(a, path);
-        } else try walk(a, path, lead, segs, idx + 1, out);
+        } else try walk(sh, a, path, lead, segs, idx + 1, out);
         return;
     }
     var names: std.ArrayList([]u8) = .empty;
-    sys.listDir(a, prefix, &names) catch return;
+    sys.listDir(a, prefix, &names) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        // no directory to look in, or none for us: nothing matches there
+        error.Sys => switch (sys.errno()) {
+            1, 2, 13, 20, 36, 40 => return, // EPERM ENOENT EACCES ENOTDIR ENAMETOOLONG ELOOP
+            // anything else would give the command part of the list
+            else => {
+                sh.diagK(.other, null, "cannot read the directory {s}: {s}", .{ if (prefix.len == 0) "." else prefix, sys.strerror(sys.errno()) });
+                // the command is not to run, as after any expansion error
+                sh.status = 2;
+                sh.flow = .exit_shell;
+                return error.Fatal;
+            },
+        },
+    };
     const dot_ok = seg[0] == '.' or (seg.len > 1 and seg[0] == '\\' and seg[1] == '.');
     // `.*` also matches `.` and `..` (dash and FreeBSD sh; decision 0009)
     if (dot_ok) {
@@ -711,7 +725,7 @@ fn walk(a: Allocator, prefix: []const u8, lead: usize, segs: []const []const u8,
         } else {
             const info = sys.stat(path, true) catch continue;
             if (info.kind != .dir) continue;
-            try walk(a, path, lead, segs, idx + 1, out);
+            try walk(sh, a, path, lead, segs, idx + 1, out);
         }
     }
 }

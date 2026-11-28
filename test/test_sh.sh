@@ -612,6 +612,14 @@ rc=0"
 # (dash looks only at the start of a long command)
 must "a job is found by text far into its command" 'pad=$(printf "%01100d" 0); eval "sleep 3 $pad.0 needle=1 2>/dev/null &"; jobs "%?needle" >o 2>&1; grep -c "No such job" o; kill $! 2>/dev/null; :' "0
 rc=0"
+must "a wildcard that cannot be read does not run the command" 'mkdir -p g/a g/b; : > g/a/x; : > g/b/x; (ulimit -n 3; set -- g/*/x; echo "ran with $#") 2>err; echo $?; grep -c "cannot read the directory" err' "2
+1
+rc=0"
+c "a directory that may not be read matches nothing" 'mkdir -p g/a g/shut; : > g/a/x; : > g/shut/x; chmod 0 g/shut; echo g/*/x; chmod 755 g/shut'
+must "an unreadable script and startup file say why" 'echo "echo hi" > s; chmod 111 s; ./s 2>&1 | sed "s/.*: s*h*: *//; s/.*Permission denied/Permission denied/"; echo "echo no" > .profile; chmod 0 .profile; HOME=$PWD sh -l -c "echo ran" 2>&1 | sed "s/.*\.profile: .*Permission denied/profile: Permission denied/"' "Permission denied
+profile: Permission denied
+ran
+rc=0"
 c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
 c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
 c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'

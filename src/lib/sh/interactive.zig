@@ -314,7 +314,7 @@ pub fn runEnvFile(sh: *Shell) void {
     const raw = a.dupe(u8, sh.getVar("ENV") orelse return) catch return;
     const path = expandEnvName(sh, a, raw) catch return;
     if (path.len == 0 or path[0] != '/') return;
-    const text = exec.readFile(a, path) orelse return;
+    const text = exec.readStartup(sh, a, path) orelse return;
     const saved = sh.label;
     _ = exec.runSource(sh, text, .{}) catch |oe| sh.oom(oe);
     sh.label = saved;

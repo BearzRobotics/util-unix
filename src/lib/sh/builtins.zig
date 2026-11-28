@@ -1575,9 +1575,12 @@ fn readCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
                 while (pos < b.len and !esc.items[pos] and isWs(ifs, b[pos])) pos += 1;
             }
         }
-        sh.setVar(name, val.items) catch {
-            sh.diagCmdK(.readonly_assignment, name, "read", "{s}: is read only", .{name});
-            return 2;
+        sh.setVar(name, val.items) catch |e| switch (e) {
+            error.ReadOnly => {
+                sh.diagCmdK(.readonly_assignment, name, "read", "{s}: is read only", .{name});
+                return 2;
+            },
+            error.OutOfMemory => return sh.oom(error.OutOfMemory),
         };
     }
     if (got_eof) return 1;
@@ -1837,30 +1840,30 @@ fn bracketCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {
 
 // --- command, type, hash, alias ------------------------------------------------------------------
 
-fn describe(sh: *Shell, a: Allocator, name: []const u8, verbose: bool, out: *std.ArrayList(u8)) bool {
+fn describe(sh: *Shell, a: Allocator, name: []const u8, verbose: bool, out: *std.ArrayList(u8)) Allocator.Error!bool {
     if (lexer.reservedOf(&.{.{ .text = name }}) != null) {
-        if (verbose) out.print(a, "{s} is a shell keyword\n", .{name}) catch {} else out.print(a, "{s}\n", .{name}) catch {};
+        if (verbose) try out.print(a, "{s} is a shell keyword\n", .{name}) else try out.print(a, "{s}\n", .{name});
         return true;
     }
     if (sh.aliases.get(name)) |v| {
-        if (verbose) out.print(a, "{s} is an alias for {s}\n", .{ name, v }) catch {} else out.print(a, "alias {s}={s}\n", .{ name, quoteSingle(a, v) catch v }) catch {};
+        if (verbose) try out.print(a, "{s} is an alias for {s}\n", .{ name, v }) else try out.print(a, "alias {s}={s}\n", .{ name, try quoteSingle(a, v) });
         return true;
     }
     if (sh.funcs.get(name) != null) {
-        if (verbose) out.print(a, "{s} is a shell function\n", .{name}) catch {} else out.print(a, "{s}\n", .{name}) catch {};
+        if (verbose) try out.print(a, "{s} is a shell function\n", .{name}) else try out.print(a, "{s}\n", .{name});
         return true;
     }
     if (find(name)) |b| {
-        if (verbose) out.print(a, "{s} is a {s}shell builtin\n", .{ name, if (b.special) "special " else "" }) catch {} else out.print(a, "{s}\n", .{name}) catch {};
+        if (verbose) try out.print(a, "{s} is a {s}shell builtin\n", .{ name, if (b.special) "special " else "" }) else try out.print(a, "{s}\n", .{name});
         return true;
     }
     if (sh.host_builtins.get(name) != null) {
-        if (verbose) out.print(a, "{s} is a shell builtin\n", .{name}) catch {} else out.print(a, "{s}\n", .{name}) catch {};
+        if (verbose) try out.print(a, "{s} is a shell builtin\n", .{name}) else try out.print(a, "{s}\n", .{name});
         return true;
     }
     const path = if (std.mem.indexOfScalar(u8, name, '/') != null) (if (sys.access(name, 1)) name else null) else exec.findExecutable(sh, a, name);
     if (path) |p| {
-        if (verbose) out.print(a, "{s} is {s}\n", .{ name, p }) catch {} else out.print(a, "{s}\n", .{p}) catch {};
+        if (verbose) try out.print(a, "{s} is {s}\n", .{ name, p }) else try out.print(a, "{s}\n", .{p});
         return true;
     }
     return false;
@@ -1870,8 +1873,8 @@ fn typeCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
     var st: u8 = 0;
     var out: std.ArrayList(u8) = .empty;
     for (args[1..]) |n| {
-        if (!describe(sh, a, n, true, &out)) {
-            out.print(a, "{s}: not found\n", .{n}) catch {};
+        if (!(describe(sh, a, n, true, &out) catch |oe| return sh.oom(oe))) {
+            out.print(a, "{s}: not found\n", .{n}) catch |oe| return sh.oom(oe);
             st = 127;
         }
     }
@@ -1903,9 +1906,9 @@ fn commandCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         var out: std.ArrayList(u8) = .empty;
         sh.lookup_path = lookup;
         defer sh.lookup_path = null;
-        const ok = describe(sh, a, args[i], mode == 'V', &out);
+        const ok = describe(sh, a, args[i], mode == 'V', &out) catch |oe| return sh.oom(oe);
         if (!ok and mode == 'V') {
-            out.print(a, "{s}: not found\n", .{args[i]}) catch {};
+            out.print(a, "{s}: not found\n", .{args[i]}) catch |oe| return sh.oom(oe);
         }
         _ = sh.out(out.items);
         return if (ok) 0 else 127;

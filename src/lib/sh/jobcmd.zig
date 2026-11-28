@@ -108,7 +108,7 @@ fn resumeOne(sh: *Shell, cmd: []const u8, spec: []const u8, fg: bool) u8 {
     if (fg) {
         _ = sh.out(std.fmt.allocPrint(arena.allocator(), "{s}\n", .{text}) catch |oe| return sh.oom(oe));
         j.foreground = true;
-        jobs.continueJob(sh, j);
+        if (!jobs.continueJob(j)) return cannotContinue(sh, cmd, j);
         j.stamp = blk: {
             sh.job_stamp += 1;
             break :blk sh.job_stamp;
@@ -116,9 +116,14 @@ fn resumeOne(sh: *Shell, cmd: []const u8, spec: []const u8, fg: bool) u8 {
         return jobs.waitFg(sh, j);
     }
     _ = sh.out(std.fmt.allocPrint(arena.allocator(), "[{d}] {s}\n", .{ j.id, text }) catch |oe| return sh.oom(oe));
-    jobs.continueJob(sh, j);
+    if (!jobs.continueJob(j)) return cannotContinue(sh, cmd, j);
     sh.bg_pid = j.lastPid();
     return 0;
+}
+
+fn cannotContinue(sh: *Shell, cmd: []const u8, j: *const jobs.Job) u8 {
+    sh.diagCmdK(.kill_error, null, cmd, "cannot continue job {d}: {s}", .{ j.id, sys.strerror(sys.errno()) });
+    return 1;
 }
 
 pub fn fgCmd(sh: *Shell, _: Allocator, args: []const []const u8) u8 {

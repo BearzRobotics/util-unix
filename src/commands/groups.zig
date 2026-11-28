@@ -39,8 +39,8 @@ pub fn main(ctx: cli.Context) u8 {
         return 1;
     }
 
-    var db = uu.userdb.Db.load(ctx.io, ctx.gpa, .{}) catch {
-        cli.warn(ctx, "cannot read the user and group databases", .{});
+    var db = uu.userdb.Db.load(ctx.io, ctx.gpa, .{}) catch |e| {
+        cli.warn(ctx, "cannot read the user and group databases: {s}", .{cli.errText(e)});
         return 1;
     };
     defer db.deinit();

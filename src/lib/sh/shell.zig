@@ -455,7 +455,8 @@ pub const Shell = struct {
         defer drop.deinit(self.gpa);
         var it = self.hash.iterator();
         while (it.next()) |e| {
-            if (e.value_ptr.*.len == 0 or e.value_ptr.*[0] != '/') drop.append(self.gpa, e.key_ptr.*) catch {};
+            // without room to list them, forget them all
+            if (e.value_ptr.*.len == 0 or e.value_ptr.*[0] != '/') drop.append(self.gpa, e.key_ptr.*) catch return self.clearHash();
         }
         for (drop.items) |k| if (self.hash.fetchRemove(k)) |kv| {
             self.gpa.free(kv.key);

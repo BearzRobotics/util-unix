@@ -400,12 +400,12 @@ fn runProfiles(shell: *sh.Shell) bool {
     var arena = std.heap.ArenaAllocator.init(shell.gpa);
     defer arena.deinit();
     const a = arena.allocator();
-    if (sh.exec.readFile(a, "/etc/profile")) |t| if (!runProfile(shell, t)) return false;
+    if (sh.exec.readStartup(shell, a, "/etc/profile")) |t| if (!runProfile(shell, t)) return false;
     // HOME is the caller's word for where to look: not to be run with other ids
     if (sh.idsDiffer()) return true;
     if (shell.getVar("HOME")) |h| {
         const p = std.fmt.allocPrint(a, "{s}/.profile", .{h}) catch return true;
-        if (sh.exec.readFile(a, p)) |t| return runProfile(shell, t);
+        if (sh.exec.readStartup(shell, a, p)) |t| return runProfile(shell, t);
     }
     return true;
 }
