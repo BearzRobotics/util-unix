@@ -218,6 +218,8 @@ pub const Shell = struct {
     /// Source text being run and the command-word columns of the current
     /// simple command (for excerpts).
     cur_src: []const u8 = "",
+    /// the script line `cur_src` starts with
+    cur_src_start: u32 = 1,
     cur_col: u32 = 0,
     cur_end_col: u32 = 0,
 
@@ -535,8 +537,8 @@ pub const Shell = struct {
         const e = diagmod.entryOf(c.kind);
         var col = self.cur_col;
         var end_col = self.cur_end_col;
-        if (self.line > 0 and self.cur_src.len > 0) {
-            if (diagmod.sourceLine(self.cur_src, self.line)) |text| {
+        if (self.line >= self.cur_src_start and self.line > 0 and self.cur_src.len > 0) {
+            if (diagmod.sourceLine(self.cur_src, self.line - self.cur_src_start + 1)) |text| {
                 if (diagmod.refine(text, self.cur_col, c.kind, c.subject)) |sp| {
                     col = sp.col;
                     end_col = sp.end;
@@ -554,6 +556,7 @@ pub const Shell = struct {
             .posix = msg,
             .bare = bare,
             .source = self.cur_src,
+            .source_start = self.cur_src_start,
         };
         self.emit(&d);
     }

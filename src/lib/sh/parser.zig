@@ -36,6 +36,20 @@ pub const Diag = struct {
     opener: ?diagmod.Opener = null,
     buf: [256]u8 = undefined,
     len: usize = 0,
+    held: [192]u8 = undefined,
+
+    /// Move `token` and the opener's name into the Diag itself, for a caller
+    /// about to free what they were borrowed from. Long ones are cut short.
+    pub fn keep(self: *Diag) void {
+        const t = @min(self.token.len, 128);
+        @memcpy(self.held[0..t], self.token[0..t]);
+        self.token = self.held[0..t];
+        if (self.opener) |*o| {
+            const n = @min(o.name.len, self.held.len - 128);
+            @memcpy(self.held[128..][0..n], o.name[0..n]);
+            o.name = self.held[128..][0..n];
+        }
+    }
 
     pub fn message(self: *const Diag) []const u8 {
         return self.buf[0..self.len];
@@ -1739,7 +1753,11 @@ pub fn parseText(a: Allocator, text: []const u8) Error!ast.Word {
 /// `diag` is filled and `error.Syntax` returned.
 pub fn parseProgram(gpa: Allocator, src: []const u8, diag: *Diag) Error!ast.Program {
     var arena = std.heap.ArenaAllocator.init(gpa);
-    errdefer arena.deinit();
+    errdefer {
+        // the parser may have worked on a copy of `src` in this arena
+        diag.keep();
+        arena.deinit();
+    }
     const a = arena.allocator();
     var p = try Parser.initProgram(a, src, diag);
     var cmds: std.ArrayList(*const Node) = .empty;
@@ -1874,4 +1892,10 @@ test "mutation: corpus scripts with random byte damage parse or fail cleanly" {
             parseOnce(buf[0..cur]);
         }
     }
+}
+
+test "a syntax error's token outlives the parse" {
+    var d: Diag = .{};
+    try std.testing.expectError(error.Syntax, parseProgram(std.testing.allocator, "echo \\\n hi\nfi\n", &d));
+    try std.testing.expectEqualStrings("fi", d.token);
 }

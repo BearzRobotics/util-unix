@@ -793,6 +793,16 @@ def job_safety_cases():
     # JOB-12
     has("a subshell job keeps its parentheses", ["(sleep 63; :)", "^Z", "fg", ("w", .3), "^C"], ["$ fg\n(sleep 63; :)\n"])
 
+def memory_cases():
+    # MEM-03: vi's end of word lands on a character, not inside one
+    has("vi: e then x at a multibyte word end", ["set -o vi", "raw:echo a\u20ac b" + ESC + "0ee", "raw:x\n", ALIVE], ["\na b\n", "al1ve"], ["panic"])
+    # MEM-05: a prompt whose expansion assigns it and fails is shown from a copy
+    with Session([SH, "-i"]) as s:
+        s.expect(r"\$ ?$")
+        s.send("PS1='$((PS1=1))$((1/0))> '\n"); s.settle(.6)
+        raw = s.raw
+    ok("PS1 that reassigns itself and fails prints no freed memory", "\ufffd" not in raw and "$((PS1=1))" in raw, repr(raw[-200:]))
+
 def prompt_cases():
     has("PS1 parameter expansion", ["PS1='$((1+1))> '", "echo hi"], ["2> echo hi"])
     has("PS1 command substitution", ["PS1='$(echo X)> '", "echo hi"], ["X> echo hi"])
@@ -1039,7 +1049,7 @@ def paste_render_cases():
         got = s.raw[before:]
         ok("no editing mode: the tty's own line discipline", "plai\x01Z\r\n" in got and "\x1b[?2004h" not in got, repr(got))
 
-EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases, "safety": session_safety_cases, "insignal": input_signal_cases, "last": last_editor_cases, "jobsafety": job_safety_cases}
+EXTRA = {"prompt": prompt_cases, "signals": signal_cases, "completion": completion_cases, "paste": paste_render_cases, "safety": session_safety_cases, "insignal": input_signal_cases, "last": last_editor_cases, "jobsafety": job_safety_cases, "memory": memory_cases}
 
 def setid_cases():
     """SHX-18, SHI-20: with differing ids, sh gives up the effective ones, or

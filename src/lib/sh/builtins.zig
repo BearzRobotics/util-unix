@@ -876,7 +876,8 @@ fn cdCmd(sh: *Shell, a: Allocator, args: []const []const u8) u8 {
         dir = args[i];
         if (std.mem.eql(u8, dir, "-")) {
             // POSIX leaves an unset OLDPWD unspecified; dash stays in the current directory (FreeBSD sh fails)
-            dir = sh.getVar("OLDPWD") orelse (sh.getVar("PWD") orelse (physicalCwd(a) orelse "."));
+            // a copy: OLDPWD is assigned before this is last used
+            dir = a.dupe(u8, sh.getVar("OLDPWD") orelse (sh.getVar("PWD") orelse (physicalCwd(a) orelse "."))) catch |oe| return sh.oom(oe);
             print = true;
         }
     } else {

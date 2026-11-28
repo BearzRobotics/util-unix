@@ -1531,13 +1531,14 @@ pub const Editor = struct {
     fn viEndWord(self: *const Editor, from: usize, kind: WordKind) usize {
         const s = self.buf.items;
         var p = from;
-        if (p + 1 >= s.len) return if (s.len == 0) 0 else s.len - 1;
-        p += 1;
+        if (self.nextBoundary(p) >= s.len) return self.lastCharPos();
+        p = self.nextBoundary(p);
         while (p < s.len and classOf(s[p], kind) == 0) p += 1;
-        if (p >= s.len) return s.len - 1;
+        if (p >= s.len) return self.lastCharPos();
         const cl = classOf(s[p], kind);
         while (p + 1 < s.len and classOf(s[p + 1], kind) == cl) p += 1;
-        return p;
+        // the last byte of the word: the cursor goes on its character's first
+        return self.prevBoundary(p + 1);
     }
 
     const Target = struct { pos: usize, inclusive: bool };

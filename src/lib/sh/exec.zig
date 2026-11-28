@@ -62,8 +62,13 @@ pub fn runSource(sh: *Shell, src_in: []const u8, o: RunOpts) error{OutOfMemory}!
     var p = try parser.Parser.initProgram(a, src, &d);
     p.aliases = .{ .ctx = sh, .get = aliasGet };
     const saved_src = sh.cur_src;
+    const saved_start = sh.cur_src_start;
     sh.cur_src = src;
-    defer sh.cur_src = saved_src;
+    sh.cur_src_start = 1;
+    defer {
+        sh.cur_src = saved_src;
+        sh.cur_src_start = saved_start;
+    }
     var last: u8 = 0;
     var echoed: usize = 0; // how much of `src` `set -v` has been through
     while (true) {
@@ -109,6 +114,9 @@ fn endsInContinuation(text: []const u8) bool {
     return (body.len - std.mem.trimEnd(u8, body, "\\").len) % 2 == 1;
 }
 
+/// How much of a script read from a descriptor is held on to after it has run.
+const stream_keep = 64 * 1024;
+
 pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
     const gpa = sh.gpa;
     var buf: std.ArrayList(u8) = .empty;
@@ -120,13 +128,31 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
     sh.arenas_running += 1;
     defer sh.arenas_running -= 1;
     const saved_src = sh.cur_src;
-    defer sh.cur_src = saved_src;
+    const saved_start = sh.cur_src_start;
+    defer {
+        sh.cur_src = saved_src;
+        sh.cur_src_start = saved_start;
+    }
+    // the line `buf` starts with
+    var first_line: u32 = 1;
     var chunk: [8192]u8 = undefined;
     // alias text the last command's parser had not reached, and its storage
     var carry: parser.Carry = .{};
     var carry_store = std.heap.ArenaAllocator.init(gpa);
     defer carry_store.deinit();
     while (true) {
+        // What has been run is let go, in whole lines, or the shell would keep
+        // all it was ever fed. Enough stays for a diagnostic to quote.
+        if (start > 2 * stream_keep) {
+            if (std.mem.lastIndexOfScalar(u8, buf.items[0 .. start - stream_keep], '\n')) |nl| {
+                const cut = nl + 1;
+                first_line += @intCast(std.mem.count(u8, buf.items[0..cut], "\n"));
+                buf.replaceRange(gpa, 0, cut, "") catch unreachable; // it only shrinks
+                start -= cut;
+            }
+        }
+        sh.cur_src = buf.items;
+        sh.cur_src_start = first_line;
         var arena = std.heap.ArenaAllocator.init(gpa);
         const a = arena.allocator();
         const defined_before = sh.funcs_defined;
@@ -157,6 +183,7 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
                 }
                 sh.cur_src = buf.items;
                 sh.line = d.line;
+                sh.cur_src_start = first_line;
                 reportSyntax(sh, &d, "", buf.items);
                 sh.status = 2;
                 sh.flow = .exit_shell;
@@ -192,7 +219,7 @@ pub fn runStream(sh: *Shell, fd: i32) error{OutOfMemory}!u8 {
         if (p.warn_heredoc) |w| {
             p.warn_heredoc = null;
             sh.cur_src = buf.items;
-            var wd: diagmod.Diagnostic = .{ .code = 1003, .kind = .unterminated_heredoc, .severity = .warning, .label = sh.label, .line = w.line, .subject = w.delim, .posix = "here-document delimited by end-of-file", .source = buf.items };
+            var wd: diagmod.Diagnostic = .{ .code = 1003, .kind = .unterminated_heredoc, .severity = .warning, .label = sh.label, .line = w.line, .subject = w.delim, .posix = "here-document delimited by end-of-file", .source = buf.items, .source_start = first_line };
             sh.emit(&wd);
         }
         const node = maybe orelse {
@@ -275,6 +302,7 @@ fn reportSyntax(sh: *Shell, d: *const parser.Diag, prefix: []const u8, src: []co
         .subject = d.token,
         .posix = text,
         .source = src,
+        .source_start = sh.cur_src_start,
     };
     if (d.kind == .unterminated_quote or d.kind == .unterminated_arithmetic) dd.subject = if (d.opener) |o| o.name else "";
     if (d.kind == .missing_redirect_target) dd.subject = d.expected;
@@ -370,7 +398,7 @@ fn errexitCheck(sh: *Shell, st: u8, what: []const u8) void {
         sh.status = st;
         // Rich and JSON styles say which command ended the shell; the posix
         // style stays silent (POSIX prints nothing here).
-        var d: diagmod.Diagnostic = .{ .code = 4005, .kind = .errexit_exit, .severity = .warning, .label = sh.label, .line = sh.line, .column = sh.cur_col, .end_column = sh.cur_end_col, .subject = what, .posix = "", .source = sh.cur_src };
+        var d: diagmod.Diagnostic = .{ .code = 4005, .kind = .errexit_exit, .severity = .warning, .label = sh.label, .line = sh.line, .column = sh.cur_col, .end_column = sh.cur_end_col, .subject = what, .posix = "", .source = sh.cur_src, .source_start = sh.cur_src_start };
         sh.emit(&d);
     }
 }
@@ -1074,7 +1102,8 @@ pub fn substitute(sh: *Shell, a: Allocator, node: *const Node) expand.Error![]co
 
 fn xtrace(sh: *Shell, a: Allocator, s: ast.Simple, vals: []const []const u8, args: []const []const u8) void {
     var line: std.ArrayList(u8) = .empty;
-    var ps4: []const u8 = sh.getVar("PS4") orelse "+ ";
+    // a copy: expanding it may assign PS4, and a failure leaves this as the text
+    var ps4: []const u8 = a.dupe(u8, sh.getVar("PS4") orelse "+ ") catch return;
     // PS4 is subject to parameter expansion, command substitution and arithmetic
     if (std.mem.indexOfAny(u8, ps4, "$`") != null) {
         if (parser.parseText(a, ps4)) |w| {

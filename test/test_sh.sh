@@ -559,6 +559,14 @@ c "a long here-document in a script on stdin ends at any read boundary" 'for pad
 c "a long here-document delimiter joined by a backslash is found" '{ printf "cat <<DELIM | wc -c\n"; printf "%020000d\n" 0; printf "DEL\\\nIM\necho after\n"; } > s; sh < s | tr -d " "'
 c "what follows a long here-document on stdin is left for its reader" '{ printf "cat <<E >/dev/null\n"; printf "%030000d\n" 0; printf "E\nread x; echo \"[\$x]\"\ndata\necho end\n"; } > s; cat s | sh'
 c "the current and previous job are marked among more than 64" 'i=0; while [ $i -lt 66 ]; do sleep 2 & i=$((i+1)); done; jobs %+ >o; cut -c1-6 o; jobs %- >o; cut -c1-6 o; jobs -p >o; kill $(cat o) 2>/dev/null; :' P
+c "cd -P - in a removed directory does not use what it has freed" 'mkdir gone; cd gone; rmdir ../gone; OLDPWD=.; cd -P - >/dev/null 2>&1; case $PWD in ""|.|/*) echo ok ;; *) printf %s "$PWD" | od -An -tx1 ;; esac' e
+# (what was freed shows as bytes 0xAA, octal 252)
+c "PS4 that reassigns itself and fails traces from a copy" '(PS4='"'"'$((PS4=1))$((1/0)) '"'"'; set -x; echo hi) >/dev/null 2>err; LC_ALL=C grep -c "$(printf "\252\252")" err' e
+# the shell reads 15 MB of comment-like commands, then says how large it is
+cat > "$TEST_TMP/size.sh" <<'SIZE'
+while read -r k v u; do case $k in VmRSS:) if [ "$v" -lt 9000 ]; then echo small; else echo "$v kB"; fi ;; esac; done < "/proc/$$/status"
+SIZE
+c "a script on stdin is not kept once it has run" 'line=": $(printf "%0200d" 0)"; i=0; while [ $i -lt 500 ]; do printf "%s\n" "$line"; i=$((i+1)); done > part; { j=0; while [ $j -lt 150 ]; do cat part; j=$((j+1)); done; cat '"$TEST_TMP"'/size.sh; } | sh' P
 c "a PATH in front of the command decides why it was not found" 'mkdir -p ne em; : > ne/zzcmd; chmod -x ne/zzcmd; PATH=./em ls 2>/dev/null; echo $?; PATH=./ne zzcmd 2>&1 | grep -c "Permission denied"; echo $?' P
 c "local assigning a read-only variable fails" '(readonly R=1; f() { local R=2; echo in; }; f; echo after) 2>/dev/null; echo $?'
 c "local naming a read-only variable is allowed" 'readonly R=1; f() { local R; echo ok; }; f'

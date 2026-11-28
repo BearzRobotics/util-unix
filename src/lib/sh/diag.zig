@@ -223,6 +223,9 @@ pub const Diagnostic = struct {
     bare: bool = false,
     /// Whole source text the line/column refer to (for the excerpt).
     source: []const u8 = "",
+    /// The line of the script that `source` starts with: the earlier part of a
+    /// long script read from a descriptor is no longer held.
+    source_start: u32 = 1,
     /// Name of the shell program for the rich and gcc headers (`sh`); empty
     /// means the `name` argument of `render`.
     prog: []const u8 = "",
@@ -368,8 +371,14 @@ fn digits(n: u32) usize {
     return c;
 }
 
-fn excerpt(out: *std.ArrayList(u8), a: Allocator, src: []const u8, line: u32, col: u32, end_col: u32, width: usize, color: bool, marker: u8) Allocator.Error!void {
-    const text = sourceLine(src, line) orelse return;
+/// The excerpt for `line` of the script, if `d.source` still has it.
+fn excerptAt(out: *std.ArrayList(u8), a: Allocator, d: *const Diagnostic, line: u32, col: u32, end_col: u32, width: usize, color: bool, marker: u8) Allocator.Error!void {
+    if (line < d.source_start) return;
+    return excerpt(out, a, d.source, d.source_start, line, col, end_col, width, color, marker);
+}
+
+fn excerpt(out: *std.ArrayList(u8), a: Allocator, src: []const u8, first: u32, line: u32, col: u32, end_col: u32, width: usize, color: bool, marker: u8) Allocator.Error!void {
+    const text = sourceLine(src, line - first + 1) orelse return;
     try out.appendNTimes(a, ' ', width + 1);
     try out.appendSlice(a, "|\n");
     var nb: [12]u8 = undefined;
@@ -461,10 +470,10 @@ pub fn render(a: Allocator, d: *const Diagnostic, name: []const u8, style: Style
             try out.append(a, '\n');
             var width = digits(line);
             if (d.opener) |o| width = @max(width, digits(o.line));
-            try excerpt(&out, a, d.source, line, col, end_col, width, color, '^');
+            try excerptAt(&out, a, d, line, col, end_col, width, color, '^');
             if (show_opener) if (d.opener) |o| {
                 try out.print(a, "note: the '{s}' started here\n", .{o.name});
-                try excerpt(&out, a, d.source, o.line, o.column, o.column + @as(u32, @intCast(o.name.len)), width, color, '-');
+                try excerptAt(&out, a, d, o.line, o.column, o.column + @as(u32, @intCast(o.name.len)), width, color, '-');
             };
             if (help.len > 0) try out.print(a, "help: {s}\n", .{help});
         },

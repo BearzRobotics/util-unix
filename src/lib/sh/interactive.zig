@@ -308,10 +308,10 @@ pub fn setup(sh: *Shell, s: *Session, gpa: Allocator) void {
 pub fn runEnvFile(sh: *Shell) void {
     // POSIX: ignored when the real and effective ids differ
     if (sys.idsDiffer()) return;
-    const raw = sh.getVar("ENV") orelse return;
     var arena = std.heap.ArenaAllocator.init(sh.gpa);
     defer arena.deinit();
     const a = arena.allocator();
+    const raw = a.dupe(u8, sh.getVar("ENV") orelse return) catch return;
     const path = expandEnvName(sh, a, raw) catch return;
     if (path.len == 0 or path[0] != '/') return;
     const text = exec.readFile(a, path) orelse return;
@@ -410,7 +410,8 @@ pub fn loop(s: *Session) u8 {
         var text: std.ArrayList(u8) = .empty;
         var first = true;
         while (true) {
-            const ps = if (first) (sh.getVar("PS1") orelse "$ ") else (sh.getVar("PS2") orelse "> ");
+            // a copy: expanding it may assign the variable
+            const ps = a.dupe(u8, if (first) (sh.getVar("PS1") orelse "$ ") else (sh.getVar("PS2") orelse "> ")) catch |oe| return sh.oom(oe);
             const prompt = expandPrompt(sh, a, ps) catch ps;
             const input = readOne(s, a, prompt);
             // a trap that ran while the line was typed may have said `exit`
