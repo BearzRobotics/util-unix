@@ -2,9 +2,16 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # test_sh_diag.sh - exact diagnostics: for every case in sh_diag/cases.txt the
 # rich style message (header, excerpt, caret column, note, help), the exit
-# status, the posix-style (dash-identical) message, the json record and the
+# status, the posix-style message, the json record and the
 # gcc line are compared with the frozen files in sh_diag/. Also checks that
 # every code of the catalog is documented, explained and covered here.
+#
+# The frozen files record our own output: this is a regression test, and dash is
+# run only for the status and output of the stability cases. The posix style
+# follows dash's wording except, on purpose, for these, where ours says more
+# (see the catalog, which gives dash's text): SH2006, SH5009, SH5010, SH5011;
+# SH5014 (status 1, dash 2) and SH5017 (our words and status 1); SH5016 (dash
+# has no fc).
 #
 #   sh test/test_sh_diag.sh            run
 #   sh test/test_sh_diag.sh freeze     rewrite the frozen files (review the diff!)

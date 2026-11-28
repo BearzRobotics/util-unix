@@ -81,7 +81,9 @@ run_cmp "hosts by address 127.0.0.1"     hosts 127.0.0.1
 # GNU answers ::1 from an NSS module (nss-myhostname) when /etc/hosts has no entry; this
 # getent reads files only (decision 0004), so compare only when the file has the line.
 if grep -q '^::1[[:space:]]' /etc/hosts; then run_cmp "hosts by address ::1"           hosts ::1; fi
-run_cmp "hosts alias lookup"             hosts ip6-localhost
+# (without the name in /etc/hosts both print nothing, and nothing is looked up)
+if grep -qw ip6-localhost /etc/hosts; then run_cmp "hosts alias lookup" hosts ip6-localhost
+else skip_test "hosts alias lookup (/etc/hosts has no ip6-localhost)"; fi
 run_cmp "hosts unknown name"             hosts nosuch.invalid
 run_cmp "ahostsv4 localhost"             ahostsv4 localhost
 run_cmp "ahostsv4 literal"               ahostsv4 127.0.0.1

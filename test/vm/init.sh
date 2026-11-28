@@ -95,6 +95,18 @@ for spec in "alice" "alice:staff" ":devs" "-R alice:devs" "-R -h bob" "-R -P ali
     t "chown $spec: same result as busybox" "$b $(snapshot /tmp/oracle)" "$a $(snapshot /tmp/ours)"
 done
 
+# --- hostname as root --------------------------------------------------------
+echo "== hostname as root"
+cd /tmp
+/ut/hostname vmname;                       t "hostname sets the name" vmname "$(uname -n)"
+printf '# a comment\n\n  filehost \n' > hf
+/ut/hostname -F hf;                        t "hostname -F skips comments and blanks" filehost "$(uname -n)"
+/ut/hostname --file=hf;                    t "hostname --file" filehost "$(uname -n)"
+: > empty; /ut/hostname -F empty 2>/dev/null; t "hostname -F of an empty file fails" 1 $?
+t "and leaves the name" filehost "$(uname -n)"
+/ut/hostname "$(printf 'a%.0s' $(seq 1 70))" 2>/dev/null; t "a name that is too long is refused" 1 $?
+t "and leaves the name" filehost "$(uname -n)"
+
 # --- chmod as root -----------------------------------------------------------
 echo "== chmod as root"
 D=/tmp/mod; rm -rf $D; mkdir $D; cd $D

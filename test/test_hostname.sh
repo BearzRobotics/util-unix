@@ -41,6 +41,9 @@ run_cmp "two operands"    a b
 run_cmp "operand with -s" -s foo
 run_cmp "operand with -f" -f foo
 if [ "$(id -u)" != 0 ]; then
+    # Without root every set is refused alike: these compare the refusals and
+    # what is checked before the kernel is asked. What -F reads from a file is
+    # checked as root in test/vm/init.sh.
     run_cmp "set (not root)"   somename
     # checked before the kernel is asked, as hostname 3.25 does
     for n in "bad name" a_b .lead a. a..b -- "-x" ""; do

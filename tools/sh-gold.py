@@ -157,7 +157,7 @@ def run_one(shells, name, case, base):
     try:
         # helpers and the script live in the working directory (the FreeBSD
         # sysroot sees only that); dot names keep them out of globs and ls
-        hd = os.path.join(w, ".h")
+        hd = os.path.join(w, ".shgold-bin")
         os.mkdir(hd)
         for hn, body in HELPERS.items():
             with open(os.path.join(hd, hn), "w") as f:
@@ -177,14 +177,14 @@ def run_one(shells, name, case, base):
             argv_tail = [".case.sh"]
         if name == "freebsd":
             cmd = ["sh", os.path.join(ROOT, "tools/bsdrun.sh"), "timeout", "-s", "KILL", str(TIMEOUT), "sh"] + argv_tail
-            env = {"PATH": "/mnt/work/.h:/usr/bin:/bin", "SH": "sh", "TMP": "/tmp", "TMPDIR": "/tmp",
+            env = {"PATH": "/mnt/work/.shgold-bin:/usr/bin:/bin", "SH": "sh", "TMP": "/tmp", "TMPDIR": "/tmp",
                    "HOME": "/mnt/work", "LC_ALL": "C", "LANG": "C", "REPO_ROOT": "/mnt/work"}
             full = cmd
             wr = "/mnt/work"
         else:
             exe = os.path.join(sd, link)
             sh_cmd = exe + (" " + " ".join(flags) if flags else "")
-            env = {"PATH": "%s:%s/.h:/usr/local/bin:/usr/bin:/bin" % (sd, w), "SH": sh_cmd, "TMP": "/tmp",
+            env = {"PATH": "%s:%s/.shgold-bin:/usr/local/bin:/usr/bin:/bin" % (sd, w), "SH": sh_cmd, "TMP": "/tmp",
                    "TMPDIR": "/tmp", "HOME": w, "LC_ALL": "C", "LANG": "C", "REPO_ROOT": w}
             full = ["bwrap", "--unshare-pid", "--unshare-ipc", "--unshare-net", "--die-with-parent",
                     "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
