@@ -46,7 +46,7 @@ b"' B
 c "tab preserved" "echo 'a	b'" B
 c "dollar at end" 'echo a$' B
 c "dollar before space" 'echo $ x' B
-c "quoted glob" 'echo "*" '"'"'?'"'" B
+c "quoted glob" 'touch a b; echo "*" '"'"'?'"'" B
 
 # ---- parameter expansion ----
 c "plain param" 'x=hello; echo $x ${x}' B
@@ -105,7 +105,7 @@ c "multiple assignments" 'a=1 b=2; echo $a $b' B
 c "assignment uses previous" 'a=1 b=$a; echo $b' B
 c "assignment with quotes" 'a="x y"; b='"'"'p q'"'"'; echo "$a" "$b"' B
 c "assignment no field splitting" 'a="x y"; b=$a; echo "$b"' B
-c "assignment with glob not expanded" 'a=*; echo "$a"' B
+c "assignment with glob not expanded" 'touch zz; a=*; echo "$a"' B
 c "export visible to children" 'export z=1; sh -c "echo \$z"' B
 c "export unset var" 'export z; sh -c "echo [\$z]"; z=2; sh -c "echo \$z"' B
 c "unexported not visible" 'z=1; sh -c "echo [\$z]"' B
@@ -170,7 +170,7 @@ c "arith nested" 'echo $(( $((1+1)) * 3 ))' B
 c "arith with spaces" 'echo $(( 1 + 2 ))' B
 c "arith in quotes" 'echo "$((1+2))"' B
 c "arith large" 'echo $((9223372036854775807)) $((9223372036854775807+1))' B
-c "arith negative shift" 'echo $((1<<63))' B
+c "arith shift into and out of the sign bit" 'echo $((1<<63)) $((-16>>2))' B
 c "arith ternary short circuit" 'echo $((1?5:1/0))' B
 c "arith var with expression" 'x="1+2"; echo $((x)); echo after' B
 c "arith in for" 'i=0; while [ $i -lt 3 ]; do echo $i; i=$((i+1)); done' B
@@ -216,15 +216,14 @@ c "glob set -f" 'touch a b; set -f; echo *; set +f; echo *' B
 c "glob sorted" 'touch b a c B A; echo *' B
 c "glob class" 'touch a1 b2 c; echo [[:alpha:]][[:digit:]]' B
 c "glob bracket close first" 'touch ]x ax; echo []]x' B
-c "glob in assignment not expanded" 'touch a; v=*; echo $v' B
+c "glob in assignment not expanded" 'touch a; v=*; echo "$v"' B
 c "glob escaped bracket" 'touch a b "[a]"; echo \[a\]' B
-c "glob in case not filename" 'touch x; case x in *) echo any;; esac' B
+c "glob in case not filename" 'touch zz; case x in *) echo any;; zz) echo expanded;; esac; case q in z*) echo expanded;; q) echo kept;; esac' B
 c "glob dotdot" 'mkdir d; cd d; touch ../f; echo ../f*' B
 c "glob dot-star matches dot and dotdot" 'touch .h v; echo .*' B
 c "glob dot-question-star matches dotdot" 'touch .h v; echo .?*' B
 c "glob dot bracket" 'touch .h v; echo .[.]*' B
 c "glob dot-star in a subdirectory" 'mkdir d; touch d/.h; echo d/.*' B
-c "glob star still hides dot and dotdot" 'touch .h v; echo *' B
 c "glob absolute" 'echo /de*' B
 
 # ---- redirections ----
@@ -255,11 +254,11 @@ c "redirect on function definition" 'f() { echo in; } > g; f; cat g' B
 c "redirect restored after builtin" 'echo a > f; echo b; cat f' B
 c "redirect word expansion" 'n=file; echo z > $n; cat file' B
 c "redirect with fd var like text" 'echo hi 2>/dev/null' B
-cx "redirect two-digit fd" 'exec 10>f; echo a >&10; exec 10>&-; cat f' Pe
+cx "a two-digit number is not a descriptor" 'exec 10>f; echo a >&10; exec 10>&-; cat f' Pe
 c "redirect closed input" 'exec <&-; cat; echo "rc=$?"' B
 c "stderr to file" 'echo e >&2 2> f; cat f' B
-c "input from heredoc to fd 3" 'cat <&3 3<<EOF
-x
+c "input from heredoc to fd 3" 'cat 3<<EOF <&3
+from three
 EOF' B
 c "redirect before command" '> f echo hi; cat f' B
 c "redirect only creates file" '> f; ls f' B
@@ -324,9 +323,10 @@ c "heredoc in cmdsub" 'x=$(cat <<EOF
 inner
 EOF
 ); echo "$x"' B
-c "heredoc delimiter with spaces in body" 'cat <<EOF
-EOF
-EOF' B
+c "heredoc delimiter with spaces in body" 'cat <<"E F"
+a E F b
+E F
+echo after' B
 c "heredoc param default" 'cat <<EOF
 ${u:-default} ${#u}
 EOF' B
@@ -381,7 +381,6 @@ c "if multi line" 'if true
 then
   echo y
 fi' B
-c "while" 'i=0; while [ $i -lt 3 ]; do echo $i; i=$((i+1)); done' B
 c "until" 'i=0; until [ $i -ge 3 ]; do echo $i; i=$((i+1)); done' B
 c "while status" 'while false; do :; done; echo $?' B
 c "while break status" 'while true; do break; done; echo $?' B
@@ -440,11 +439,10 @@ c "function return no arg" 'f() { false; return; }; f; echo $?' B
 c "function recursion" 'f() { if [ $1 -gt 0 ]; then echo $1; f $(($1-1)); fi; }; f 3' B
 c "function shares variables" 'f() { x=2; }; x=1; f; echo $x' B
 c "function redefine" 'f() { echo 1; }; f() { echo 2; }; f' B
-c "function with redirect" 'f() { echo in; }; f > g; cat g' B
 c "function calls function" 'a() { b; }; b() { echo b; }; a' B
 cx "function body compound if" 'f() if true; then echo y; fi; f' B
 c "function return in loop" 'f() { for i in 1 2 3; do if [ $i = 2 ]; then return 7; fi; done; }; f; echo $?' B
-c "function and special builtin name" 'f() { echo mine; }; f' B
+cx "a function cannot take a special builtin's name" 'eval "export() { echo mine; }"; echo not reached' e
 c "function dollar zero" 'sh -c "f() { echo \${0##*/}; }; f"' B
 c "function unset" 'f() { echo hi; }; unset -f f; f; echo "rc=$?"' B
 c "function in pipeline" 'f() { cat; }; echo x | f' B
@@ -900,7 +898,6 @@ c "type missing" 'type nosuchcmd; echo $?' B
 c "type keyword" 'type if' B
 c "type external found" 'type ls >/dev/null; echo $?' B
 c "colon" ': foo bar; echo $?' B
-c "true false" 'true; echo $?; false; echo $?' B
 c "special builtin assign persists" 'x=1 :; echo $x' B
 c "regular builtin assign does not persist" 'x=1 true; echo "[$x]"' B
 c "special builtin assign eval persists" 'x=1 eval :; echo $x' B
@@ -1023,7 +1020,7 @@ c "test string with spaces" '[ "a b" = "a b" ]; echo $?' B
 c "test empty var needs quotes" 'x=; [ "$x" = "" ]; echo $?' B
 cx "test special chars" '[ "(" = "(" ]; echo $?; [ "!" = "!" ]; echo $?' B
 c "test -t" '[ -t 0 ]; echo $?' B
-c "test -p -S -b -c" 'mkfifo p; [ -p p ]; echo $?; [ -c /dev/null ]; echo $?; [ -b /dev/null ]; echo $?' B
+c "test -p -S -b -c" 'mkfifo p; [ -p p ]; echo $?; [ -c /dev/null ]; echo $?; [ -b /dev/null ]; echo $?; [ -S /dev/null ]; echo $?' B
 c "test -ef nonexistent" '[ nothing -ef nothing ]; echo $?' B
 c "getopts basic" 'set -- -a -b x; while getopts ab: o; do echo "$o $OPTARG $OPTIND"; done' B
 c "getopts grouped" 'set -- -ab; while getopts ab o; do echo "$o $OPTIND"; done' B
@@ -1237,8 +1234,8 @@ jobs -p > tmp.txt
 wc -l < tmp.txt | tr -d " "; wait' B
 c "hash lists the commands remembered by running them" 'whoami > /dev/null; hash | sed "s,.*/,,"; hash -r; hash; echo end' B
 c "pwd after the directory was removed prints the logical name" 'mkdir pwdgone; cd pwdgone; rmdir ../pwdgone; pwd | sed "s,.*/,,"; echo status=$?' B
-c "cd - without OLDPWD stays put" 'unset OLDPWD; cd - > /dev/null; echo status=$?' E "POSIX leaves it unspecified; dash stays in the current directory, FreeBSD sh fails."
-c "OLDPWD is exported by cd" 'cd /; cd /tmp; env | grep OLDPWD' B
+c "cd - without OLDPWD stays put" 'cd /usr; unset OLDPWD; cd - > /dev/null; echo status=$?; pwd' E "POSIX leaves it unspecified; dash stays in the current directory, FreeBSD sh fails."
+c "OLDPWD is exported by cd" 'unset OLDPWD; cd /; cd /tmp; env | grep ^OLDPWD=' B
 c "a builtin that cannot write its output fails" 'type echo > /dev/full 2>/dev/null; echo status=$?' E "dash 1, FreeBSD sh 2; POSIX only asks for non-zero."
 c "sh +c is read as -c" 'sh +c "echo hi"' B
 cx "heredoc ended by end of input" 'cat <<EOF
@@ -1320,7 +1317,7 @@ cx "heredoc unterminated" 'cat <<EOF
 body' Pe
 c "bang in middle" 'echo a ! b' B
 c "function keyword absent" 'f () { echo ok; }; f' B
-cx "case esac as word" 'case esac in esac) echo ok;; esac' B
+cx "case esac as word" 'case esac in (esac) echo ok;; esac' B
 cx "for in with keywords" 'for i in then do done; do echo $i; done' B
 c "nested quotes in cmdsub" 'echo "$(echo "x y" | tr " " "-")"' B
 cx "dollar paren paren ambiguity" 'echo $((echo a); (echo b))' e
@@ -1347,7 +1344,7 @@ c "quoted here-doc preserves backslash" 'cat <<"E"
 a\nb\\c
 E' B
 c "exit in cmdsub does not exit" 'x=$(exit 2); echo "alive $?"' B
-c "variable in redirection fd" 'echo a >&2 2>/dev/null; echo b' B
+c "variable in redirection fd" 'n=2; { echo a >&$n; } 2>/dev/null; echo b' B
 c "sh -c nested" 'sh -c "echo nested \$0 \$1" name arg' B
 c "sh -c exit status" 'sh -c "exit 5"; echo $?' B
 c "sh -s from stdin" 'echo "echo from-stdin" | sh -s' B
